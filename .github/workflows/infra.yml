@@ -19,10 +19,11 @@ env:
 
 jobs:
   plan:
-    if: github.event_name == 'pull_request'
+    # AWS の設定（Variables）が入るまではスキップする
+    if: github.event_name == 'pull_request' && vars.AWS_TF_ROLE_ARN != ''
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - uses: aws-actions/configure-aws-credentials@v4
         with: { role-to-assume: "${{ vars.AWS_TF_ROLE_ARN }}", aws-region: "${{ env.AWS_REGION }}" }
       - uses: hashicorp/setup-terraform@v3
@@ -31,11 +32,11 @@ jobs:
       - run: terraform -chdir=$TF_DIR plan -no-color -var "github_repo=${{ github.repository }}"
 
   apply:
-    if: github.event_name != 'pull_request'
+    if: github.event_name != 'pull_request' && vars.AWS_TF_ROLE_ARN != ''
     runs-on: ubuntu-latest
     environment: aws-mvp      # Required reviewers をここに設定する
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - uses: aws-actions/configure-aws-credentials@v4
         with: { role-to-assume: "${{ vars.AWS_TF_ROLE_ARN }}", aws-region: "${{ env.AWS_REGION }}" }
       - uses: hashicorp/setup-terraform@v3

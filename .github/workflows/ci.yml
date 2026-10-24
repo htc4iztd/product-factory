@@ -9,8 +9,8 @@ jobs:
     runs-on: ubuntu-latest
     defaults: { run: { working-directory: services/agent } }
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
         with: { python-version: "3.13", cache: pip }
       - run: pip install -e ".[dev]"
       - run: ruff check pf_agent tests
@@ -21,8 +21,8 @@ jobs:
     runs-on: ubuntu-latest
     defaults: { run: { working-directory: apps/web } }
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
         with: { node-version: 22, cache: npm, cache-dependency-path: apps/web/package-lock.json }
       - run: npm ci
       - run: npm run lint
@@ -33,12 +33,12 @@ jobs:
     needs: [agent, web]
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - name: compose up
         run: |
           printf 'AUTH_SECRET=ci\nPF_INTERNAL_TOKEN=ci\nPF_LLM=stub\nPF_HTTP_PORT=8080\nAUTH_URL=http://localhost:8080\n' > .env
           docker compose up -d --build --wait
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v5
         with: { node-version: 22 }
       - name: playwright full cycle (P0–P5 をダミー入力で通す)
         working-directory: apps/web
