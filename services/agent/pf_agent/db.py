@@ -95,6 +95,18 @@ def database_url() -> str:
     return os.environ.get("DATABASE_URL", "sqlite:///./factory.db")
 
 
+def pool_kwargs() -> dict:
+    """接続プールの上限。PF_DB_POOL_SIZE があるときだけ絞る。
+
+    Supabase の接続プール（session モード）は同時接続数に上限があるので、
+    工場DB用とADK用のエンジンそれぞれをこの数に抑える。
+    """
+    size = os.environ.get("PF_DB_POOL_SIZE")
+    if not size:
+        return {}
+    return {"pool_size": int(size), "max_overflow": 0, "pool_pre_ping": True}
+
+
 def async_session_db_url(url: str | None = None) -> str:
     """ADK の DatabaseSessionService 用（非同期ドライバ）。工場DBと同じDBに同居させる。"""
     url = url or database_url()
@@ -120,7 +132,7 @@ _Session = None
 
 def init_db(url: str | None = None):
     global _engine, _Session
-    _engine = create_engine(sync_url(url), future=True)
+    _engine = create_engine(sync_url(url), future=True, **pool_kwargs())
     Base.metadata.create_all(_engine)
     _Session = sessionmaker(_engine, expire_on_commit=False, future=True)
     return _engine

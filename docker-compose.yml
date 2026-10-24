@@ -1,4 +1,4 @@
-# ステージB（EC2 1台 + docker compose）の構成。ローカル開発も同じファイルで動く。
+# ローカル開発と CI（e2e）の構成。本番は Cloud Run + Supabase（README のデプロイ参照）。
 # worker / scheduler（ループ L1〜L5 の定期実行）は R2 で追加する。MVP では工程は agent-api が同期実行する。
 services:
   postgres:

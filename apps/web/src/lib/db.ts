@@ -7,7 +7,18 @@ import { Pool, type PoolClient } from "pg";
 // テーブルは pg で直接扱う
 // （3テーブルだけなのでコード生成を持ち込まない）。
 const g = globalThis as unknown as { pfPool?: Pool; pfReady?: Promise<void> };
-export const pool = g.pfPool ?? new Pool({ connectionString: process.env.DATABASE_URL });
+// PF_DB_POOL_SIZE：Supabase の接続プール（session モード）の上限に収めるための同時接続数
+export const pool = g.pfPool ?? new Pool({ ...connection(process.env.DATABASE_URL), max: Number(process.env.PF_DB_POOL_SIZE ?? 10) });
+
+// sslmode=require は agent 側（libpq）と同じく「暗号化するが証明書は検証しない」に揃える。
+// pg は require を verify-full として扱い、Supabase 独自の CA で失敗するため
+function connection(url: string | undefined) {
+  if (!url) return { connectionString: url };
+  const u = new URL(url);
+  if (u.searchParams.get("sslmode") !== "require") return { connectionString: url };
+  u.searchParams.delete("sslmode");
+  return { connectionString: u.toString(), ssl: { rejectUnauthorized: false } };
+}
 g.pfPool = pool;
 
 export function ready(): Promise<void> {

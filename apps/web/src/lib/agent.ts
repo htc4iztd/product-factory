@@ -5,6 +5,20 @@ import { auth } from "./auth";
 // 呼び出し元の文脈（ユーザー・テナント・基本ロール）はセッションからだけ組み立てる。
 const BASE = process.env.AGENT_API_URL ?? "http://localhost:8100";
 const TOKEN = process.env.PF_INTERNAL_TOKEN ?? "dev-internal-token";
+// Cloud Run では agent-api を IAM で閉じる。web のサービスアカウントの ID トークンを付けて呼ぶ。
+const ID_TOKEN = process.env.AGENT_AUTH === "google-id-token";
+
+let idToken: { value: string; exp: number } | null = null;
+
+async function googleIdToken(): Promise<string> {
+  if (idToken && idToken.exp > Date.now()) return idToken.value;
+  const url = `http://metadata.google.internal/computeMetadata/v1/instance/service-accounts/default/identity?audience=${encodeURIComponent(BASE)}`;
+  const res = await fetch(url, { headers: { "Metadata-Flavor": "Google" }, cache: "no-store" });
+  if (!res.ok) throw new AgentError(502, `ID トークンを取得できません（${res.status}）`);
+  // トークンの有効期限は1時間。余裕を持って50分で取り直す
+  idToken = { value: await res.text(), exp: Date.now() + 50 * 60 * 1000 };
+  return idToken.value;
+}
 
 export class AgentError extends Error {
   constructor(public status: number, message: string) {
@@ -23,6 +37,7 @@ export async function agent<T = unknown>(path: string, init?: { method?: string;
       "x-pf-user": session.user.email,
       "x-pf-tenant": session.user.tenantId,
       "x-pf-role": session.user.role,
+      ...(ID_TOKEN ? { authorization: `Bearer ${await googleIdToken()}` } : {}),
     },
     body: init?.body === undefined ? undefined : JSON.stringify(init.body),
     cache: "no-store",

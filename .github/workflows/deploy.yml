@@ -1,5 +1,5 @@
 name: deploy
-# ci が main で成功したら、イメージを ECR に push し、SSM Run Command で EC2 上の compose を更新する
+# ci が main で成功したら、イメージを Artifact Registry に push し、Cloud Run（agent-api → web）を更新する
 on:
   workflow_run:
     workflows: [ci]
@@ -12,45 +12,60 @@ permissions:
   contents: read
 
 env:
-  AWS_REGION: ${{ vars.AWS_REGION || 'ap-northeast-1' }}
+  REGION: ${{ vars.GCP_REGION || 'asia-northeast1' }}
+  PROJECT: ${{ vars.GCP_PROJECT_ID }}
+  # workflow_run では github.sha が main の最新になるので、ci が検証したコミットを使う
+  SHA: ${{ github.event.workflow_run.head_sha || github.sha }}
 
 jobs:
   deploy:
-    # AWS の設定（Variables）が入るまではスキップする
-    if: vars.AWS_DEPLOY_ROLE_ARN != '' && (github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success')
+    # GCP の設定（Variables）が入るまではスキップする
+    if: vars.GCP_WIF_PROVIDER != '' && (github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success')
     runs-on: ubuntu-latest
-    environment: aws-mvp
+    environment: production   # Workload Identity の条件と揃える
     steps:
       - uses: actions/checkout@v5
-      - uses: aws-actions/configure-aws-credentials@v4
-        with: { role-to-assume: "${{ vars.AWS_DEPLOY_ROLE_ARN }}", aws-region: "${{ env.AWS_REGION }}" }
-      - id: ecr
-        uses: aws-actions/amazon-ecr-login@v2
+        with: { ref: "${{ env.SHA }}" }
+      - uses: google-github-actions/auth@v3
+        with:
+          workload_identity_provider: ${{ vars.GCP_WIF_PROVIDER }}
+          service_account: ${{ vars.GCP_DEPLOY_SA }}
+      - uses: google-github-actions/setup-gcloud@v3
+
       - name: build & push
-        env:
-          PREFIX: ${{ steps.ecr.outputs.registry }}/product-factory
-          TAG: ${{ github.sha }}
         run: |
+          REG=$REGION-docker.pkg.dev/$PROJECT/product-factory
+          gcloud auth configure-docker $REGION-docker.pkg.dev --quiet
           for svc in agent-api:services/agent web:apps/web; do
             name=${svc%%:*}; ctx=${svc#*:}
-            docker build -t $PREFIX/$name:$TAG -t $PREFIX/$name:latest $ctx
-            docker push --all-tags $PREFIX/$name
+            docker build -t $REG/$name:$SHA $ctx
+            docker push $REG/$name:$SHA
           done
-      - name: upload compose bundle
-        run: |
-          BUCKET=$(aws ssm get-parameter --name /pf/mvp/data_bucket --query Parameter.Value --output text)
-          git archive --format=tar.gz -o release.tgz HEAD docker-compose.yml infra/nginx
-          aws s3 cp release.tgz s3://$BUCKET/release/${{ github.sha }}.tar.gz
-      - name: roll out via SSM
+
+      # Supabase の接続プール（session モード）は同時接続数に上限があるので、
+      # インスタンスは各1台、プールは各2本に抑える（agent は工場DBとADKで2本ずつ）
+      - name: deploy agent-api
         env:
-          REGISTRY: ${{ steps.ecr.outputs.registry }}
-          TAG: ${{ github.sha }}
+          GEMINI: ${{ vars.PF_GEMINI }}
+          PF_MODEL: ${{ vars.PF_MODEL || 'gemini-2.5-flash' }}
         run: |
-          IID=$(aws ssm get-parameter --name /pf/mvp/instance_id --query Parameter.Value --output text)
-          CMD_ID=$(aws ssm send-command --instance-ids "$IID" --document-name AWS-RunShellScript \
-            --parameters commands="[\"/opt/pf/deploy.sh $REGISTRY $TAG ${{ github.sha }}\"]" \
-            --query Command.CommandId --output text)
-          aws ssm wait command-executed --command-id "$CMD_ID" --instance-id "$IID" || true
-          aws ssm get-command-invocation --command-id "$CMD_ID" --instance-id "$IID" \
-            --query '{status:Status,out:StandardOutputContent,err:StandardErrorContent}'
-          test "$(aws ssm get-command-invocation --command-id "$CMD_ID" --instance-id "$IID" --query Status --output text)" = Success
+          SECRETS=DATABASE_URL=DATABASE_URL:latest,PF_INTERNAL_TOKEN=PF_INTERNAL_TOKEN:latest
+          ENVS=PF_DB_POOL_SIZE=2,PF_MODEL=$PF_MODEL
+          # Gemini を使うのは Variables の PF_GEMINI=true のときだけ。それ以外はスタブ
+          if [ "$GEMINI" = "true" ]; then SECRETS=$SECRETS,GOOGLE_API_KEY=GOOGLE_API_KEY:latest; else ENVS=$ENVS,PF_LLM=stub; fi
+          gcloud run deploy pf-agent --region $REGION --image $REGION-docker.pkg.dev/$PROJECT/product-factory/agent-api:$SHA \
+            --service-account pf-agent@$PROJECT.iam.gserviceaccount.com --no-allow-unauthenticated \
+            --port 8100 --cpu 1 --memory 1Gi --cpu-boost --timeout 600 --min-instances 0 --max-instances 1 \
+            --set-env-vars "$ENVS" --set-secrets "$SECRETS"
+
+      - name: deploy web
+        env:
+          ALLOW_SIGNUP: ${{ vars.PF_ALLOW_SIGNUP || 'true' }}
+        run: |
+          AGENT_URL=$(gcloud run services describe pf-agent --region $REGION --format 'value(status.url)')
+          gcloud run deploy pf-web --region $REGION --image $REGION-docker.pkg.dev/$PROJECT/product-factory/web:$SHA \
+            --service-account pf-web@$PROJECT.iam.gserviceaccount.com --allow-unauthenticated \
+            --port 3000 --cpu 1 --memory 512Mi --cpu-boost --timeout 600 --min-instances 0 --max-instances 1 \
+            --set-env-vars "AGENT_API_URL=$AGENT_URL,AGENT_AUTH=google-id-token,PF_DB_POOL_SIZE=2,PF_ALLOW_SIGNUP=$ALLOW_SIGNUP" \
+            --set-secrets AUTH_SECRET=AUTH_SECRET:latest,DATABASE_URL=DATABASE_URL:latest,PF_INTERNAL_TOKEN=PF_INTERNAL_TOKEN:latest
+          echo "web: $(gcloud run services describe pf-web --region $REGION --format 'value(status.url)')" >> $GITHUB_STEP_SUMMARY

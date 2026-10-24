@@ -11,7 +11,7 @@ from google.genai import types
 from sqlalchemy import select
 
 from . import repo
-from .db import PhaseReview, Product, StageRun, async_session_db_url, init_db, session
+from .db import PhaseReview, Product, StageRun, async_session_db_url, init_db, pool_kwargs, session
 from .stages import (
     ACCEPT_AS_IS,
     COMPLETED,
@@ -41,7 +41,7 @@ class FactoryError(Exception):
 class Engine:
     def __init__(self, db_url: str | None = None):
         init_db(db_url)
-        self.sessions = DatabaseSessionService(db_url=async_session_db_url(db_url))
+        self.sessions = DatabaseSessionService(db_url=async_session_db_url(db_url), **pool_kwargs())
         self.workflow = build_stage_workflow()
 
     def _runner(self) -> Runner:
