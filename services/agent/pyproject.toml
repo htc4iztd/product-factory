@@ -1,0 +1,31 @@
+[project]
+name = "pf-agent"
+version = "0.1.0"
+description = "Product Factory agent-api (ADK 2.x workflow, factory DB, audit log)"
+requires-python = ">=3.11"
+dependencies = [
+  "google-adk[db]==2.13.0",
+  "fastapi>=0.115",
+  "uvicorn[standard]>=0.30",
+  "sqlalchemy>=2.0",
+  "aiosqlite>=0.20",
+  "greenlet>=3",
+  "psycopg[binary]>=3.2",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8", "httpx>=0.27", "ruff>=0.6"]
+
+[tool.setuptools]
+packages = ["pf_agent"]
+
+[tool.pytest.ini_options]
+pythonpath = ["."]
+testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 120
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]
+ignore = ["B008"]   # FastAPI の Depends() 既定値は定石

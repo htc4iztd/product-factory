@@ -1,0 +1,51 @@
+# ステージB（EC2 1台 + docker compose）の構成。ローカル開発も同じファイルで動く。
+# worker / scheduler（ループ L1〜L5 の定期実行）は R2 で追加する。MVP では工程は agent-api が同期実行する。
+services:
+  postgres:
+    image: pgvector/pgvector:pg16
+    environment:
+      POSTGRES_USER: pf
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-pf}
+      POSTGRES_DB: pf
+    volumes: [pgdata:/var/lib/postgresql/data]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U pf"]
+      interval: 5s
+      retries: 20
+
+  agent-api:
+    image: ${PF_IMAGE_PREFIX:-pf}/agent-api:${PF_TAG:-latest}
+    build: ./services/agent
+    environment:
+      DATABASE_URL: postgresql://pf:${POSTGRES_PASSWORD:-pf}@postgres:5432/pf
+      PF_INTERNAL_TOKEN: ${PF_INTERNAL_TOKEN:?set PF_INTERNAL_TOKEN}
+      PF_LLM: ${PF_LLM:-}
+      GOOGLE_API_KEY: ${GOOGLE_API_KEY:-}
+      PF_MODEL: ${PF_MODEL:-gemini-2.5-flash}
+    depends_on:
+      postgres: { condition: service_healthy }
+    restart: unless-stopped
+
+  web:
+    image: ${PF_IMAGE_PREFIX:-pf}/web:${PF_TAG:-latest}
+    build: ./apps/web
+    environment:
+      DATABASE_URL: postgresql://pf:${POSTGRES_PASSWORD:-pf}@postgres:5432/pf
+      AUTH_SECRET: ${AUTH_SECRET:?set AUTH_SECRET}
+      AUTH_URL: ${AUTH_URL:-http://localhost}
+      AUTH_TRUST_HOST: "true"
+      AGENT_API_URL: http://agent-api:8100
+      PF_INTERNAL_TOKEN: ${PF_INTERNAL_TOKEN:?set PF_INTERNAL_TOKEN}
+      PF_ALLOW_SIGNUP: ${PF_ALLOW_SIGNUP:-true}
+    depends_on: [agent-api]
+    restart: unless-stopped
+
+  nginx:
+    image: nginx:1.27-alpine
+    ports: ["${PF_HTTP_PORT:-80}:80"]
+    volumes: [./infra/nginx/default.conf:/etc/nginx/conf.d/default.conf:ro]
+    depends_on: [web]
+    restart: unless-stopped
+
+volumes:
+  pgdata:

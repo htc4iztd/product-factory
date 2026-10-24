@@ -1,0 +1,15 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+body { @apply bg-white text-ink; font-family: "Meiryo", "Hiragino Sans", "Noto Sans JP", sans-serif; }
+.btn { @apply inline-flex items-center rounded-md px-3 py-1.5 text-sm font-semibold border; }
+.btn-primary { @apply btn bg-teal text-white border-teal hover:opacity-90; }
+.btn-accent { @apply btn bg-amber text-white border-amber hover:opacity-90; }
+.btn-ghost { @apply btn bg-white text-ink border-gray-300 hover:bg-pale; }
+.input { @apply w-full rounded-md border border-gray-300 px-3 py-2 text-sm; }
+.card { @apply rounded-lg border border-teal-light bg-white p-4; }
+.prose-md h1 { @apply text-lg font-bold mt-2 mb-2; }
+.prose-md h2 { @apply text-base font-bold mt-4 mb-1 text-deep; }
+.prose-md ul { @apply list-disc pl-5; }
+.prose-md p { @apply my-1; }

@@ -1,0 +1,32 @@
+#!/bin/bash
+# 初回起動時に docker と deploy.sh を入れる。アプリの起動は GitHub Actions の deploy が SSM 経由で行う。
+set -euxo pipefail
+dnf install -y docker git jq
+systemctl enable --now docker
+mkdir -p /usr/local/lib/docker/cli-plugins
+curl -fsSL https://github.com/docker/compose/releases/download/v2.29.7/docker-compose-linux-x86_64 \
+  -o /usr/local/lib/docker/cli-plugins/docker-compose
+chmod +x /usr/local/lib/docker/cli-plugins/docker-compose
+mkdir -p /opt/pf/app/infra/nginx
+
+cat > /opt/pf/deploy.sh <<'SH'
+#!/bin/bash
+# 使い方: deploy.sh <ECRレジストリ> <タグ> <git sha>
+set -euo pipefail
+REGISTRY=$1; TAG=$2; SHA=$3
+cd /opt/pf/app
+# compose と nginx 設定は deploy ワークフローが該当コミットから tar にして S3 に置く
+aws s3 cp s3://${bucket}/release/$SHA.tar.gz /tmp/release.tgz && tar xzf /tmp/release.tgz -C /opt/pf/app
+# .env は Parameter Store から毎回作り直す
+aws ssm get-parameters-by-path --region ${region} --path ${prefix}/env --with-decryption \
+  --query 'Parameters[].[Name,Value]' --output text | awk '{n=$1; sub(".*/","",n); print n"="$2}' > .env
+TOKEN=$(curl -sX PUT http://169.254.169.254/latest/api/token -H 'X-aws-ec2-metadata-token-ttl-seconds: 60')
+IP=$(curl -s -H "X-aws-ec2-metadata-token: $TOKEN" http://169.254.169.254/latest/meta-data/public-ipv4)
+{ echo "PF_IMAGE_PREFIX=$REGISTRY/product-factory"; echo "PF_TAG=$TAG"; echo "AUTH_URL=http://$IP"; } >> .env
+grep -q '^GOOGLE_API_KEY=unset$' .env && sed -i 's/^GOOGLE_API_KEY=unset$/GOOGLE_API_KEY=/' .env
+aws ecr get-login-password --region ${region} | docker login --username AWS --password-stdin $REGISTRY
+docker compose pull agent-api web
+docker compose up -d --no-build --remove-orphans
+docker image prune -f
+SH
+chmod +x /opt/pf/deploy.sh
