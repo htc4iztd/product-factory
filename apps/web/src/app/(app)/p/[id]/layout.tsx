@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { cookies } from "next/headers";
 import { SidebarShell } from "@/components/SidebarShell";
-import { ChevronLeft, Code2, Diamond, LayoutDashboard, ScrollText, Settings2 } from "lucide-react";
+import { BookText, ChevronLeft, Code2, Diamond, FileText, KanbanSquare, LayoutDashboard, MessagesSquare, ScrollText, Settings2, Video } from "lucide-react";
 import { agent, type Overview } from "@/lib/agent";
 import { NavItem } from "@/components/NavItem";
 import { StatusDot } from "@/components/StatusBadge";
@@ -61,6 +61,16 @@ export default async function ProductLayout({ children, params }: { children: Re
                   <span className="truncate">{p.gate} {p.gate_question}</span>
                 </NavItem>
               ))}
+            </div>
+          </div>
+          <div>
+            <div className="section-title mb-1 px-2">チーム</div>
+            <div className="space-y-0.5">
+              <NavItem href={`/p/${id}/talk`}><MessagesSquare size={15} />議論</NavItem>
+              <NavItem href={`/p/${id}/tickets`}><KanbanSquare size={15} />チケット</NavItem>
+              <NavItem href={`/p/${id}/decisions`}><BookText size={15} />決定記録</NavItem>
+              <NavItem href={`/p/${id}/meetings`}><Video size={15} />会議</NavItem>
+              <NavItem href={`/p/${id}/docs`}><FileText size={15} />ドキュメント</NavItem>
             </div>
           </div>
           <div>

@@ -8,7 +8,8 @@ from fastapi.responses import JSONResponse, Response
 from pydantic import BaseModel, Field
 from sqlalchemy import select
 
-from . import llm, llmconf
+from . import collab, llm, llmconf
+from .api_collab import router as collab_router
 from .authz import GATE_GROUP, STAGE_GROUP, Caller, caller, require
 from .db import AuditLog, session
 from .engine import Engine, FactoryError, product_dict
@@ -29,6 +30,14 @@ app = FastAPI(title="Product Factory agent-api", lifespan=lifespan)
 @app.exception_handler(FactoryError)
 async def _factory_error(_, exc: FactoryError):
     return JSONResponse(status_code=exc.status, content={"detail": exc.message})
+
+
+@app.exception_handler(collab.CollabError)
+async def _collab_error(_, exc: collab.CollabError):
+    return JSONResponse(status_code=exc.status, content={"detail": exc.message})
+
+
+app.include_router(collab_router)
 
 
 class CreateProduct(BaseModel):

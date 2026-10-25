@@ -15,7 +15,7 @@ function References({ refs, onClose }: { refs: StageDetail["references"]; onClos
     <div className="flex h-full flex-col">
       <div className="flex items-center gap-2 border-b border-zinc-200 px-4 py-3">
         <div className="flex h-6 w-6 items-center justify-center rounded-md bg-zinc-800 text-white"><BookOpen size={13} /></div>
-        <div className="text-[13px] font-semibold">事業フェーズの成果物</div>
+        <div className="text-[13px] font-semibold">事業フェーズの成果物と決定記録</div>
         <button onClick={onClose} className="btn-ghost btn-sm ml-auto h-7 w-7 p-0" aria-label="パネルを閉じる"><PanelRightClose size={15} /></button>
       </div>
       {refs.length === 0 ? (
@@ -35,7 +35,7 @@ function References({ refs, onClose }: { refs: StageDetail["references"]; onClos
               <div className="mb-2 flex items-center gap-2 text-[11px] text-zinc-500">
                 <span>{cur.framework}</span>
                 <span className={`chip ${cur.source === "下書き" ? "border-amber-200 text-amber-700" : "border-emerald-200 text-emerald-700"}`}>{cur.source}</span>
-                <a href={`../s/${cur.id}`} className="ml-auto text-brand-700 hover:underline">開く</a>
+                <a href={cur.id === "_decisions" ? "../decisions" : `../s/${cur.id}`} className="ml-auto text-brand-700 hover:underline">開く</a>
               </div>
               <div className="prose-md text-[12px]"><Markdown remarkPlugins={[remarkGfm]}>{cur.markdown}</Markdown></div>
             </div>
@@ -49,10 +49,15 @@ function References({ refs, onClose }: { refs: StageDetail["references"]; onClos
 // 右側のパネル（AIタブと参照タブ）。開閉と選んだタブは cookie に残す（ステージを移っても保つ）
 export function AiDrawer(props: {
   initial: "closed" | Tab; pid: string; sid: string; chat: ChatMsg[]; fields: FieldSpec[]; prompts: string[];
-  disabled?: string | null; references: StageDetail["references"];
+  disabled?: string | null; references: StageDetail["references"]; decisions?: StageDetail["decisions"];
   sessions: ChatSession[]; sessionId: string | null; report: StageReport | null;
 }) {
-  const { initial, references, ...panel } = props;
+  const { initial, decisions = [], references: base, ...panel } = props;
+  // 確定した決定記録（このステージ宛て・下書きの ID に触れるもの）も参照タブに並べる
+  const references = decisions.length ? [...base, {
+    id: "_decisions", no: "", name: `決定記録（${decisions.length}）`, framework: "会話・会議で確定したこと", status: "", source: "確定",
+    markdown: decisions.map((d) => `### ${d.key} ${d.title}\n${d.detail && d.detail !== d.title ? d.detail + "\n" : ""}${d.rationale ? `\n理由：${d.rationale}\n` : ""}${d.refs.length ? `\n関係：${d.refs.join(", ")}\n` : ""}`).join("\n"),
+  }] : base;
   const [state, setState] = useState<"closed" | Tab>(initial);
   const set = (v: "closed" | Tab) => {
     setState(v);

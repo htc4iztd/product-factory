@@ -90,7 +90,7 @@ export default async function StagePage({ params, searchParams }: Props) {
             )}
           </div>
         </section>
-        <AiDrawer initial={drawer} references={st.references} sessions={st.sessions} sessionId={st.session_id} report={st.report} pid={id} sid={stage} chat={st.chat} fields={st.framework.fields} prompts={st.framework.prompts}
+        <AiDrawer initial={drawer} references={st.references} decisions={st.decisions} sessions={st.sessions} sessionId={st.session_id} report={st.report} pid={id} sid={stage} chat={st.chat} fields={st.framework.fields} prompts={st.framework.prompts}
           disabled={!st.enabled ? "ステージを開くと対話できます" : null} />
       </div>
     </div>

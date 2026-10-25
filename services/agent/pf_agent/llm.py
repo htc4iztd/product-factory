@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import ipaddress
 import json
+import re
 import socket
 import time
 import urllib.error
@@ -145,6 +146,66 @@ def summarize(conn: Conn, stage: Stage, fw: Framework, messages: list[dict],
         f"## 採用した案\n{decided}\n\n## 却下した案\n{dropped}\n\n## 対話\n{log}\n"
     )
     return head + _text(conn, conn.summary_model, prompt).strip() + "\n"
+
+
+class ExDecision(BaseModel):
+    title: str          # 何を決めたか（1文）
+    detail: str         # 決めた内容の詳細
+    rationale: str      # なぜそうしたか（会話にあることだけ）
+    refs: list[str]     # 関係する ID（US-01, FR-03, TK-2 など）
+
+
+class ExAction(BaseModel):
+    title: str
+    detail: str
+    assignee: str       # 会話で担当が決まっていればそのメールアドレスか名前。なければ空
+    refs: list[str]
+
+
+class Extracted(BaseModel):
+    summary: str
+    decisions: list[ExDecision]
+    actions: list[ExAction]
+
+
+_DECIDE_RE = re.compile(r"^(?:決定|決め|合意)[:：]\s*(.+)$")
+_ACTION_RE = re.compile(r"^(?:TODO|宿題|やること)[:：]\s*(.+?)(?:[（(]([^）)]+)[）)])?$", re.I)
+
+
+def _stub_extract(text: str) -> Extracted:
+    """スタブ：「決定：」「宿題：」で始まる行をそのまま拾う。"""
+    decisions, actions, lines = [], [], []
+    for raw in text.splitlines():
+        body = raw.split(":", 1)[1].strip() if re.match(r"^[^:：]{1,60}: ", raw) else raw.strip()
+        if not body:
+            continue
+        lines.append(body)
+        if m := _DECIDE_RE.match(body):
+            decisions.append(ExDecision(title=m.group(1), detail=m.group(1), rationale="会話の記録から（スタブ）",
+                                        refs=re.findall(r"[A-Z]{2,4}-\d+", m.group(1))))
+        elif m := _ACTION_RE.match(body):
+            actions.append(ExAction(title=m.group(1).strip(), detail="", assignee=(m.group(2) or "").strip(),
+                                    refs=re.findall(r"[A-Z]{2,4}-\d+", m.group(1))))
+    summary = "／".join(lines[:3])[:300] or "（発言なし）"
+    return Extracted(summary=f"{len(lines)}件の発言（スタブの要約）：{summary}", decisions=decisions, actions=actions)
+
+
+def extract(conn: Conn, product: str, kind: str, text: str) -> Extracted:
+    """会話（スレッド・会議・外部の会話）から、要約・決まったこと・宿題を抜き出す。"""
+    if conn.provider == "stub":
+        return _stub_extract(text)
+    prompt = (
+        f"次はプロダクト「{product}」についての{kind}の記録です。仕様や方針を決めるための記録として読み、"
+        "日本語で次の3つを抜き出してください。\n"
+        "- summary：経緯を知らない人が読んで分かる要約（5行以内）。\n"
+        "- decisions：会話の中で合意された・決まったことだけ。提案や意見の段階のものは入れない。"
+        "title は決めたことを1文で、rationale は会話にある理由だけを書く（推測しない）。\n"
+        "- actions：誰かがやることになった作業。担当が会話で決まっていれば assignee に入れる。\n"
+        "refs には、会話に出てくる ID（US-01・FR-03・AC-02・TK-5・DEC-2 など）のうち関係するものを入れる。"
+        "ID を作り出さない。\n\n"
+        f"## 記録\n{text[-60000:]}\n"
+    )
+    return _json(conn, conn.summary_model, prompt, Extracted)
 
 
 def ping(conn: Conn) -> dict:

@@ -152,6 +152,119 @@ class ChatMessage(Base):
     created_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), default=_now)
 
 
+# ---------------- チーム（チケット・議論・決定記録・会議・ドキュメント） ----------------
+# 番号はプロダクトの中で振る（TK-1, DEC-1, MTG-1, DOC-1）。成果物の ID（US-01 など）と同じ書き方で参照できる。
+class Ticket(Base):
+    __tablename__ = "tickets"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    product_id: Mapped[str] = mapped_column(String(32), index=True)
+    number: Mapped[int] = mapped_column(Integer)
+    title: Mapped[str] = mapped_column(String(300))
+    body: Mapped[str] = mapped_column(Text, default="")
+    status: Mapped[str] = mapped_column(String(16), default="todo")    # triage | todo | doing | review | done | closed
+    priority: Mapped[str] = mapped_column(String(8), default="P2")     # P1 | P2 | P3
+    assignee: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    stage_id: Mapped[str | None] = mapped_column(String(8), nullable=True)
+    refs: Mapped[list | None] = mapped_column(JSON, nullable=True)      # ["US-03", "DEC-2"]
+    due: Mapped[str | None] = mapped_column(String(10), nullable=True)  # YYYY-MM-DD
+    source: Mapped[dict | None] = mapped_column(JSON, nullable=True)    # どこから起きたか {kind, id, url}
+    external: Mapped[dict | None] = mapped_column(JSON, nullable=True)  # GitHub Issue などとの対応
+    created_by: Mapped[str] = mapped_column(String(200))
+    created_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), default=_now)
+    updated_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), default=_now, onupdate=_now)
+
+
+class Channel(Base):
+    __tablename__ = "channels"
+    id: Mapped[str] = mapped_column(String(32), primary_key=True, default=_id)
+    product_id: Mapped[str] = mapped_column(String(32), index=True)
+    name: Mapped[str] = mapped_column(String(80))
+    topic: Mapped[str] = mapped_column(String(300), default="")
+    # 外部の会話をつなぐとき：{"provider": "gchat"|"teams"|..., "ref": ..., "mode": "copy"|"summary"}
+    external: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    created_by: Mapped[str] = mapped_column(String(200))
+    created_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), default=_now)
+
+
+class Post(Base):
+    """チャンネルの発言とスレッドの返信、チケットのコメント。"""
+    __tablename__ = "posts"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    product_id: Mapped[str] = mapped_column(String(32), index=True)
+    channel_id: Mapped[str | None] = mapped_column(String(32), index=True, nullable=True)
+    ticket_id: Mapped[int | None] = mapped_column(Integer, index=True, nullable=True)
+    parent_id: Mapped[int | None] = mapped_column(Integer, index=True, nullable=True)  # スレッドの親
+    author: Mapped[str] = mapped_column(String(200))
+    body: Mapped[str] = mapped_column(Text)
+    refs: Mapped[list | None] = mapped_column(JSON, nullable=True)
+    mentions: Mapped[list | None] = mapped_column(JSON, nullable=True)
+    source: Mapped[dict | None] = mapped_column(JSON, nullable=True)   # 外部から取り込んだ発言 {provider, url}
+    created_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), default=_now)
+
+
+class Decision(Base):
+    __tablename__ = "decisions"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    product_id: Mapped[str] = mapped_column(String(32), index=True)
+    number: Mapped[int] = mapped_column(Integer)
+    title: Mapped[str] = mapped_column(String(300))
+    detail: Mapped[str] = mapped_column(Text, default="")
+    rationale: Mapped[str] = mapped_column(Text, default="")
+    status: Mapped[str] = mapped_column(String(12), default="proposed")  # proposed | confirmed | rejected | superseded
+    stage_id: Mapped[str | None] = mapped_column(String(8), nullable=True)
+    refs: Mapped[list | None] = mapped_column(JSON, nullable=True)
+    # {kind: thread|meeting|external|manual, id, url}
+    source: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    proposed_by: Mapped[str] = mapped_column(String(200))
+    decided_by: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    decided_at: Mapped[dt.datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), default=_now)
+
+
+class Meeting(Base):
+    __tablename__ = "meetings"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    product_id: Mapped[str] = mapped_column(String(32), index=True)
+    number: Mapped[int] = mapped_column(Integer)
+    title: Mapped[str] = mapped_column(String(300))
+    starts_at: Mapped[str | None] = mapped_column(String(25), nullable=True)   # ISO 8601（現地時刻のまま）
+    attendees: Mapped[list | None] = mapped_column(JSON, nullable=True)
+    agenda: Mapped[str] = mapped_column(Text, default="")
+    transcript: Mapped[str] = mapped_column(Text, default="")
+    minutes: Mapped[str] = mapped_column(Text, default="")
+    source: Mapped[dict | None] = mapped_column(JSON, nullable=True)            # 外部の会議 {provider, url}
+    created_by: Mapped[str] = mapped_column(String(200))
+    created_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), default=_now)
+
+
+class Doc(Base):
+    __tablename__ = "docs"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    product_id: Mapped[str] = mapped_column(String(32), index=True)
+    number: Mapped[int] = mapped_column(Integer)
+    title: Mapped[str] = mapped_column(String(300))
+    body: Mapped[str] = mapped_column(Text, default="")
+    refs: Mapped[list | None] = mapped_column(JSON, nullable=True)
+    updated_by: Mapped[str] = mapped_column(String(200))
+    created_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), default=_now)
+    updated_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), default=_now, onupdate=_now)
+
+
+class Notice(Base):
+    """メンションや担当の割り当ての通知。"""
+    __tablename__ = "notices"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    tenant_id: Mapped[str] = mapped_column(String(64), index=True)
+    user: Mapped[str] = mapped_column(String(200), index=True)
+    product_id: Mapped[str] = mapped_column(String(32))
+    kind: Mapped[str] = mapped_column(String(24))      # mention | assigned | decision
+    text: Mapped[str] = mapped_column(String(300))
+    link: Mapped[str] = mapped_column(String(300))
+    actor: Mapped[str] = mapped_column(String(200))
+    read: Mapped[bool] = mapped_column(Boolean, default=False)
+    created_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), default=_now)
+
+
 class LlmSetting(Base):
     """LLM の接続設定。scope は "app"（運用者が決めるアプリ全体の既定）か "t:<テナントID>"（テナントの上書き）。"""
     __tablename__ = "llm_settings"

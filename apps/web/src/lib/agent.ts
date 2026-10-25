@@ -113,6 +113,7 @@ export type StageDetail = {
   inputs: StageRef[]; downstream: StageRef[];
   references: { id: string; no: string; name: string; framework: string; status: string; source: string; markdown: string }[];
   trace: Trace | null;
+  decisions: Decision[];
 };
 export type Trace =
   | { kind: "stories_without_ac"; total: number; items: { id: string; text: string; release: string }[] }
@@ -150,3 +151,33 @@ export type LlmSettings = {
   };
 };
 export type LlmTestResult = { ok: boolean; model: string; reply?: string; ms?: number; error?: string };
+
+// ---------------- チーム ----------------
+export type TicketStatus = "triage" | "todo" | "doing" | "review" | "done" | "closed";
+export type Ticket = {
+  number: number; key: string; title: string; body: string; status: TicketStatus; priority: "P1" | "P2" | "P3";
+  assignee: string | null; stage_id: string | null; refs: string[]; due: string | null;
+  source: { kind: string; id?: string | number; url?: string } | null; external: Record<string, unknown> | null;
+  created_by: string; created_at: string; updated_at: string; comments?: number;
+};
+export type Post = {
+  id: number; channel_id: string | null; parent_id: number | null; author: string; body: string; refs: string[];
+  mentions: string[]; source: { provider?: string; url?: string | null } | null; created_at: string; replies?: number;
+};
+export type TicketDetail = Omit<Ticket, "comments"> & { comments: Post[] };
+export type ChannelExternal = { provider: string; mode: "copy" | "summary"; ref: string; url: string };
+export type Channel = { id: string; name: string; topic: string; external: ChannelExternal | null; posts: number; created_by: string; created_at: string };
+export type Decision = {
+  number: number; key: string; title: string; detail: string; rationale: string;
+  status: "proposed" | "confirmed" | "rejected" | "superseded"; stage_id: string | null; refs: string[];
+  source: { kind: string; id?: string | number; provider?: string; url?: string | null } | null;
+  proposed_by: string; decided_by: string | null; decided_at: string | null; created_at: string;
+};
+export type Meeting = {
+  number: number; key: string; title: string; starts_at: string | null; attendees: string[];
+  source: { provider?: string; url?: string } | null; has_minutes: boolean; created_by: string; created_at: string;
+};
+export type MeetingDetail = Meeting & { agenda: string; transcript: string; minutes: string; decisions: Decision[]; tickets: Ticket[] };
+export type DocSummary = { number: number; key: string; title: string; refs: string[]; updated_by: string; updated_at: string };
+export type DocDetail = DocSummary & { body: string };
+export type Notices = { unread: number; items: { id: number; kind: string; text: string; link: string; actor: string; read: boolean; product_id: string; created_at: string }[] };
