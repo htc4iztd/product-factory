@@ -1,13 +1,16 @@
 import Link from "next/link";
-import { AlertTriangle, CheckCircle2, CircleDashed, Clock, Lock } from "lucide-react";
-import { agent, type Overview } from "@/lib/agent";
+import { AlertTriangle, ArrowRight, CheckCircle2, CircleDashed, Clock, ImageIcon, Lock } from "lucide-react";
+import { agent, type CanvasInfo, type Overview } from "@/lib/agent";
+import { GenerateForm } from "@/components/canvas/CanvasControls";
 import { GROUPS } from "@/lib/groups";
 import { PageHeader } from "@/components/PageHeader";
 import { StatusBadge } from "@/components/StatusBadge";
 
 export default async function ProductPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
-  const ov = await agent<Overview>(`/products/${id}`);
+  const [ov, cv] = await Promise.all([agent<Overview>(`/products/${id}`), agent<CanvasInfo>(`/products/${id}/canvas`)]);
+  const cover = cv.images.find((i) => i.id === cv.product.cover_image_id) ?? null;
+  const img = (iid: string) => `/api/p/${id}/images/${iid}`;
   const active = ov.stages.filter((s) => s.enabled);
   const done = active.filter((s) => s.status === "completed").length;
   const waiting = active.filter((s) => s.pending_kind === "approval");
@@ -41,6 +44,45 @@ export default async function ProductPage({ params }: { params: Promise<{ id: st
         </div>
       </PageHeader>
       <div className="space-y-8 px-8 py-6">
+        <section className="card grid overflow-hidden lg:grid-cols-[minmax(0,1.7fr)_minmax(300px,1fr)]">
+          <div className="relative aspect-video border-b border-zinc-100 bg-zinc-50 lg:aspect-auto lg:min-h-[320px] lg:border-b-0 lg:border-r">
+            {cover ? (
+              <Link href={`/p/${id}/canvas`} className="absolute inset-0">
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img src={img(cover.id)} alt={`${ov.product.name} のプロダクトイメージ（${cv.kinds[cover.kind]}）`} className="h-full w-full object-cover" />
+              </Link>
+            ) : (
+              <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 bg-gradient-to-br from-brand-50 to-violet-50 text-center">
+                <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-white text-brand-600 shadow-card"><ImageIcon size={22} /></div>
+                <div className="font-semibold">プロダクトの全体像を1枚の絵に</div>
+                <p className="max-w-sm px-4 text-[13px] text-zinc-500">①リーンキャンバスと④バリュープロポジションの内容から、画像生成AIが描きます。最初の1枚が表紙になります。</p>
+              </div>
+            )}
+          </div>
+          <div className="flex flex-col gap-4 p-5">
+            <div>
+              <div className="flex items-center gap-2 font-semibold"><ImageIcon size={15} className="text-brand-600" />プロダクト・キャンバス</div>
+              <p className="mt-1 text-xs text-zinc-500">関わる人と同じイメージを持つための絵です。中身が変わったら描き直してください。</p>
+            </div>
+            <GenerateForm pid={id} kinds={cv.kinds} model={cv.model} first={cv.images.length === 0} />
+            {cv.images.length > 0 && (
+              <div className="mt-auto space-y-2">
+                <div className="grid grid-cols-4 gap-1.5">
+                  {cv.images.slice(0, 4).map((i) => (
+                    <Link key={i.id} href={`/p/${id}/canvas`} className={`overflow-hidden rounded-md ring-1 ${i.id === cover?.id ? "ring-2 ring-amber-300" : "ring-zinc-200"}`}>
+                      {/* eslint-disable-next-line @next/next/no-img-element */}
+                      <img src={img(i.id)} alt={`${cv.kinds[i.kind]}の画像`} loading="lazy" className="aspect-video w-full object-cover" />
+                    </Link>
+                  ))}
+                </div>
+                <Link href={`/p/${id}/canvas`} className="flex items-center gap-1 text-xs font-medium text-brand-700 hover:underline">
+                  すべての絵（{cv.images.length}）と使ったプロンプト<ArrowRight size={12} />
+                </Link>
+              </div>
+            )}
+          </div>
+        </section>
+
         <section className="grid grid-cols-2 gap-3 lg:grid-cols-4">
           {stats.map(({ label, value, icon: Icon, tone }) => (
             <div key={label} className="card p-4">

@@ -1,5 +1,7 @@
 import Link from "next/link";
-import { ChevronLeft, Diamond, ImageIcon, LayoutDashboard, ScrollText, Settings2 } from "lucide-react";
+import { cookies } from "next/headers";
+import { SidebarShell } from "@/components/SidebarShell";
+import { ChevronLeft, Diamond, LayoutDashboard, ScrollText, Settings2 } from "lucide-react";
 import { agent, type Overview } from "@/lib/agent";
 import { NavItem } from "@/components/NavItem";
 import { StatusDot } from "@/components/StatusBadge";
@@ -11,9 +13,9 @@ export default async function ProductLayout({ children, params }: { children: Re
   const ov = await agent<Overview>(`/products/${id}`);
   const stages = Object.fromEntries(ov.stages.map((s) => [s.id, s]));
   const phases = Object.fromEntries(ov.phases.map((p) => [p.id, p]));
+  const navOpen = (await cookies()).get("pf_nav")?.value !== "closed";
   return (
-    <div className="flex min-h-screen">
-      <aside className="sticky top-0 flex h-screen w-64 shrink-0 flex-col border-r border-zinc-200 bg-zinc-100/70">
+    <SidebarShell initialOpen={navOpen} sidebar={<>
         <div className="px-3 pb-2 pt-3">
           <Link href="/" className="flex items-center gap-1 text-xs text-zinc-500 hover:text-zinc-900">
             <ChevronLeft size={14} />すべてのプロダクト
@@ -29,17 +31,6 @@ export default async function ProductLayout({ children, params }: { children: Re
           </div>
         </div>
         <nav className="flex-1 space-y-5 overflow-y-auto px-3 py-3">
-          <Link href={`/p/${id}/canvas`} className="group block overflow-hidden rounded-xl border border-zinc-200 bg-white shadow-card transition hover:shadow-pop">
-            {ov.product.cover_image_id ? (
-              // eslint-disable-next-line @next/next/no-img-element
-              <img src={`/api/p/${id}/images/${ov.product.cover_image_id}`} alt="" className="aspect-video w-full object-cover" />
-            ) : (
-              <div className="flex aspect-video items-center justify-center bg-gradient-to-br from-brand-50 to-violet-100 text-brand-500"><ImageIcon size={22} /></div>
-            )}
-            <div className="flex items-center gap-1.5 px-2.5 py-2 text-[12px] font-medium text-zinc-700 group-hover:text-zinc-900">
-              <ImageIcon size={13} className="text-brand-600" />プロダクト・キャンバス
-            </div>
-          </Link>
           <div className="space-y-0.5">
             <NavItem href={`/p/${id}`} exact><LayoutDashboard size={15} />概要</NavItem>
           </div>
@@ -84,8 +75,8 @@ export default async function ProductLayout({ children, params }: { children: Re
           </div>
         </nav>
         <div className="border-t border-zinc-200 p-3"><UserMenu /></div>
-      </aside>
-      <main className="min-w-0 flex-1">{children}</main>
-    </div>
+    </>}>
+      {children}
+    </SidebarShell>
   );
 }

@@ -128,7 +128,16 @@ await page.getByText("直近の記録").waitFor();
 await shot("12-gate", true);
 
 await page.goto(`${BASE}/p/${pid}`);
+await page.getByAltText(/プロダクトイメージ/).waitFor();   // 概要の上部に表紙が出る
 await shot("13-overview-after", true);
+// サイドバーを隠す → 再読み込みしても隠れたまま → 表示に戻す
+await btn("サイドバーを隠す").click();
+await page.locator("aside").waitFor({ state: "detached" });
+await page.reload();
+await btn("サイドバーを表示").waitFor();
+await shot("13b-nav-hidden");
+await btn("サイドバーを表示").click();
+await page.locator("aside").waitFor();
 const recheck = await page.getByText("上流の確定版が変わりました").count();
 const confirmed = await page.locator("main").getByText("確定", { exact: true }).count();
 await page.goto(`${BASE}/p/${pid}/audit`);

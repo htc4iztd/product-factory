@@ -13,7 +13,7 @@ export default async function CanvasPage({ params }: { params: Promise<{ id: str
   return (
     <>
       <PageHeader
-        crumbs={<span>プロダクト・キャンバス</span>}
+        crumbs={<><Link href={`/p/${id}`} className="hover:text-zinc-700">概要</Link><span>/</span><span>プロダクト・キャンバス</span></>}
         title="プロダクト・キャンバス"
         sub="プロダクトの全体像を1枚の絵にして、関わる人と同じイメージを持つための場所です。"
         actions={<>
