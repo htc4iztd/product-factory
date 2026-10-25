@@ -54,21 +54,37 @@ export async function agent<T = unknown>(path: string, init?: { method?: string;
 
 export type Phase = {
   id: string; name: string; gate: string | null; gate_question: string | null;
-  stages: string[]; unlocked: boolean; complete: boolean;
+  stages: string[]; active: number; done: number; complete: boolean;
   review: { decision: string; reason: string; actor: string; at: string } | null;
 };
 export type StageSummary = {
-  id: string; no: string; name: string; phase: string; status: string;
-  pending_kind: string | null; current_version: number; approved_version: number;
+  id: string; no: string; name: string; phase: string; framework: string; status: string;
+  enabled: boolean; approval_required: boolean; pending_kind: string | null;
+  current_version: number; approved_version: number;
 };
 export type Product = { id: string; name: string; idea: string; scope: string; mode: string; status: string; created_at: string };
 export type Overview = { product: Product; phases: Phase[]; stages: StageSummary[] };
-export type Pending = { id: string; kind: "clarify" | "approval"; message: string; payload: Record<string, unknown> };
+
+export type Column = { key: string; label: string; kind: "text" | "number" };
+export type FieldSpec = {
+  key: string; label: string; kind: "text" | "list" | "table"; hint: string; required: boolean;
+  columns: Column[]; rows: string[];
+};
+export type Row = Record<string, string | number>;
+export type FieldValue = string | string[] | Row[];
+export type Draft = Record<string, FieldValue>;
+export type Proposal = { id: string; field: string; value: FieldValue; reason: string; status: "pending" | "accepted" | "rejected" };
+export type ChatMsg = { id: number; role: "user" | "assistant" | "feedback"; actor: string; text: string; proposals: Proposal[]; at: string };
+export type StageRef = { id: string; no: string; name: string; status?: string; enabled?: boolean };
 export type StageDetail = {
-  id: string; no: string; name: string; phase: string; artifact_name: string; required_sections: string[];
-  inputs: string[]; status: string; pending: Pending | null; answers: string | null; audit_findings: string[] | null;
-  current_version: number; approved_version: number;
-  artifact: { version: number; content: string; sha256: string; approved: boolean } | null;
+  id: string; no: string; name: string; phase: string;
+  framework: { view: string; title: string; summary: string; fields: FieldSpec[]; prompts: string[] };
+  status: string; enabled: boolean; approval_required: boolean;
+  pending: { kind: string; version: number } | null; audit_findings: string[] | null; missing: string[];
+  current_version: number; approved_version: number; dirty: boolean;
+  draft: Draft; chat: ChatMsg[]; markdown: string;
+  versions: { version: number; confirmed: boolean; sha256: string; created_at: string }[];
+  inputs: StageRef[]; downstream: StageRef[];
 };
 export type AuditRow = {
   id: number; at: string; stage_id: string | null; actor_type: string; actor: string; kind: string;
@@ -76,6 +92,6 @@ export type AuditRow = {
 };
 
 export const STATUS_LABEL: Record<string, string> = {
-  not_started: "未着手", in_progress: "進行中", awaiting_approval: "承認待ち", revising: "修正中",
-  completed: "完了", skipped: "スキップ", needs_recheck: "要再確認",
+  not_started: "未着手", in_progress: "作業中", awaiting_approval: "承認待ち", revising: "修正中",
+  completed: "確定", skipped: "スキップ", needs_recheck: "要再確認",
 };

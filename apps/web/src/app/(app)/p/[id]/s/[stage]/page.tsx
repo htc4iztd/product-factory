@@ -1,116 +1,99 @@
+import Link from "next/link";
 import Markdown from "react-markdown";
-import { revalidatePath } from "next/cache";
-import { redirect } from "next/navigation";
-import { agent, AgentError, type StageDetail } from "@/lib/agent";
-import { StatusChip } from "@/components/StatusChip";
+import remarkGfm from "remark-gfm";
+import { ArrowRight, Lock } from "lucide-react";
+import { agent, type StageDetail } from "@/lib/agent";
+import { StatusBadge, StatusDot } from "@/components/StatusBadge";
+import { Canvas } from "@/components/stage/Canvas";
+import { ChatPanel } from "@/components/stage/ChatPanel";
+import { ApprovalPanel, ClosedBanner, CommitButton, RecheckBanner } from "@/components/stage/StageActions";
 
-type Props = { params: Promise<{ id: string; stage: string }>; searchParams: Promise<{ error?: string; tab?: string }> };
+type Props = { params: Promise<{ id: string; stage: string }>; searchParams: Promise<{ tab?: string }> };
+
+const PHASE_NAME: Record<string, string> = { P1: "探索", P2: "事業定義", P3: "要求・設計", P4: "構築", P5: "リリース" };
 
 export default async function StagePage({ params, searchParams }: Props) {
   const { id, stage } = await params;
-  const sp = await searchParams;
+  const tab = (await searchParams).tab ?? "canvas";
   const st = await agent<StageDetail>(`/products/${id}/stages/${stage}`);
   const here = `/p/${id}/s/${stage}`;
-
-  async function call(path: string, body?: unknown) {
-    "use server";
-    try {
-      await agent(path, { method: "POST", body });
-    } catch (e) {
-      if (e instanceof AgentError) redirect(`${here}?error=${encodeURIComponent(e.message)}`);
-      throw e;
-    }
-    revalidatePath(`/p/${id}`, "layout");
-    redirect(here);
-  }
-  async function start() {
-    "use server";
-    await call(`/products/${id}/stages/${stage}/start`);
-  }
-  async function answer(formData: FormData) {
-    "use server";
-    await call(`/products/${id}/stages/${stage}/respond`, { answer: String(formData.get("answer") ?? "") });
-  }
-  async function decide(formData: FormData) {
-    "use server";
-    await call(`/products/${id}/stages/${stage}/respond`, {
-      decision: String(formData.get("decision")),
-      comment: String(formData.get("comment") ?? ""),
-    });
-  }
-
-  const pending = st.pending;
-  const canStart = !pending && ["not_started", "revising", "needs_recheck", "completed"].includes(st.status);
-  const tab = sp.tab ?? "doc";
-  const questions = (pending?.payload?.questions as string[] | undefined) ?? [];
+  const awaiting = st.status === "awaiting_approval";
+  const readOnly = !st.enabled;
+  const required = st.framework.fields.filter((f) => f.required).length;
+  const filled = required - st.missing.length;
+  const tabs = [["canvas", "キャンバス"], ["doc", "文書"], ["history", `版の履歴（${st.versions.length}）`]];
 
   return (
-    <div className="space-y-4">
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-3">
-          <h1 className="text-2xl font-bold text-deep">{st.no} {st.name}</h1>
-          <StatusChip status={st.status} />
+    <div className="flex h-screen flex-col">
+      <header className="shrink-0 border-b border-zinc-200 bg-white px-8 pt-4">
+        <div className="mb-2 flex items-center gap-1.5 text-xs text-zinc-400">
+          <Link href={`/p/${id}`} className="hover:text-zinc-700">概要</Link><span>/</span><span>{st.phase} {PHASE_NAME[st.phase]}</span>
         </div>
-        {canStart && (
-          <form action={start}>
-            <button className="btn-primary">{st.status === "not_started" ? "このステージを始める" : "やり直す"}</button>
-          </form>
-        )}
-      </div>
-      <p className="text-sm text-muted">
-        成果物：{st.artifact_name}／必須の見出し：{st.required_sections.join("・")}
-        {st.approved_version > 0 && `／承認済みの版：v${st.approved_version}`}
-      </p>
-      {sp.error && <div className="rounded border border-amber bg-amber-light p-3 text-sm">{sp.error}</div>}
-
-      {pending?.kind === "clarify" && (
-        <form action={answer} className="card space-y-3 border-amber">
-          <h2 className="font-bold text-deep">確認質問</h2>
-          <ul className="list-disc pl-5 text-sm">{questions.map((q) => <li key={q}>{q}</li>)}</ul>
-          <textarea name="answer" rows={5} required className="input" placeholder="回答（そのまま監査ログに残ります）" />
-          <button className="btn-accent">回答して成果物を作る</button>
-        </form>
-      )}
-
-      {st.artifact && (
-        <section className="card">
-          <div className="mb-3 flex gap-4 border-b text-sm">
-            {[["doc", "文書"], ["meta", "版と監査"]].map(([k, l]) => (
-              <a key={k} href={`${here}?tab=${k}`} className={`pb-2 ${tab === k ? "border-b-2 border-amber font-bold text-deep" : "text-muted"}`}>{l}</a>
-            ))}
+        <div className="flex flex-wrap items-start justify-between gap-4">
+          <div className="min-w-0">
+            <h1 className="flex items-center gap-2.5 text-xl font-semibold tracking-tight">
+              <span className="text-zinc-400">{st.no}</span>{st.name}<StatusBadge status={st.status} enabled={st.enabled} />
+            </h1>
+            <p className="mt-1 text-[13px] text-zinc-500"><span className="font-medium text-zinc-700">{st.framework.title}</span> — {st.framework.summary}</p>
           </div>
-          {tab === "doc" ? (
-            <div className="prose-md text-sm"><Markdown>{st.artifact.content}</Markdown></div>
-          ) : (
-            <dl className="grid grid-cols-[8rem_1fr] gap-y-1 text-sm">
-              <dt className="text-muted">現在の版</dt><dd>v{st.artifact.version}{st.artifact.approved && "（承認済み）"}</dd>
-              <dt className="text-muted">SHA-256</dt><dd className="font-mono text-xs">{st.artifact.sha256}</dd>
-              <dt className="text-muted">ビルダーの回答</dt><dd className="whitespace-pre-wrap">{st.answers}</dd>
-            </dl>
-          )}
-        </section>
-      )}
-
-      {pending?.kind === "approval" && (
-        <form action={decide} className="card space-y-3 border-2 border-amber">
-          <h2 className="font-bold text-deep">承認（v{String(pending.payload?.version ?? st.current_version)}）</h2>
-          <div className="text-sm">
-            <div className="font-bold">監査エージェントの指摘</div>
-            {(st.audit_findings ?? []).length === 0 ? (
-              <p className="text-muted">なし（必須の見出しと本文がそろっています）</p>
-            ) : (
-              <ul className="list-disc pl-5 text-amber">{st.audit_findings!.map((f) => <li key={f}>{f}</li>)}</ul>
+          <div className="flex items-center gap-3">
+            <div className="text-right text-[11px] leading-4 text-zinc-400">
+              <div>必須項目 <span className="tabular-nums text-zinc-700">{filled}/{required}</span></div>
+              <div>{st.approved_version ? `確定版 v${st.approved_version}` : "未確定"}{st.dirty && st.approved_version > 0 ? "・未確定の変更あり" : ""}</div>
+            </div>
+            {st.approval_required && <span className="chip"><Lock size={11} />承認あり</span>}
+            {st.enabled && !awaiting && (
+              <CommitButton pid={id} sid={stage} missing={st.missing} dirty={st.dirty} approval={st.approval_required} hasVersion={st.current_version > 0} />
             )}
-            {Boolean(pending.payload?.escalated) && <p className="mt-1 font-bold text-amber">作り直しの上限を超えたため、指摘付きで承認に回っています</p>}
           </div>
-          <textarea name="comment" rows={3} className="input" placeholder="理由・修正指示（Request Changes と Accept as-is では必須）" />
-          <div className="flex gap-2">
-            <button name="decision" value="Approve" className="btn-accent">Approve</button>
-            <button name="decision" value="Request Changes" className="btn-ghost">Request Changes</button>
-            <button name="decision" value="Accept as-is" className="btn-ghost">Accept as-is</button>
+        </div>
+        <div className="mt-3 flex flex-wrap items-center gap-x-5 gap-y-2">
+          <nav className="flex gap-4 text-[13px]">
+            {tabs.map(([k, l]) => (
+              <Link key={k} href={`${here}?tab=${k}`} className={`-mb-px border-b-2 pb-2.5 ${tab === k ? "border-zinc-900 font-medium text-zinc-900" : "border-transparent text-zinc-500 hover:text-zinc-800"}`}>{l}</Link>
+            ))}
+          </nav>
+          <div className="ml-auto flex flex-wrap items-center gap-1.5 pb-2 text-[11px] text-zinc-400">
+            {st.inputs.length > 0 && <span>参照する上流</span>}
+            {st.inputs.map((s) => (
+              <Link key={s.id} href={`/p/${id}/s/${s.id}`} className="chip hover:border-zinc-300"><StatusDot status={s.status ?? ""} enabled={s.enabled} />{s.no} {s.name}</Link>
+            ))}
+            {st.downstream.length > 0 && <span className="ml-2 flex items-center gap-1"><ArrowRight size={11} />下流 {st.downstream.length}</span>}
           </div>
-        </form>
-      )}
+        </div>
+      </header>
+
+      <div className="flex min-h-0 flex-1">
+        <section className="min-w-0 flex-1 overflow-y-auto">
+          <div className="space-y-4 p-6">
+            {!st.enabled && <ClosedBanner pid={id} sid={stage} />}
+            {st.status === "needs_recheck" && <RecheckBanner pid={id} sid={stage} inputs={st.inputs.map((s) => s.no + s.name).join("・")} />}
+            {awaiting && st.pending && <ApprovalPanel pid={id} sid={stage} version={st.pending.version} findings={st.audit_findings ?? []} />}
+            {tab === "canvas" && <Canvas pid={id} st={st} readOnly={readOnly} />}
+            {tab === "doc" && (
+              <div className="card prose-md mx-auto max-w-3xl p-8"><Markdown remarkPlugins={[remarkGfm]}>{st.markdown}</Markdown></div>
+            )}
+            {tab === "history" && (
+              <div className="card divide-y divide-zinc-100">
+                {st.versions.length === 0 && <p className="p-6 text-center text-[13px] text-zinc-500">まだ確定した版はありません。</p>}
+                {st.versions.map((v) => (
+                  <div key={v.version} className="flex items-center gap-4 px-5 py-3 text-[13px]">
+                    <span className="w-10 font-semibold">v{v.version}</span>
+                    {v.version === st.approved_version ? <span className="chip border-emerald-200 text-emerald-700">確定版</span>
+                      : v.confirmed ? <span className="chip">過去の確定版</span> : <span className="chip border-amber-200 text-amber-700">承認待ち・差し戻し</span>}
+                    <span className="font-mono text-[11px] text-zinc-400">{v.sha256.slice(0, 12)}</span>
+                    <span className="ml-auto text-xs text-zinc-400">{new Date(v.created_at).toLocaleString("ja-JP")}</span>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        </section>
+        <aside className="w-[400px] shrink-0 border-l border-zinc-200 bg-zinc-50/60">
+          <ChatPanel pid={id} sid={stage} chat={st.chat} fields={st.framework.fields} prompts={st.framework.prompts}
+            disabled={!st.enabled ? "ステージを開くと対話できます" : null} />
+        </aside>
+      </div>
     </div>
   );
 }

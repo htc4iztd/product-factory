@@ -1,7 +1,11 @@
 """工程管理（設計書 5.1 の「工程管理」層）。
 
-フェーズの順序・審査・前提条件は、この決定的なコードが持つ。各ステージの中は
-ADK の Workflow（workflow.py）が動き、1ステージの実行ごとに1セッションを使う（6章）。
+工程（17工程を14ステージにまとめたもの）の並びと、ステージ間の入力関係・変更の伝播は、
+この決定的なコードが持つ。工程の順序でロックはしない。どのステージからでも始められ、
+確定版が変わると参照している下流が「要再確認」になる。
+
+各ステージの中では、ビルダーとAIの対話を ADK の Workflow（workflow.py）が動かし、
+ステージごとに1つのセッションを使う。
 """
 from __future__ import annotations
 
@@ -10,10 +14,13 @@ from google.adk.sessions import DatabaseSessionService
 from google.genai import types
 from sqlalchemy import select
 
+from . import frameworks as fx
 from . import repo
 from .db import PhaseReview, Product, StageRun, async_session_db_url, init_db, pool_kwargs, session
 from .stages import (
     ACCEPT_AS_IS,
+    APPROVE,
+    AWAITING_APPROVAL,
     COMPLETED,
     DECISIONS,
     NEEDS_RECHECK,
@@ -21,14 +28,12 @@ from .stages import (
     PHASE_BY_ID,
     REQUEST_CHANGES,
     REVISING,
-    SKIPPED,
     STAGE_BY_ID,
     STAGES,
 )
-from .workflow import build_stage_workflow
+from .workflow import build_chat_workflow
 
 APP = "product-factory"
-STARTABLE = (NOT_STARTED, REVISING, NEEDS_RECHECK, COMPLETED)
 
 
 class FactoryError(Exception):
@@ -42,22 +47,24 @@ class Engine:
     def __init__(self, db_url: str | None = None):
         init_db(db_url)
         self.sessions = DatabaseSessionService(db_url=async_session_db_url(db_url), **pool_kwargs())
-        self.workflow = build_stage_workflow()
+        self.workflow = build_chat_workflow()
 
     def _runner(self) -> Runner:
-        # 呼ぶたびに作り直す：停止中の状態はDBにだけあることを前提にする
+        # 呼ぶたびに作り直す：状態はDBにだけあることを前提にする
         return Runner(app_name=APP, agent=self.workflow, session_service=self.sessions)
 
     # ---------------- products ----------------
     def create_product(self, tenant: str, user: str, name: str, idea: str,
                        scope: str = "mvp", mode: str = "personal") -> Product:
+        # 承認の既定：法人モードは全ステージ必須、個人モードは不要（あとで設定で変えられる）
+        approval = mode == "corporate"
         with session() as s:
             p = Product(tenant_id=tenant, name=name, idea=idea, scope=scope, mode=mode, created_by=user)
             s.add(p)
             s.flush()
             for st in STAGES:
-                status = SKIPPED if (scope == "poc" and st.skip_in_poc) else NOT_STARTED
-                s.add(StageRun(product_id=p.id, stage_id=st.id, status=status))
+                s.add(StageRun(product_id=p.id, stage_id=st.id, status=NOT_STARTED,
+                               enabled=not (scope == "poc" and st.skip_in_poc), approval_required=approval))
             s.commit()
         repo.log(p.id, None, "human", user, "product.create",
                  body={"name": name, "idea": idea, "scope": scope, "mode": mode})
@@ -75,144 +82,169 @@ class Engine:
                                   .order_by(Product.created_at.desc())).scalars())
 
     # ---------------- stages ----------------
-    def _check_startable(self, product: Product, stage_id: str) -> None:
-        if product.status != "active":
-            raise FactoryError(409, "このプロダクトは中止されています")
+    @staticmethod
+    def _stage(product: Product, stage_id: str, writable: bool = True):
         stage = STAGE_BY_ID.get(stage_id)
         if stage is None:
             raise FactoryError(404, "unknown stage")
-        phases = {p["id"]: p for p in repo.phase_states(product.id)}
-        if not phases[stage.phase]["unlocked"]:
-            raise FactoryError(409, f"{stage.phase} はまだ開いていません（前フェーズの審査待ち）")
-        for dep in stage.inputs:
-            if repo.get_run(product.id, dep).status not in (COMPLETED, SKIPPED):
-                raise FactoryError(409, f"上流 {STAGE_BY_ID[dep].no}{STAGE_BY_ID[dep].name} が完了していません")
-        run = repo.get_run(product.id, stage_id)
-        if run.pending:
-            raise FactoryError(409, "このステージは入力待ちです")
-        if run.status not in STARTABLE:
-            raise FactoryError(409, f"状態 {run.status} からは開始できません")
+        if writable and product.status != "active":
+            raise FactoryError(409, "このプロダクトは中止されています")
+        if writable and not repo.get_run(product.id, stage_id).enabled:
+            raise FactoryError(409, "このステージは閉じています（設定で開けます）")
+        return stage
 
-    async def start_stage(self, product: Product, stage_id: str, user: str) -> dict | None:
-        self._check_startable(product, stage_id)
-        with session() as s:
-            r = s.execute(select(StageRun).where(StageRun.product_id == product.id,
-                                                 StageRun.stage_id == stage_id)).scalar_one()
-            r.audit_retries = 0
-            r.audit_findings = None
-            s.commit()
-        sess = await self.sessions.create_session(
-            app_name=APP, user_id=user,
-            state={"pf_product_id": product.id, "pf_stage_id": stage_id})
-        repo.set_pending(product.id, stage_id, None, session_id=sess.id)
-        repo.log(product.id, stage_id, "human", user, "stage.start", body={"session_id": sess.id})
-        msg = types.Content(role="user", parts=[types.Part(text="start")])
-        return await self._run(product.id, stage_id, user, sess.id, msg, None)
-
-    async def respond(self, product: Product, stage_id: str, user: str, body: dict) -> dict | None:
+    async def chat(self, product: Product, stage_id: str, user: str, message: str) -> None:
+        self._stage(product, stage_id)
+        if not message.strip():
+            raise FactoryError(422, "発言が空です")
         run = repo.get_run(product.id, stage_id)
-        pend = run.pending
-        if not pend:
-            raise FactoryError(409, "入力待ちではありません")
-        kind = pend["kind"]
-        if kind == "clarify":
-            value = {"answer": str(body.get("answer", ""))}
-            repo.log(product.id, stage_id, "human", user, "clarify.answer",
-                     body={"questions": pend.get("payload", {}).get("questions"), "answer": value["answer"]})
-        elif kind == "approval":
-            decision = body.get("decision")
-            if decision not in DECISIONS:
-                raise FactoryError(422, f"decision は {DECISIONS} のどれか")
-            comment = str(body.get("comment", ""))
-            if decision in (REQUEST_CHANGES, ACCEPT_AS_IS) and not comment.strip():
-                raise FactoryError(422, "Request Changes と Accept as-is には理由が必須です")
-            value = {"decision": decision, "comment": comment}
-            repo.log(product.id, stage_id, "human", user, "approval",
-                     body=value, version=pend.get("payload", {}).get("version"),
-                     reason=comment or None)
+        session_id = run.session_id
+        if not session_id or await self.sessions.get_session(
+                app_name=APP, user_id=product.id, session_id=session_id) is None:
+            # セッションの持ち主はプロダクト（ビルダーが替わっても同じ対話を続ける）
+            sess = await self.sessions.create_session(
+                app_name=APP, user_id=product.id,
+                state={"pf_product_id": product.id, "pf_stage_id": stage_id})
+            session_id = sess.id
+            repo.set_session(product.id, stage_id, session_id)
+        repo.add_chat(product.id, stage_id, "user", user, message.strip())
+        msg = types.Content(role="user", parts=[types.Part(text=message.strip())])
+        async for _ in self._runner().run_async(user_id=product.id, session_id=session_id, new_message=msg):
+            pass
+
+    def set_field(self, product: Product, stage_id: str, user: str, key: str, value) -> None:
+        self._stage(product, stage_id)
+        try:
+            repo.set_field(product.id, stage_id, key, value, user, "edit")
+        except KeyError:
+            raise FactoryError(404, f"unknown field {key}") from None
+        except (ValueError, TypeError) as e:
+            raise FactoryError(422, f"値の形が合いません：{e}") from None
+
+    def decide_proposal(self, product: Product, stage_id: str, user: str, message_id: int,
+                        proposal_id: str, accept: bool) -> None:
+        self._stage(product, stage_id)
+        try:
+            repo.decide_proposal(product.id, stage_id, message_id, proposal_id, accept, user)
+        except KeyError:
+            raise FactoryError(404, "案が見つかりません") from None
+        except ValueError as e:
+            raise FactoryError(409, str(e)) from None
+
+    def commit(self, product: Product, stage_id: str, user: str, note: str, force: bool) -> dict:
+        stage = self._stage(product, stage_id)
+        run = repo.get_run(product.id, stage_id)
+        if run.status == AWAITING_APPROVAL:
+            raise FactoryError(409, "承認待ちです。承認するか、修正指示を出してから確定し直してください")
+        d = repo.draft(product.id, stage_id)
+        fw = fx.FRAMEWORK_BY_STAGE[stage.id]
+        findings = fx.check(fw, d)
+        if findings and not force:
+            raise FactoryError(422, "必須の項目が空です：" + "、".join(findings))
+        cur = repo.current_artifact(product.id, stage_id)
+        if cur is not None and cur.data == d and run.approved_version == cur.version:
+            raise FactoryError(409, "確定版から変更がありません")
+        return repo.commit(product.id, stage_id, user, note)
+
+    def acknowledge(self, product: Product, stage_id: str, user: str) -> None:
+        """上流が変わっても内容を変えなくてよいと判断したとき、確定版のまま「確定」に戻す。"""
+        self._stage(product, stage_id)
+        if repo.get_run(product.id, stage_id).status != NEEDS_RECHECK:
+            raise FactoryError(409, "要再確認ではありません")
+        repo.set_status(product.id, stage_id, COMPLETED)
+        repo.log(product.id, stage_id, "human", user, "recheck.ack")
+
+    def decide(self, product: Product, stage_id: str, user: str, decision: str, comment: str) -> None:
+        self._stage(product, stage_id)
+        run = repo.get_run(product.id, stage_id)
+        if run.status != AWAITING_APPROVAL:
+            raise FactoryError(409, "承認待ちではありません")
+        if decision not in DECISIONS:
+            raise FactoryError(422, f"decision は {DECISIONS} のどれか")
+        if decision in (REQUEST_CHANGES, ACCEPT_AS_IS) and not comment.strip():
+            raise FactoryError(422, "Request Changes と Accept as-is には理由が必須です")
+        repo.log(product.id, stage_id, "human", user, "approval",
+                 body={"decision": decision, "comment": comment}, version=run.current_version,
+                 reason=comment or None)
+        if decision in (APPROVE, ACCEPT_AS_IS):
+            repo.complete_stage(product.id, stage_id, decision)
         else:
-            raise FactoryError(500, f"unknown pending kind {kind}")
-        msg = types.Content(role="user", parts=[types.Part(function_response=types.FunctionResponse(
-            id=pend["id"], name=pend["name"], response={"result": value}))])
-        repo.set_pending(product.id, stage_id, None)
-        return await self._run(product.id, stage_id, user, run.session_id, msg, pend["invocation_id"])
+            repo.request_changes(product.id, stage_id, user, comment.strip())
 
-    async def _run(self, product_id, stage_id, user, session_id, msg, invocation_id) -> dict | None:
-        pending = None
-        async for ev in self._runner().run_async(user_id=user, session_id=session_id,
-                                                  new_message=msg, invocation_id=invocation_id):
-            for fc in ev.get_function_calls() or []:
-                if ev.long_running_tool_ids and fc.id in ev.long_running_tool_ids:
-                    args = fc.args or {}
-                    payload = args.get("payload") or {}
-                    pending = {"id": fc.id, "name": fc.name, "invocation_id": ev.invocation_id,
-                               "kind": payload.get("kind"), "message": args.get("message"),
-                               "payload": payload}
-        repo.set_pending(product_id, stage_id, pending)
-        if pending:
-            repo.log(product_id, stage_id, "agent", f"stage-agent:{stage_id}",
-                     f"request.{pending['kind']}", body={"message": pending["message"],
-                                                        "payload": pending["payload"]})
-        return pending
+    def update_settings(self, product: Product, user: str, stages: dict[str, dict]) -> None:
+        for sid, cfg in stages.items():
+            if sid not in STAGE_BY_ID:
+                raise FactoryError(404, f"unknown stage {sid}")
+            repo.update_settings(product.id, sid, user, cfg.get("enabled"), cfg.get("approval_required"))
 
     # ---------------- phase review (G1〜G4) ----------------
     def review_phase(self, product: Product, phase_id: str, user: str, decision: str,
                      reason: str, back_stage: str | None = None) -> None:
+        """フェーズの区切りでの振り返り。進行のロックではなく、判断の記録として残す。"""
         ph = PHASE_BY_ID.get(phase_id)
         if ph is None or ph.gate is None:
             raise FactoryError(404, "審査のないフェーズです")
-        state = {p["id"]: p for p in repo.phase_states(product.id)}[phase_id]
-        if not state["unlocked"] or not state["complete"]:
-            raise FactoryError(409, "フェーズ内のステージがすべて完了していません")
         if decision not in ("proceed", "back", "stop"):
             raise FactoryError(422, "decision は proceed / back / stop")
         if decision != "proceed" and not reason.strip():
             raise FactoryError(422, "戻る・やめるには理由が必須です")
+        target = None
+        if decision == "back":
+            target = back_stage or ph.stages[0]
+            if target not in ph.stages:
+                raise FactoryError(422, "戻り先はこのフェーズのステージ")
         with session() as s:
             s.add(PhaseReview(product_id=product.id, phase_id=phase_id, decision=decision,
                               reason=reason, actor=user))
-            if decision == "back":
-                target = back_stage or ph.stages[0]
-                if target not in ph.stages:
-                    raise FactoryError(422, "戻り先はこのフェーズのステージ")
+            if target:
                 r = s.execute(select(StageRun).where(StageRun.product_id == product.id,
                                                      StageRun.stage_id == target)).scalar_one()
                 r.status = REVISING
+                r.pending = None
             if decision == "stop":
                 s.get(Product, product.id).status = "stopped"
             s.commit()
         repo.log(product.id, None, "human", user, f"phase.review.{ph.gate}",
-                 body={"phase": phase_id, "decision": decision, "back_stage": back_stage},
+                 body={"phase": phase_id, "decision": decision, "back_stage": target},
                  reason=reason or None)
+        if target:
+            repo.add_chat(product.id, target, "feedback", user, f"{ph.gate} 審査で差し戻し：{reason}")
 
     # ---------------- views ----------------
     def overview(self, product: Product) -> dict:
-        with session() as s:
-            runs = {r.stage_id: r for r in s.execute(
-                select(StageRun).where(StageRun.product_id == product.id)).scalars()}
+        rs = repo.runs(product.id)
         stages = []
         for st in STAGES:
-            r = runs[st.id]
+            r = rs[st.id]
+            fw = fx.FRAMEWORK_BY_STAGE[st.id]
             stages.append({"id": st.id, "no": st.no, "name": st.name, "phase": st.phase,
-                           "status": r.status, "pending_kind": (r.pending or {}).get("kind"),
-                           "current_version": r.current_version,
-                           "approved_version": r.approved_version})
-        return {"product": product_dict(product), "phases": repo.phase_states(product.id),
-                "stages": stages}
+                           "framework": fw.title, "status": r.status, "enabled": r.enabled,
+                           "approval_required": r.approval_required,
+                           "pending_kind": (r.pending or {}).get("kind"),
+                           "current_version": r.current_version, "approved_version": r.approved_version})
+        return {"product": product_dict(product), "phases": repo.phase_states(product.id), "stages": stages}
 
     def stage_detail(self, product: Product, stage_id: str) -> dict:
-        st = STAGE_BY_ID.get(stage_id)
-        if st is None:
-            raise FactoryError(404, "unknown stage")
+        st = self._stage(product, stage_id, writable=False)
+        fw = fx.FRAMEWORK_BY_STAGE[stage_id]
         r = repo.get_run(product.id, stage_id)
+        d = repo.draft(product.id, stage_id)
         art = repo.current_artifact(product.id, stage_id)
-        return {"id": st.id, "no": st.no, "name": st.name, "phase": st.phase,
-                "artifact_name": st.artifact, "required_sections": list(st.sections),
-                "inputs": list(st.inputs), "status": r.status, "pending": r.pending,
-                "answers": r.answers, "audit_findings": r.audit_findings,
-                "current_version": r.current_version, "approved_version": r.approved_version,
-                "artifact": None if art is None else {"version": art.version, "content": art.content,
-                                                      "sha256": art.sha256, "approved": art.approved}}
+        rs = repo.runs(product.id)
+        return {
+            "id": st.id, "no": st.no, "name": st.name, "phase": st.phase,
+            "framework": {"view": fw.view, "title": fw.title, "summary": fw.summary,
+                          "fields": fx.spec(fw), "prompts": list(fw.prompts)},
+            "status": r.status, "enabled": r.enabled, "approval_required": r.approval_required,
+            "pending": r.pending, "audit_findings": r.audit_findings, "missing": fx.check(fw, d),
+            "current_version": r.current_version, "approved_version": r.approved_version,
+            "dirty": art is None or art.data != d,
+            "draft": d, "chat": repo.chat(product.id, stage_id), "versions": repo.versions(product.id, stage_id),
+            "markdown": fx.to_markdown(st, fw, d),
+            "inputs": [{"id": i, "no": STAGE_BY_ID[i].no, "name": STAGE_BY_ID[i].name,
+                        "status": rs[i].status, "enabled": rs[i].enabled} for i in st.inputs],
+            "downstream": [{"id": s.id, "no": s.no, "name": s.name} for s in STAGES if stage_id in s.inputs],
+        }
 
 
 def product_dict(p: Product) -> dict:

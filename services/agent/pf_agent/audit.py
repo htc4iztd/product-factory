@@ -1,9 +1,10 @@
-"""事前監査（設計書 8.1）。決定的に判定できるものだけをここで行う。"""
+"""Markdown の見出しごとの本文を取り出す（文章だけで作っていた頃の版を下書きに移すときに使う）。
+
+確定前の検査は frameworks.check が項目単位で行う。
+"""
 from __future__ import annotations
 
 import re
-
-from .stages import Stage
 
 
 def sections(markdown: str) -> dict[str, str]:
@@ -22,17 +23,3 @@ def sections(markdown: str) -> dict[str, str]:
     if cur is not None:
         out[cur] = "\n".join(buf).strip()
     return out
-
-
-def check(stage: Stage, markdown: str) -> list[str]:
-    """不合格の理由を返す。空なら合格。"""
-    findings: list[str] = []
-    if not markdown.strip():
-        return ["成果物が空です"]
-    secs = sections(markdown)
-    for h in stage.sections:
-        if h not in secs:
-            findings.append(f"必須の見出し「{h}」がありません")
-        elif not secs[h]:
-            findings.append(f"見出し「{h}」の本文が空です")
-    return findings

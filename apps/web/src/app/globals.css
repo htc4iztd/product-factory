@@ -2,14 +2,32 @@
 @tailwind components;
 @tailwind utilities;
 
-body { @apply bg-white text-ink; font-family: "Meiryo", "Hiragino Sans", "Noto Sans JP", sans-serif; }
-.btn { @apply inline-flex items-center rounded-md px-3 py-1.5 text-sm font-semibold border; }
-.btn-primary { @apply btn bg-teal text-white border-teal hover:opacity-90; }
-.btn-accent { @apply btn bg-amber text-white border-amber hover:opacity-90; }
-.btn-ghost { @apply btn bg-white text-ink border-gray-300 hover:bg-pale; }
-.input { @apply w-full rounded-md border border-gray-300 px-3 py-2 text-sm; }
-.card { @apply rounded-lg border border-teal-light bg-white p-4; }
-.prose-md h1 { @apply text-lg font-bold mt-2 mb-2; }
-.prose-md h2 { @apply text-base font-bold mt-4 mb-1 text-deep; }
-.prose-md ul { @apply list-disc pl-5; }
-.prose-md p { @apply my-1; }
+@layer base {
+  html { -webkit-font-smoothing: antialiased; }
+  body { @apply bg-zinc-50 text-zinc-900 text-[14px] leading-relaxed; font-feature-settings: "palt"; }
+  ::selection { @apply bg-brand-100; }
+}
+
+@layer components {
+  .btn { @apply inline-flex items-center justify-center gap-1.5 rounded-lg px-3 h-8 text-[13px] font-medium transition-colors disabled:opacity-50 disabled:pointer-events-none whitespace-nowrap; }
+  .btn-primary { @apply btn bg-zinc-900 text-white hover:bg-zinc-700; }
+  .btn-brand { @apply btn bg-brand-600 text-white hover:bg-brand-700; }
+  .btn-secondary { @apply btn border border-zinc-200 bg-white text-zinc-800 shadow-sm hover:bg-zinc-50; }
+  .btn-ghost { @apply btn text-zinc-600 hover:bg-zinc-100 hover:text-zinc-900; }
+  .btn-danger { @apply btn border border-rose-200 bg-white text-rose-700 hover:bg-rose-50; }
+  .btn-sm { @apply h-7 px-2 text-xs rounded-md; }
+  .input { @apply w-full rounded-lg border border-zinc-200 bg-white px-3 py-2 text-[13px] shadow-sm outline-none transition placeholder:text-zinc-400 focus:border-brand-500 focus:ring-4 focus:ring-brand-100; }
+  .label { @apply mb-1 block text-xs font-medium text-zinc-600; }
+  .card { @apply rounded-xl border border-zinc-200 bg-white shadow-card; }
+  .chip { @apply inline-flex items-center gap-1 rounded-md border border-zinc-200 bg-white px-1.5 py-0.5 text-[11px] font-medium text-zinc-600; }
+  .kbd { @apply rounded border border-zinc-200 bg-zinc-50 px-1 font-mono text-[10px] text-zinc-500; }
+  .section-title { @apply text-[11px] font-semibold uppercase tracking-wider text-zinc-400; }
+  .prose-md { @apply text-[13px] leading-relaxed text-zinc-700; }
+  .prose-md h1 { @apply mb-3 mt-1 text-base font-semibold text-zinc-900; }
+  .prose-md h2 { @apply mb-1.5 mt-5 text-[13px] font-semibold text-zinc-900; }
+  .prose-md ul { @apply list-disc space-y-0.5 pl-5; }
+  .prose-md p { @apply my-1; }
+  .prose-md table { @apply my-2 w-full border-collapse text-xs; }
+  .prose-md th { @apply border border-zinc-200 bg-zinc-50 px-2 py-1 text-left font-medium; }
+  .prose-md td { @apply border border-zinc-200 px-2 py-1; }
+}

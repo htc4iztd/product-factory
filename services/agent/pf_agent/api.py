@@ -38,10 +38,38 @@ class CreateProduct(BaseModel):
     mode: str = Field(default="personal", pattern="^(personal|corporate)$")
 
 
-class Respond(BaseModel):
-    answer: str | None = None
-    decision: str | None = None
-    comment: str | None = None
+class Chat(BaseModel):
+    message: str = Field(min_length=1, max_length=8000)
+
+
+class FieldValue(BaseModel):
+    field: str
+    value: str | list | None = None
+
+
+class ProposalDecision(BaseModel):
+    message_id: int
+    proposal_id: str
+    accept: bool
+
+
+class Commit(BaseModel):
+    note: str = ""
+    force: bool = False
+
+
+class Decide(BaseModel):
+    decision: str
+    comment: str = ""
+
+
+class StageSetting(BaseModel):
+    enabled: bool | None = None
+    approval_required: bool | None = None
+
+
+class Settings(BaseModel):
+    stages: dict[str, StageSetting]
 
 
 class Review(BaseModel):
@@ -85,20 +113,57 @@ def stage_detail(product_id: str, stage_id: str, c: Caller = Depends(caller)):
     return engine.stage_detail(p, stage_id)
 
 
-@app.post("/products/{product_id}/stages/{stage_id}/start")
-async def start(product_id: str, stage_id: str, c: Caller = Depends(caller)):
-    p = _product(c, product_id, STAGE_GROUP.get(stage_id, "business"), "create")
-    pending = await engine.start_stage(p, stage_id, c.user)
-    return {"pending": pending, "stage": engine.stage_detail(p, stage_id)}
+def _stage_product(c: Caller, product_id: str, stage_id: str, op: str):
+    return _product(c, product_id, STAGE_GROUP.get(stage_id, "business"), op)
 
 
-@app.post("/products/{product_id}/stages/{stage_id}/respond")
-async def respond(product_id: str, stage_id: str, body: Respond, c: Caller = Depends(caller)):
-    group = STAGE_GROUP.get(stage_id, "business")
-    op = "approve" if body.decision is not None else "create"
-    p = _product(c, product_id, group, op)
-    pending = await engine.respond(p, stage_id, c.user, body.model_dump(exclude_none=True))
-    return {"pending": pending, "stage": engine.stage_detail(p, stage_id)}
+@app.post("/products/{product_id}/stages/{stage_id}/chat")
+async def chat(product_id: str, stage_id: str, body: Chat, c: Caller = Depends(caller)):
+    p = _stage_product(c, product_id, stage_id, "create")
+    await engine.chat(p, stage_id, c.user, body.message)
+    return engine.stage_detail(p, stage_id)
+
+
+@app.put("/products/{product_id}/stages/{stage_id}/draft")
+def set_field(product_id: str, stage_id: str, body: FieldValue, c: Caller = Depends(caller)):
+    p = _stage_product(c, product_id, stage_id, "create")
+    engine.set_field(p, stage_id, c.user, body.field, body.value)
+    return engine.stage_detail(p, stage_id)
+
+
+@app.post("/products/{product_id}/stages/{stage_id}/proposals")
+def decide_proposal(product_id: str, stage_id: str, body: ProposalDecision, c: Caller = Depends(caller)):
+    p = _stage_product(c, product_id, stage_id, "create")
+    engine.decide_proposal(p, stage_id, c.user, body.message_id, body.proposal_id, body.accept)
+    return engine.stage_detail(p, stage_id)
+
+
+@app.post("/products/{product_id}/stages/{stage_id}/commit")
+def commit(product_id: str, stage_id: str, body: Commit, c: Caller = Depends(caller)):
+    p = _stage_product(c, product_id, stage_id, "create")
+    engine.commit(p, stage_id, c.user, body.note, body.force)
+    return engine.stage_detail(p, stage_id)
+
+
+@app.post("/products/{product_id}/stages/{stage_id}/ack")
+def acknowledge(product_id: str, stage_id: str, c: Caller = Depends(caller)):
+    p = _stage_product(c, product_id, stage_id, "create")
+    engine.acknowledge(p, stage_id, c.user)
+    return engine.stage_detail(p, stage_id)
+
+
+@app.post("/products/{product_id}/stages/{stage_id}/decide")
+def decide(product_id: str, stage_id: str, body: Decide, c: Caller = Depends(caller)):
+    p = _stage_product(c, product_id, stage_id, "approve")
+    engine.decide(p, stage_id, c.user, body.decision, body.comment)
+    return engine.stage_detail(p, stage_id)
+
+
+@app.put("/products/{product_id}/settings")
+def settings(product_id: str, body: Settings, c: Caller = Depends(caller)):
+    p = _product(c, product_id, "business", "assign")
+    engine.update_settings(p, c.user, {k: v.model_dump() for k, v in body.stages.items()})
+    return engine.overview(engine.product(product_id))
 
 
 @app.post("/products/{product_id}/phases/{phase_id}/review")

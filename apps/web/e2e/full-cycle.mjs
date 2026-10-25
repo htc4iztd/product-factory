@@ -1,4 +1,4 @@
-// R0 完了条件の確認：画面から仮の入力で P0〜P5 を一周する。
+// 画面からひと通り確かめる：対話で下書き → 採用 → 確定、承認フロー、下流の要再確認、ステージの開閉、振り返り。
 // 使い方: BASE=http://localhost:3000 SHOTS=./shots node e2e/full-cycle.mjs
 import { chromium } from "playwright";
 import fs from "node:fs";
@@ -9,58 +9,110 @@ fs.mkdirSync(SHOTS, { recursive: true });
 const email = `e2e-${Date.now()}@example.com`;
 
 const browser = await chromium.launch();
-const page = await browser.newPage({ viewport: { width: 1400, height: 900 } });
-const shot = (n) => page.screenshot({ path: `${SHOTS}/${n}.png`, fullPage: true });
+const page = await browser.newPage({ viewport: { width: 1440, height: 960 } });
+page.setDefaultTimeout(20000);
+const shot = (n, full = false) => page.screenshot({ path: `${SHOTS}/${n}.png`, fullPage: full });
+const btn = (name, exact = false) => page.getByRole("button", { name, exact });
 
 await page.goto(`${BASE}/register`);
-await page.fill('input[name=name]', "E2E");
-await page.fill('input[name=email]', email);
-await page.fill('input[name=password]', "password123");
-await page.click("button:has-text('登録して始める')");
+await shot("00-register");
+await page.fill("input[name=name]", "E2E");
+await page.fill("input[name=email]", email);
+await page.fill("input[name=password]", "password123");
+await btn("登録して始める").click();
 await page.waitForURL(`${BASE}/`);
 
-await page.fill('input[name=name]', "家計簿アプリ");
-await page.fill('textarea[name=idea]', "共働き世帯の家計を5分で締められるアプリ");
-await page.click("button:has-text('作成')");
+await page.fill("input[name=name]", "家計簿アプリ");
+await page.fill("textarea[name=idea]", "共働き世帯の家計を5分で締められるアプリ");
+await btn("作成", true).click();
 await page.waitForURL(/\/p\/[0-9a-f]+$/);
 const pid = page.url().split("/p/")[1];
-await shot("01-overview");
+await shot("01-overview", true);
 
-const phases = { P1: ["s01", "s02", "s03"], P2: ["s04", "s05"], P3: ["s06", "s07", "s08", "s09", "s10", "s11"], P4: ["s12", "s13"], P5: ["s14"] };
-let first = true;
-for (const [ph, stages] of Object.entries(phases)) {
-  for (const sid of stages) {
-    await page.goto(`${BASE}/p/${pid}/s/${sid}`);
-    await page.click("button:has-text('このステージを始める')");
-    await page.waitForSelector("textarea[name=answer]");
-    if (first) await shot("02-clarify");
-    await page.fill("textarea[name=answer]", `仮の回答（${sid}）`);
-    await page.click("button:has-text('回答して成果物を作る')");
-    await page.waitForSelector("button[value=Approve]");
-    if (first) await shot("03-approval");
-    if (first) {
-      // 理由なしの Request Changes は弾かれる
-      await page.click("button[value='Request Changes']");
-      await page.waitForSelector("text=理由が必須");
-      await page.fill("textarea[name=comment]", "対象顧客をもっと具体的に");
-      await page.click("button[value='Request Changes']");
-      await page.waitForSelector("text=承認（v2）");
-    }
-    await page.click("button[value=Approve]");
-    await page.waitForSelector("text=やり直す");
-    if (first) { await shot("04-completed"); first = false; }
-  }
-  if (ph !== "P5") {
-    await page.goto(`${BASE}/p/${pid}/g/${ph}`);
-    await page.click("button[value=proceed]");
-    await page.waitForSelector("text=直近の審査：進む");
-    if (ph === "P1") await shot("05-gate");
-  }
+async function draftAndCommit(sid, shotName) {
+  await page.goto(`${BASE}/p/${pid}/s/${sid}`);
+  await btn("下書きを作って").click();
+  const all = page.getByRole("button", { name: /件をすべて採用/ });
+  await all.waitFor();
+  if (shotName) await shot(`${shotName}-proposals`);
+  await all.click();
+  await all.waitFor({ state: "detached" });
+  if (shotName) await shot(`${shotName}-canvas`);
+  await btn(/^確定/).first().click();
+  await btn("確定", true).click();
+  await page.getByText(/確定版 v\d+/).first().waitFor();
 }
+
+await draftAndCommit("s01", "02-lean");
+// 手で直す：課題を編集して確定し直す
+await page.getByRole("button", { name: "課題を編集" }).click();
+await page.locator("textarea").first().fill("家計の締めに毎月2時間かかる\n夫婦で支出の状況が共有できない");
+await btn("保存", true).click();
+await page.getByText("家計の締めに毎月2時間かかる").waitFor();
+await page.getByText("未確定の変更あり").waitFor();
+await btn("確定する").click();
+await btn("確定", true).click();
+await page.getByText("確定版 v2").waitFor();
+
+await draftAndCommit("s02", "03-market");
+await draftAndCommit("s03", "04-competitors");
+await draftAndCommit("s04", "05-vpc");
+await draftAndCommit("s05", "06-plan");
+await page.goto(`${BASE}/p/${pid}/s/s05?tab=doc`);
+await shot("07-doc", true);
+
+// ④を承認ありにして、修正指示 → 直して再提出 → 承認
+await page.goto(`${BASE}/p/${pid}/settings`);
+await page.getByRole("switch", { name: "プロダクト戦略の承認" }).click();
+await page.waitForSelector('[aria-label="プロダクト戦略の承認"][aria-checked=true]');
+await shot("08-settings", true);
+await page.goto(`${BASE}/p/${pid}/s/s04`);
+await page.getByRole("button", { name: "北極星指標を編集" }).click();
+await page.locator("textarea").first().fill("週に1回以上、締めを完了した世帯数");
+await btn("保存", true).click();
+await page.getByText("週に1回以上、締めを完了した世帯数").first().waitFor();
+await btn("確定して承認に回す").click();
+await btn("確定", true).click();
+await page.getByText(/が承認待ちです/).waitFor();
+await btn("Request Changes").click();
+await page.getByText("理由が必須").waitFor();
+await page.getByPlaceholder(/理由・修正指示/).fill("撤退条件を数値で");
+await btn("Request Changes").click();
+await page.getByText("承認者の修正指示：撤退条件を数値で").waitFor();
+await page.getByRole("button", { name: "撤退条件を編集" }).click();
+await page.locator("textarea").first().fill("6か月で週次の締め完了世帯が100未満なら撤退");
+await btn("保存", true).click();
+await page.getByText("6か月で週次の締め完了世帯が100未満なら撤退").first().waitFor();
+await btn("確定して承認に回す").click();
+await btn("確定", true).click();
+await page.getByText(/が承認待ちです/).waitFor();
+await shot("09-approval");
+await btn("Approve").click();
+await page.getByText(/が承認待ちです/).waitFor({ state: "detached" });
+
+// ④の確定版が変わったので、⑤が要再確認になる
+await page.goto(`${BASE}/p/${pid}/s/s05`);
+await page.getByText(/確定版が変わりました/).waitFor();
+await shot("10-recheck");
+
+// ⑦を閉じる
+await page.goto(`${BASE}/p/${pid}/settings`);
+await page.getByRole("switch", { name: "業務要求定義を使う" }).click();
+await page.waitForSelector('[aria-label="業務要求定義を使う"][aria-checked=false]');
+
+// 文書型のステージ（⑥）も同じ流れで確定できる
+await draftAndCommit("s06", "11-doc-stage");
+
+await page.goto(`${BASE}/p/${pid}/g/P1`);
+await btn("進む", true).click();
+await page.getByText("直近の記録").waitFor();
+await shot("12-gate", true);
+
 await page.goto(`${BASE}/p/${pid}`);
-await shot("06-done");
-const chips = await page.locator("main >> text=完了").count();
+await shot("13-overview-after", true);
+const recheck = await page.getByText("上流の確定版が変わりました").count();
+const confirmed = await page.locator("main").getByText("確定", { exact: true }).count();
 await page.goto(`${BASE}/p/${pid}/audit`);
-await shot("07-audit");
-console.log(JSON.stringify({ pid, completedChips: chips }));
+await shot("14-audit");
+console.log(JSON.stringify({ pid, confirmed, recheck }));
 await browser.close();

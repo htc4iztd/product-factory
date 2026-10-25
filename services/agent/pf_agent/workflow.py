@@ -1,10 +1,10 @@
-"""ステージの共通の型（設計書 5.2）を ADK 2.x の Workflow で組む。
+"""ステージの対話1往復を ADK 2.x の Workflow で組む。
 
-計画 → 確認質問（人）→ 成果物 → 事前監査 →（不合格なら作り直し）→ 承認（人）
-→ Approve / Accept as-is なら完了、Request Changes なら作り直し。
+ビルダーの発言 → AIの発言と書き換え案（converse）→ 案を項目の型で検査して保存（screen）
 
-人の入力は RequestInput で止める。停止状態は ADK のセッション（工場DBと同じDB）に
-残り、Runner を作り直しても FunctionResponse で再開できる（R0で検証済み）。
+対話の履歴は工場DB（chat_messages）が正本。ADK のセッションはステージごとに1つ持ち、
+各往復の実行記録（イベント）を工場DBと同じDBに残す。案を下書きに反映するのは人の
+「採用」操作だけで、AIは下書きを直接書き換えない。
 """
 from __future__ import annotations
 
@@ -12,99 +12,53 @@ import uuid
 from typing import Any
 
 from google.adk.agents.context import Context
-from google.adk.events import RequestInput
-from google.adk.events.event import Event
 from google.adk.workflow import START, Workflow
 
-from . import audit as audit_mod
-from . import repo
-from .stages import ACCEPT_AS_IS, APPROVE, AWAITING_APPROVAL, IN_PROGRESS, REQUEST_CHANGES, STAGE_BY_ID
-
-MAX_AUDIT_RETRIES = 3   # 根拠のない暫定値（未決事項）。R1の実測で決める
+from . import frameworks as fx
+from . import llm, repo
+from .stages import STAGE_BY_ID
 
 
 def _ids(ctx: Context) -> tuple[str, str]:
     return ctx.state["pf_product_id"], ctx.state["pf_stage_id"]
 
 
-def plan(ctx: Context, node_input: Any):
+def converse(ctx: Context, node_input: Any):
     product_id, stage_id = _ids(ctx)
     stage = STAGE_BY_ID[stage_id]
-    repo.set_status(product_id, stage_id, IN_PROGRESS)
-    questions = list(stage.clarify)
-    repo.log(product_id, stage_id, "agent", f"stage-agent:{stage_id}", "plan",
-             body={"questions": questions})
-    return {"questions": questions}
+    fw = fx.FRAMEWORK_BY_STAGE[stage_id]
+    c = repo.chat_context(product_id, stage_id)
+    try:
+        turn = llm.converse(stage, fw, c["idea"], c["draft"], c["upstream"], c["history"], c["message"])
+    except Exception as e:  # LLM の失敗は対話の中で伝え、下書きには触れない
+        return {"reply": f"AIの呼び出しに失敗しました（{type(e).__name__}）。もう一度送ってください。",
+                "proposals": []}
+    return {"reply": turn.reply, "proposals": [p.model_dump() for p in turn.proposals]}
 
 
-async def clarify(ctx: Context, node_input: Any):
-    yield RequestInput(
-        interrupt_id=f"clarify-{uuid.uuid4().hex[:8]}",
-        message="確認質問に答えてください",
-        payload={"kind": "clarify", "questions": (node_input or {}).get("questions", [])},
-    )
-
-
-def produce(ctx: Context, node_input: Any):
+def screen(ctx: Context, node_input: Any):
     product_id, stage_id = _ids(ctx)
-    feedback: list[str] = []
-    if isinstance(node_input, dict) and "findings" in node_input:
-        feedback = list(node_input["findings"])
-    elif isinstance(node_input, dict) and node_input.get("decision") == REQUEST_CHANGES:
-        feedback = [f"ビルダーの修正指示：{node_input.get('comment') or '（コメントなし）'}"]
-    else:
-        answer = node_input.get("answer") if isinstance(node_input, dict) else node_input
-        repo.save_answers(product_id, stage_id, "" if answer is None else str(answer))
-    version = repo.produce_artifact(product_id, stage_id, feedback)
-    return {"version": version}
+    fw = fx.FRAMEWORK_BY_STAGE[stage_id]
+    accepted, dropped = [], []
+    for p in (node_input or {}).get("proposals", []):
+        f = fw.get(p.get("field", ""))
+        if f is None:
+            dropped.append(f"不明な項目 {p.get('field')}")
+            continue
+        try:
+            value = fx.coerce(f, p.get("value"))
+        except (ValueError, TypeError) as e:
+            dropped.append(f"{f.label}：値の形が合わない（{e}）")
+            continue
+        accepted.append({"id": uuid.uuid4().hex[:10], "field": f.key, "value": value,
+                         "reason": p.get("reason", ""), "status": "pending"})
+    reply = (node_input or {}).get("reply", "")
+    if dropped:
+        reply += "\n\n（形式が合わず外した案：" + "、".join(dropped) + "）"
+    msg_id = repo.add_chat(product_id, stage_id, "assistant", f"stage-agent:{stage_id} ({llm.model_name()})",
+                           reply, accepted)
+    return {"message_id": msg_id, "proposals": len(accepted), "dropped": dropped}
 
 
-def audit(ctx: Context, node_input: Any):
-    product_id, stage_id = _ids(ctx)
-    stage = STAGE_BY_ID[stage_id]
-    art = repo.current_artifact(product_id, stage_id)
-    findings = audit_mod.check(stage, art.content if art else "")
-    retries = repo.record_audit(product_id, stage_id, findings, art.version if art else None)
-    if not findings:
-        return Event(output={"version": art.version, "findings": []}, route="pass")
-    if retries > MAX_AUDIT_RETRIES:
-        # 上限を超えたら、指摘を付けたまま人に渡す
-        return Event(output={"version": art.version, "findings": findings, "escalated": True}, route="pass")
-    return Event(output={"findings": findings}, route="fail")
-
-
-async def approve(ctx: Context, node_input: Any):
-    product_id, stage_id = _ids(ctx)
-    repo.set_status(product_id, stage_id, AWAITING_APPROVAL)
-    yield RequestInput(
-        interrupt_id=f"approve-{uuid.uuid4().hex[:8]}",
-        message="成果物を承認してください",
-        payload={"kind": "approval", **(node_input or {})},
-    )
-
-
-def decide(ctx: Context, node_input: Any):
-    data = node_input if isinstance(node_input, dict) else {"decision": node_input}
-    decision = data.get("decision")
-    if decision in (APPROVE, ACCEPT_AS_IS):
-        return Event(output=data, route="done")
-    return Event(output={"decision": REQUEST_CHANGES, "comment": data.get("comment", "")},
-                 route="changes")
-
-
-def done(ctx: Context, node_input: Any):
-    product_id, stage_id = _ids(ctx)
-    repo.complete_stage(product_id, stage_id, node_input.get("decision"))
-    return {"status": "completed"}
-
-
-def build_stage_workflow() -> Workflow:
-    return Workflow(
-        name="stage",
-        edges=[
-            (START, plan, clarify, produce, audit),
-            (audit, {"pass": approve, "fail": produce}),
-            (approve, decide),
-            (decide, {"done": done, "changes": produce}),
-        ],
-    )
+def build_chat_workflow() -> Workflow:
+    return Workflow(name="stage_chat", edges=[(START, converse, screen)])

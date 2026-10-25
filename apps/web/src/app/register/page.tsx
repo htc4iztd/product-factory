@@ -2,6 +2,7 @@ import bcrypt from "bcryptjs";
 import { redirect } from "next/navigation";
 import { findUserByEmail, newId, tx } from "@/lib/db";
 import { signIn } from "@/lib/auth";
+import { Logo } from "@/components/Logo";
 
 // 登録した人が自分のテナントの OWNER になる（個人モード）。
 export default async function RegisterPage({ searchParams }: { searchParams: Promise<{ error?: string }> }) {
@@ -30,15 +31,19 @@ export default async function RegisterPage({ searchParams }: { searchParams: Pro
     closed: "新規登録は締め切っています",
   };
   return (
-    <main className="mx-auto mt-24 max-w-sm">
-      <h1 className="mb-6 text-2xl font-bold text-deep">アカウント登録</h1>
-      <form action={register} className="card space-y-3">
+    <main className="flex min-h-screen items-center justify-center bg-[radial-gradient(ellipse_at_top,_#eef0fe,_#fafafa_60%)] px-4">
+      <div className="w-full max-w-sm">
+      <div className="mb-8 flex justify-center"><Logo /></div>
+        <h1 className="mb-1 text-center text-lg font-semibold">アカウント登録</h1>
+        <p className="mb-6 text-center text-[13px] text-zinc-500">登録した人が自分のワークスペースの OWNER になります。</p>
+      <form action={register} className="card space-y-3 p-6">
         <input name="name" placeholder="名前" className="input" />
         <input name="email" type="email" required placeholder="メールアドレス" className="input" />
         <input name="password" type="password" required placeholder="パスワード（8文字以上）" className="input" />
-        {sp.error && <p className="text-sm text-amber">{msg[sp.error] ?? "登録できませんでした"}</p>}
-        <button className="btn-primary w-full justify-center">登録して始める</button>
+        {sp.error && <p className="text-xs text-rose-600">{msg[sp.error] ?? "登録できませんでした"}</p>}
+        <button className="btn-primary h-9 w-full">登録して始める</button>
       </form>
+      </div>
     </main>
   );
 }

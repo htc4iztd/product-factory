@@ -1,51 +1,102 @@
 import Link from "next/link";
+import { AlertTriangle, CheckCircle2, CircleDashed, Clock, Lock } from "lucide-react";
 import { agent, type Overview } from "@/lib/agent";
-import { StatusChip } from "@/components/StatusChip";
+import { GROUPS } from "@/lib/groups";
+import { PageHeader } from "@/components/PageHeader";
+import { StatusBadge } from "@/components/StatusBadge";
 
 export default async function ProductPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
   const ov = await agent<Overview>(`/products/${id}`);
-  const stages = Object.fromEntries(ov.stages.map((s) => [s.id, s]));
-  const waiting = ov.stages.filter((s) => s.pending_kind);
+  const active = ov.stages.filter((s) => s.enabled);
+  const done = active.filter((s) => s.status === "completed").length;
+  const waiting = active.filter((s) => s.pending_kind === "approval");
+  const recheck = active.filter((s) => s.status === "needs_recheck");
+  const phases = Object.fromEntries(ov.phases.map((p) => [p.id, p]));
+  const pct = active.length ? Math.round((done / active.length) * 100) : 0;
+  const stats = [
+    { label: "確定", value: `${done} / ${active.length}`, icon: CheckCircle2, tone: "text-emerald-600" },
+    { label: "承認待ち", value: waiting.length, icon: Clock, tone: "text-amber-600" },
+    { label: "要再確認", value: recheck.length, icon: AlertTriangle, tone: "text-rose-600" },
+    { label: "閉じている", value: ov.stages.length - active.length, icon: CircleDashed, tone: "text-zinc-400" },
+  ];
+  const todo = [...waiting.map((s) => ({ s, why: "承認待ち" })), ...recheck.map((s) => ({ s, why: "上流の確定版が変わりました" }))];
+
   return (
-    <div className="space-y-6">
-      <div>
-        <h1 className="text-2xl font-bold text-deep">{ov.product.name}</h1>
-        <p className="text-muted">{ov.product.idea}</p>
-        {ov.product.status === "stopped" && <p className="mt-2 font-bold text-amber">このプロダクトは中止されました</p>}
-      </div>
-      <section className="card">
-        <h2 className="mb-2 font-bold text-deep">自分の入力待ち</h2>
-        {waiting.length === 0 ? <p className="text-sm text-muted">ありません</p> : (
-          <ul className="space-y-1 text-sm">
-            {waiting.map((s) => (
-              <li key={s.id}>
-                <Link href={`/p/${id}/s/${s.id}`} className="text-teal underline">
-                  {s.no} {s.name}：{s.pending_kind === "clarify" ? "確認質問" : "承認"}
-                </Link>
-              </li>
-            ))}
-          </ul>
+    <>
+      <PageHeader
+        crumbs={<span>概要</span>}
+        title={ov.product.name}
+        sub={ov.product.idea || "意図は未記入"}
+        actions={<Link href={`/p/${id}/settings`} className="btn-secondary">ステージの設定</Link>}
+      >
+        {ov.product.status === "stopped" && (
+          <div className="mt-4 rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-[13px] text-rose-700">このプロダクトは中止されました。</div>
         )}
-      </section>
-      <section className="grid gap-4 md:grid-cols-2">
-        {ov.phases.map((ph) => (
-          <div key={ph.id} className={`card ${ph.unlocked ? "" : "opacity-50"}`}>
-            <div className="mb-2 flex items-center justify-between">
-              <h3 className="font-bold text-deep">{ph.id} {ph.name}</h3>
-              {ph.gate && <span className="text-xs text-muted">◆ {ph.gate} {ph.gate_question}</span>}
-            </div>
-            <ul className="space-y-1 text-sm">
-              {ph.stages.map((sid) => (
-                <li key={sid} className="flex justify-between">
-                  <span>{stages[sid].no} {stages[sid].name}</span>
-                  <StatusChip status={stages[sid].status} />
-                </li>
-              ))}
-            </ul>
+        <div className="mt-5 flex items-center gap-3">
+          <div className="h-1.5 flex-1 overflow-hidden rounded-full bg-zinc-100">
+            <div className="h-full rounded-full bg-gradient-to-r from-brand-500 to-violet-500" style={{ width: `${pct}%` }} />
           </div>
+          <span className="text-xs tabular-nums text-zinc-500">{pct}%</span>
+        </div>
+      </PageHeader>
+      <div className="space-y-8 px-8 py-6">
+        <section className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+          {stats.map(({ label, value, icon: Icon, tone }) => (
+            <div key={label} className="card p-4">
+              <div className="flex items-center gap-2 text-xs text-zinc-500"><Icon size={14} className={tone} />{label}</div>
+              <div className="mt-1 text-2xl font-semibold tabular-nums">{value}</div>
+            </div>
+          ))}
+        </section>
+
+        {todo.length > 0 && (
+          <section>
+            <h2 className="section-title mb-2">対応が必要</h2>
+            <div className="card divide-y divide-zinc-100">
+              {todo.map(({ s, why }) => (
+                <Link key={s.id + why} href={`/p/${id}/s/${s.id}`} className="flex items-center gap-3 px-4 py-3 hover:bg-zinc-50">
+                  <span className="w-5 text-zinc-400">{s.no}</span>
+                  <span className="font-medium">{s.name}</span>
+                  <span className="text-[13px] text-zinc-500">{why}</span>
+                  <span className="ml-auto"><StatusBadge status={s.status} /></span>
+                </Link>
+              ))}
+            </div>
+          </section>
+        )}
+
+        {GROUPS.map((g) => (
+          <section key={g.title}>
+            <h2 className="section-title mb-2">{g.title}</h2>
+            <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+              {g.phases.flatMap((pid) => phases[pid].stages).map((sid) => {
+                const s = ov.stages.find((x) => x.id === sid)!;
+                return (
+                  <Link
+                    key={sid}
+                    href={`/p/${id}/s/${sid}`}
+                    className={`group rounded-xl border p-4 transition ${
+                      s.enabled ? "card hover:-translate-y-0.5 hover:shadow-pop" : "border-dashed border-zinc-300 bg-transparent opacity-70 hover:opacity-100"
+                    }`}
+                  >
+                    <div className="flex items-center justify-between">
+                      <span className="text-xs text-zinc-400">{s.no}・{phases[s.phase].name}</span>
+                      <StatusBadge status={s.status} enabled={s.enabled} />
+                    </div>
+                    <div className="mt-2 font-semibold">{s.name}</div>
+                    <div className="mt-0.5 text-[13px] text-zinc-500">{s.framework}</div>
+                    <div className="mt-3 flex items-center gap-2 text-[11px] text-zinc-400">
+                      {s.approved_version > 0 ? <span>確定版 v{s.approved_version}</span> : <span>未確定</span>}
+                      {s.approval_required && <span className="flex items-center gap-1"><Lock size={11} />承認あり</span>}
+                    </div>
+                  </Link>
+                );
+              })}
+            </div>
+          </section>
         ))}
-      </section>
-    </div>
+      </div>
+    </>
   );
 }

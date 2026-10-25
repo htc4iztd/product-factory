@@ -5,7 +5,19 @@ import datetime as dt
 import os
 import uuid
 
-from sqlalchemy import JSON, Boolean, DateTime, ForeignKey, Integer, String, Text, UniqueConstraint, create_engine
+from sqlalchemy import (
+    JSON,
+    Boolean,
+    DateTime,
+    ForeignKey,
+    Integer,
+    String,
+    Text,
+    UniqueConstraint,
+    create_engine,
+    inspect,
+    text,
+)
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, sessionmaker
 
 
@@ -47,7 +59,12 @@ class StageRun(Base):
     audit_retries: Mapped[int] = mapped_column(Integer, default=0)
     audit_findings: Mapped[list | None] = mapped_column(JSON, nullable=True)
     current_version: Mapped[int] = mapped_column(Integer, default=0)
-    approved_version: Mapped[int] = mapped_column(Integer, default=0)
+    approved_version: Mapped[int] = mapped_column(Integer, default=0)   # 確定した最新の版
+    # 作業中の下書き（フレームワークの項目ごとの値）。確定すると Artifact の版になる
+    draft: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    # プロダクトごとの設定：このステージを使うか、確定に承認が要るか
+    enabled: Mapped[bool] = mapped_column(Boolean, default=True)
+    approval_required: Mapped[bool] = mapped_column(Boolean, default=False)
     updated_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), default=_now, onupdate=_now)
 
 
@@ -58,7 +75,8 @@ class Artifact(Base):
     product_id: Mapped[str] = mapped_column(ForeignKey("products.id"), index=True)
     stage_id: Mapped[str] = mapped_column(String(8))
     version: Mapped[int] = mapped_column(Integer)
-    content: Mapped[str] = mapped_column(Text)
+    content: Mapped[str] = mapped_column(Text)              # data を Markdown にしたもの（下流・監査用）
+    data: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     sha256: Mapped[str] = mapped_column(String(64))
     approved: Mapped[bool] = mapped_column(Boolean, default=False)
     created_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), default=_now)
@@ -72,6 +90,20 @@ class PhaseReview(Base):
     decision: Mapped[str] = mapped_column(String(16))   # proceed | back | stop
     reason: Mapped[str] = mapped_column(Text, default="")
     actor: Mapped[str] = mapped_column(String(200))
+    created_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), default=_now)
+
+
+class ChatMessage(Base):
+    """ステージごとのAIとの対話。assistant の発言には項目の書き換え案（proposals）が付く。"""
+    __tablename__ = "chat_messages"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    product_id: Mapped[str] = mapped_column(ForeignKey("products.id"), index=True)
+    stage_id: Mapped[str] = mapped_column(String(8))
+    role: Mapped[str] = mapped_column(String(12))       # user | assistant | feedback
+    actor: Mapped[str] = mapped_column(String(200))
+    text: Mapped[str] = mapped_column(Text, default="")
+    # [{"id", "field", "value", "reason", "status": pending|accepted|rejected}]
+    proposals: Mapped[list | None] = mapped_column(JSON, nullable=True)
     created_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), default=_now)
 
 
@@ -134,8 +166,30 @@ def init_db(url: str | None = None):
     global _engine, _Session
     _engine = create_engine(sync_url(url), future=True, **pool_kwargs())
     Base.metadata.create_all(_engine)
+    _add_missing_columns(_engine)
     _Session = sessionmaker(_engine, expire_on_commit=False, future=True)
     return _engine
+
+
+# create_all は既存テーブルに列を足さないので、後から足した列だけここで追加する
+_ADDED_COLUMNS = {
+    "stage_runs": {"draft": "JSON", "enabled": "BOOLEAN DEFAULT {true}",
+                   "approval_required": "BOOLEAN DEFAULT {false}"},
+    "artifacts": {"data": "JSON"},
+}
+
+
+def _add_missing_columns(engine) -> None:
+    sqlite = engine.dialect.name == "sqlite"
+    true_, false_ = ("1", "0") if sqlite else ("TRUE", "FALSE")
+    insp = inspect(engine)
+    with engine.begin() as conn:
+        for table, cols in _ADDED_COLUMNS.items():
+            have = {c["name"] for c in insp.get_columns(table)}
+            for name, ddl in cols.items():
+                if name not in have:
+                    conn.execute(text(f"ALTER TABLE {table} ADD COLUMN {name} "
+                                      + ddl.format(true=true_, false=false_)))
 
 
 def session():
