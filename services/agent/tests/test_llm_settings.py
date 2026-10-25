@@ -158,3 +158,34 @@ def test_platform_admin_can_choose_vertex_for_own_tenant(client):
     # 一般テナントは選べないまま
     assert c.put("/settings/llm/tenant", headers=H, json={"provider": "vertex"}).status_code == 403
     assert llmconf.resolve("tenant-a").provider == "stub"
+
+
+def test_gemini_client_stays_open(monkeypatch):
+    """Client を一時オブジェクトのまま使うと、回収されて「client has been closed」になる（実際に起きた不具合）。"""
+    from pf_agent import llm
+    from pf_agent.llmconf import Conn
+
+    closed = {"n": 0}
+
+    class Models:
+        def __init__(self, owner):
+            self.owner = owner
+
+        def generate_content(self, **kw):
+            import gc
+            gc.collect()
+            if closed["n"]:
+                raise RuntimeError("Cannot send a request, as the client has been closed.")
+            return type("R", (), {"text": "OK", "parsed": None})()
+
+    class FakeClient:
+        def __init__(self, **kw):
+            self.models = Models(None)  # 本物と同じく models は Client を強参照しない
+
+        def __del__(self):
+            closed["n"] += 1
+
+    import google.genai
+    monkeypatch.setattr(google.genai, "Client", FakeClient)
+    conn = Conn(provider="gemini", chat_model="m", summary_model="m", image_model="", source="app", api_key="k")
+    assert llm._text(conn, "m", "hi") == "OK"

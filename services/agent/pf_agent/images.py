@@ -116,7 +116,8 @@ def generate(conn: Conn, kind: str, prompt: str, name: str, facts: list[dict]) -
     if model_name(conn) == "stub":
         return _stub_svg(name, kind, facts), "image/svg+xml"
     from google.genai import types
-    resp = llm._genai(conn).models.generate_content(
+    client = llm._genai(conn)  # 変数に持っておく（回収されると接続が閉じる）
+    resp = client.models.generate_content(
         model=model_name(conn), contents=prompt,
         config=types.GenerateContentConfig(response_modalities=["IMAGE"],
                                            image_config=types.ImageConfig(aspect_ratio="16:9")),

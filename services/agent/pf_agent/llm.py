@@ -205,7 +205,8 @@ def _json(conn: Conn, model: str, prompt: str, schema: type[BaseModel]):
         return resp.parsed_output
     if conn.provider in ("gemini", "vertex"):
         from google.genai import types
-        resp = _genai(conn).models.generate_content(
+        client = _genai(conn)  # 変数に持っておく。.models だけを持つと Client が回収されて接続が閉じる
+        resp = client.models.generate_content(
             model=model, contents=prompt,
             config=types.GenerateContentConfig(response_mime_type="application/json", response_schema=schema))
         if isinstance(resp.parsed, schema):
@@ -227,7 +228,8 @@ def _text(conn: Conn, model: str, prompt: str) -> str:
         _claude_check(resp)
         return "".join(b.text for b in resp.content if b.type == "text")
     if conn.provider in ("gemini", "vertex"):
-        return _genai(conn).models.generate_content(model=model, contents=prompt).text or ""
+        client = _genai(conn)
+        return client.models.generate_content(model=model, contents=prompt).text or ""
     if conn.provider == "openai":
         return _openai(conn, model, prompt, None)
     raise LLMError(f"未対応の接続方式：{conn.provider}")
