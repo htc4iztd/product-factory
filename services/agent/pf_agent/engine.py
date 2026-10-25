@@ -371,7 +371,63 @@ class Engine:
                         "status": rs[i].status, "enabled": rs[i].enabled} for i in st.inputs],
             "downstream": [{"id": s.id, "no": s.no, "name": s.name} for s in STAGES if stage_id in s.inputs],
             "references": self._references(product, stage_id, rs),
+            "trace": self._trace(product, stage_id, d),
         }
+
+    @staticmethod
+    def _data(product: Product, stage_id: str) -> dict:
+        """他のステージの値：最新版があれば最新版、なければ下書き。"""
+        art = repo.confirmed_artifact(product.id, stage_id)
+        return art.data if art is not None and art.data else repo.draft(product.id, stage_id)
+
+    def _trace(self, product: Product, stage_id: str, draft: dict) -> dict | None:
+        """ID でつないだ網羅の状況（⑥ストーリー↔受入基準、⑥ストーリー↔⑧機能要求、⑥受入基準↔⑬結果）。"""
+        if stage_id == "s06":
+            stories = [r for r in draft.get("stories") or [] if r.get("id")]
+            with_ac = {sid for r in draft.get("acceptance") or [] for sid in fx.ids_in(r.get("story"))}
+            return {"kind": "stories_without_ac", "items": [
+                {"id": r["id"], "text": r.get("story", ""), "release": r.get("release", "")}
+                for r in stories if r["id"] not in with_ac], "total": len(stories)}
+        if stage_id == "s08":
+            stories = [r for r in self._data(product, "s06").get("stories") or [] if r.get("id")]
+            cover: dict[str, list[str]] = {}
+            for fr in draft.get("functional") or []:
+                for sid in fx.ids_in(fr.get("stories")):
+                    cover.setdefault(sid, []).append(fr.get("id", ""))
+            return {"kind": "story_coverage", "total": len(stories), "items": [
+                {"id": r["id"], "text": r.get("story", ""), "release": r.get("release", ""),
+                 "by": cover.get(r["id"], [])} for r in stories]}
+        if stage_id == "s13":
+            acs = [r for r in self._data(product, "s06").get("acceptance") or [] if r.get("id")]
+            rows = {r.get("ac"): r for r in draft.get("coverage") or []}
+            counts: dict[str, int] = {}
+            for a in acs:
+                res = (rows.get(a["id"]) or {}).get("result") or "未実施"
+                counts[res] = counts.get(res, 0) + 1
+            return {"kind": "ac_coverage", "total": len(acs), "counts": counts,
+                    "missing": [a["id"] for a in acs if a["id"] not in rows]}
+        return None
+
+    def import_acceptance(self, product: Product, user: str) -> int:
+        """⑥の受入基準を⑬の網羅表に取り込む。入っている結果は残し、足りない行だけ足す。"""
+        self._stage(product, "s13")
+        acs = [r for r in self._data(product, "s06").get("acceptance") or [] if r.get("id")]
+        rows = [dict(r) for r in repo.draft(product.id, "s13").get("coverage") or []]
+        have = {r.get("ac") for r in rows}
+        added = 0
+        for a in acs:
+            criterion = f"{a.get('given', '')} ／ {a.get('when', '')} → {a.get('then', '')}".strip(" ／→")
+            if a["id"] in have:
+                for r in rows:
+                    if r.get("ac") == a["id"]:
+                        r["story"], r["criterion"] = a.get("story", ""), criterion
+            else:
+                rows.append({"ac": a["id"], "story": a.get("story", ""), "criterion": criterion, "result": "未実施",
+                             "evidence": "", "note": ""})
+                added += 1
+        f = fx.FRAMEWORK_BY_STAGE["s13"].get("coverage")
+        repo.set_fields(product.id, "s13", {"coverage": fx.coerce(f, rows)}, user, "import")
+        return added
 
     @staticmethod
     def _references(product: Product, stage_id: str, rs: dict) -> list[dict]:

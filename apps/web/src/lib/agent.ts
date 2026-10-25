@@ -82,10 +82,10 @@ export type CanvasInfo = {
 };
 export type Overview = { product: Product; phases: Phase[]; stages: StageSummary[] };
 
-export type Column = { key: string; label: string; kind: "text" | "number" };
+export type Column = { key: string; label: string; kind: "text" | "number"; options: string[] };
 export type FieldSpec = {
   key: string; label: string; kind: "text" | "list" | "table" | "flows"; hint: string; required: boolean;
-  columns: Column[]; rows: string[];
+  columns: Column[]; rows: string[]; id_prefix: string;
 };
 export type Row = Record<string, string | number>;
 export type FlowNode = { id: string; type: "start" | "task" | "decision" | "system" | "end"; label: string; lane: number; x: number };
@@ -109,7 +109,12 @@ export type StageDetail = {
   versions: { version: number; confirmed: boolean; sha256: string; created_at: string }[];
   inputs: StageRef[]; downstream: StageRef[];
   references: { id: string; no: string; name: string; framework: string; status: string; source: string; markdown: string }[];
+  trace: Trace | null;
 };
+export type Trace =
+  | { kind: "stories_without_ac"; total: number; items: { id: string; text: string; release: string }[] }
+  | { kind: "story_coverage"; total: number; items: { id: string; text: string; release: string; by: string[] }[] }
+  | { kind: "ac_coverage"; total: number; counts: Record<string, number>; missing: string[] };
 export type AuditRow = {
   id: number; at: string; stage_id: string | null; actor_type: string; actor: string; kind: string;
   target_version: number | null; body: Record<string, unknown> | null; reason: string | null;

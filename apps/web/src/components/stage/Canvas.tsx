@@ -2,7 +2,8 @@ import type { FieldSpec, Row, StageDetail } from "@/lib/agent";
 import { FieldEditor } from "./FieldEditor";
 import { KpiGraph } from "./KpiGraph";
 import { FlowEditor } from "./FlowEditor";
-import type { Flow } from "@/lib/agent";
+import type { Flow, Trace } from "@/lib/agent";
+import { ImportAcButton } from "./StageActions";
 
 type Ctx = { pid: string; st: StageDetail; readOnly: boolean; proposed: Set<string> };
 
@@ -297,6 +298,223 @@ function BusinessReq({ c }: { c: Ctx }) {
   );
 }
 
+// ---------- ⑥ プロダクト仕様 ----------
+const RELEASES = ["MVP", "次", "後で"];
+const RELEASE_STYLE: Record<string, string> = { MVP: "border-brand-200 bg-brand-50", 次: "border-sky-200 bg-sky-50", 後で: "border-zinc-200 bg-zinc-50" };
+
+function Title({ c, k, label, note }: { c: Ctx; k: string; label: string; note?: string }) {
+  return (
+    <div className="mb-3 flex items-center gap-2">
+      <span className="text-[13px] font-medium">{label}</span>
+      {c.proposed.has(k) && <span className="rounded bg-brand-50 px-1 text-[10px] font-medium text-brand-700">AI案あり</span>}
+      {note && <span className="text-[11px] text-zinc-400">{note}</span>}
+    </div>
+  );
+}
+
+function EditTable({ c, k, label = "表で編集する" }: { c: Ctx; k: string; label?: string }) {
+  return (
+    <details className="mt-3">
+      <summary className="cursor-pointer select-none text-xs text-zinc-500">{label}</summary>
+      <div className="mt-2"><F c={c} k={k} /></div>
+    </details>
+  );
+}
+
+function StoryMap({ rows, acCount }: { rows: Row[]; acCount: Record<string, number> }) {
+  const items = rows.filter((r) => String(r.story ?? "").trim());
+  if (!items.length) return <p className="text-[13px] text-zinc-400">行動 → ステップ の順にストーリーを並べると、ここに地図ができます。</p>;
+  const cols: { activity: string; step: string }[] = [];
+  for (const r of items) {
+    const key = { activity: String(r.activity ?? ""), step: String(r.step ?? "") };
+    if (!cols.some((x) => x.activity === key.activity && x.step === key.step)) cols.push(key);
+  }
+  const releases = [...RELEASES, ...Array.from(new Set(items.map((r) => String(r.release ?? "")))).filter((x) => !RELEASES.includes(x))];
+  const activities = Array.from(new Set(cols.map((x) => x.activity)));
+  return (
+    <div className="overflow-x-auto">
+      <table className="border-separate border-spacing-1.5 text-[12px]">
+        <thead>
+          <tr>
+            <th />
+            {activities.map((a) => (
+              <th key={a} colSpan={cols.filter((x) => x.activity === a).length} className="rounded-md bg-zinc-800 px-3 py-1.5 text-left font-semibold text-white">{a || "（行動なし）"}</th>
+            ))}
+          </tr>
+          <tr>
+            <th />
+            {cols.map((x, i) => <th key={i} className="min-w-[170px] rounded-md bg-zinc-200 px-3 py-1 text-left font-medium text-zinc-700">{x.step || "（ステップなし）"}</th>)}
+          </tr>
+        </thead>
+        <tbody>
+          {releases.map((rel) => {
+            const inRel = items.filter((r) => String(r.release ?? "") === rel);
+            if (!inRel.length && !RELEASES.includes(rel)) return null;
+            return (
+              <tr key={rel}>
+                <th className="whitespace-nowrap px-2 text-left align-top text-[11px] font-semibold text-zinc-500">{rel || "未分類"}</th>
+                {cols.map((x, i) => (
+                  <td key={i} className={`min-w-[170px] rounded-md border border-dashed align-top ${rel === "MVP" ? "border-brand-200" : "border-zinc-200"}`}>
+                    <div className="space-y-1 p-1">
+                      {inRel.filter((r) => String(r.activity ?? "") === x.activity && String(r.step ?? "") === x.step).map((r) => (
+                        <div key={String(r.id)} className={`rounded-md border px-2 py-1.5 shadow-card ${RELEASE_STYLE[rel] ?? "border-zinc-200 bg-white"}`}>
+                          <div className="flex items-center gap-1 text-[10px] text-zinc-500">
+                            <span className="font-mono">{String(r.id)}</span>
+                            {String(r.persona ?? "") && <span>・{String(r.persona)}</span>}
+                            <span className={`ml-auto ${acCount[String(r.id)] ? "text-emerald-600" : "text-rose-500"}`}>AC {acCount[String(r.id)] ?? 0}</span>
+                          </div>
+                          <div className="leading-snug">{String(r.story)}</div>
+                        </div>
+                      ))}
+                    </div>
+                  </td>
+                ))}
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+function ProductSpec({ c }: { c: Ctx }) {
+  const personas = ((c.st.draft.personas as Row[]) ?? []).filter((r) => String(r.name ?? "").trim());
+  const acCount: Record<string, number> = {};
+  for (const a of (c.st.draft.acceptance as Row[]) ?? []) for (const id of String(a.story ?? "").match(/[A-Z]{2,4}-\d+/g) ?? []) acCount[id] = (acCount[id] ?? 0) + 1;
+  const tr = c.st.trace as Extract<Trace, { kind: "stories_without_ac" }> | null;
+  return (
+    <div className="space-y-4">
+      <Panel>
+        <Title c={c} k="personas" label="ペルソナ" />
+        {personas.length ? (
+          <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+            {personas.map((p, i) => (
+              <div key={i} className="rounded-xl border border-zinc-200 bg-gradient-to-b from-zinc-50 to-white p-3 text-[12px]">
+                <div className="flex items-center gap-2">
+                  <span className="flex h-8 w-8 items-center justify-center rounded-full bg-gradient-to-br from-brand-500 to-violet-500 text-[12px] font-semibold text-white">{String(p.name).slice(0, 1)}</span>
+                  <div><div className="font-semibold">{String(p.name)}</div><div className="text-[11px] text-zinc-500">{String(p.profile ?? "")}</div></div>
+                </div>
+                <dl className="mt-2 space-y-1">
+                  {[["目的", p.goal], ["困りごと", p.pain], ["使う場面", p.context]].map(([l, v]) => String(v ?? "") && (
+                    <div key={String(l)} className="flex gap-2"><dt className="w-14 shrink-0 text-zinc-400">{String(l)}</dt><dd>{String(v)}</dd></div>
+                  ))}
+                </dl>
+              </div>
+            ))}
+          </div>
+        ) : <p className="text-[13px] text-zinc-400">代表的な利用者を、①の顧客と④の狙う顧客から書き出します。</p>}
+        <EditTable c={c} k="personas" />
+      </Panel>
+      <Panel>
+        <Title c={c} k="stories" label="ストーリーマップ" note="横：行動 → ステップ　縦：リリース（MVP／次／後で）" />
+        <StoryMap rows={(c.st.draft.stories as Row[]) ?? []} acCount={acCount} />
+        <EditTable c={c} k="stories" label="ストーリーを表で編集する（IDは自動で振ります）" />
+      </Panel>
+      <Panel>
+        {tr && tr.items.length > 0 && (
+          <div className="mb-3 rounded-lg border border-amber-200 bg-amber-50/60 px-3 py-2 text-[12px] text-amber-900">
+            受入基準のないストーリーが {tr.items.length} / {tr.total} 件あります：{tr.items.map((x) => x.id).join("、")}
+          </div>
+        )}
+        <F c={c} k="acceptance" />
+      </Panel>
+      <Panel><F c={c} k="screens" /></Panel>
+    </div>
+  );
+}
+
+// ---------- ⑧ システム要求定義 ----------
+function SystemReq({ c }: { c: Ctx }) {
+  const tr = c.st.trace as Extract<Trace, { kind: "story_coverage" }> | null;
+  const nfr = (c.st.draft.nonfunctional as Row[]) ?? [];
+  const uncovered = tr?.items.filter((x) => !x.by.length) ?? [];
+  return (
+    <div className="space-y-4">
+      <Panel>
+        <F c={c} k="functional" />
+        {tr && (
+          <div className="mt-4 border-t border-zinc-100 pt-3">
+            <div className="mb-2 flex items-center gap-2 text-[12px]">
+              <span className="font-medium">⑥ストーリーの網羅</span>
+              <span className={uncovered.length ? "text-amber-700" : "text-emerald-600"}>
+                {tr.total ? `${tr.total - uncovered.length} / ${tr.total} 件が機能要求で覆われています` : "⑥にストーリーがありません"}
+              </span>
+            </div>
+            <div className="grid gap-1 md:grid-cols-2">
+              {tr.items.map((x) => (
+                <div key={x.id} className={`flex items-center gap-2 rounded-md border px-2 py-1 text-[11px] ${x.by.length ? "border-zinc-200" : "border-amber-200 bg-amber-50/60"}`}>
+                  <span className="font-mono text-zinc-500">{x.id}</span>
+                  <span className="truncate">{x.text}</span>
+                  <span className={`ml-auto shrink-0 ${x.by.length ? "text-emerald-600" : "text-amber-700"}`}>{x.by.length ? x.by.join(", ") : "未対応"}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+      </Panel>
+      <Panel>
+        <Title c={c} k="nonfunctional" label="非機能要求" note="IPA 非機能要求グレードの6分類。水準 0（低）〜 5（高）" />
+        <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+          {nfr.map((r) => {
+            const lv = Number(r.level);
+            return (
+              <div key={String(r.category)} className="rounded-xl border border-zinc-200 p-3 text-[12px]">
+                <div className="flex items-center justify-between">
+                  <span className="font-semibold">{String(r.category)}</span>
+                  <span className="text-[11px] text-zinc-500">{String(r.level ?? "") === "" ? "水準未設定" : `水準 ${lv}`}</span>
+                </div>
+                <div className="mt-1.5 flex gap-0.5">
+                  {[0, 1, 2, 3, 4, 5].map((i) => <span key={i} className={`h-1.5 flex-1 rounded-full ${String(r.level ?? "") !== "" && i <= lv ? "bg-brand-500" : "bg-zinc-200"}`} />)}
+                </div>
+                <div className="mt-2 text-zinc-700">{String(r.requirement ?? "") || <span className="text-zinc-400">要求は未記入</span>}</div>
+                {String(r.target ?? "") && <div className="mt-1 text-[11px] text-zinc-500">目標：{String(r.target)}</div>}
+              </div>
+            );
+          })}
+        </div>
+        <EditTable c={c} k="nonfunctional" label="水準と要求を編集する" />
+      </Panel>
+      <Panel><F c={c} k="interfaces" /></Panel>
+    </div>
+  );
+}
+
+// ---------- ⑬ テスト ----------
+const RESULT_STYLE: Record<string, string> = { 合格: "bg-emerald-500", 不合格: "bg-rose-500", 保留: "bg-amber-400", 未実施: "bg-zinc-300" };
+
+function TestReport({ c }: { c: Ctx }) {
+  const tr = c.st.trace as Extract<Trace, { kind: "ac_coverage" }> | null;
+  const total = tr?.total ?? 0;
+  return (
+    <div className="space-y-4">
+      <Panel>
+        {tr && (
+          <div className="mb-3 space-y-2">
+            <div className="flex flex-wrap items-center gap-3 text-[12px]">
+              <span className="font-medium">{total ? `⑥の受入基準 ${total} 件` : "⑥に受入基準がありません"}</span>
+              {["合格", "不合格", "保留", "未実施"].map((k) => (
+                <span key={k} className="flex items-center gap-1 text-zinc-600"><span className={`h-2 w-2 rounded-full ${RESULT_STYLE[k]}`} />{k} {tr.counts[k] ?? 0}</span>
+              ))}
+              {!c.readOnly && total > 0 && <span className="ml-auto"><ImportAcButton pid={c.pid} missing={tr.missing.length} /></span>}
+            </div>
+            {total > 0 && (
+              <div className="flex h-2 overflow-hidden rounded-full bg-zinc-100">
+                {["合格", "不合格", "保留", "未実施"].map((k) => (
+                  <div key={k} className={RESULT_STYLE[k]} style={{ width: `${((tr.counts[k] ?? 0) / total) * 100}%` }} />
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+        <F c={c} k="coverage" />
+      </Panel>
+      <Panel><F c={c} k="test_cases" /></Panel>
+      <Panel><F c={c} k="summary" /></Panel>
+    </div>
+  );
+}
+
 // ---------- ⑥以降：見出しごとの文書 ----------
 function DocumentView({ c }: { c: Ctx }) {
   return (
@@ -308,7 +526,7 @@ function DocumentView({ c }: { c: Ctx }) {
 
 const VIEWS: Record<string, (p: { c: Ctx }) => React.ReactNode> = {
   lean_canvas: LeanCanvas, market: Market, competitors: Competitors, vpc: Vpc, business_plan: BusinessPlan,
-  business_req: BusinessReq, document: DocumentView,
+  business_req: BusinessReq, product_spec: ProductSpec, system_req: SystemReq, test_report: TestReport, document: DocumentView,
 };
 
 export function Canvas({ pid, st, readOnly }: { pid: string; st: StageDetail; readOnly: boolean }) {

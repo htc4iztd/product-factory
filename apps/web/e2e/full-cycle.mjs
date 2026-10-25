@@ -152,6 +152,19 @@ await page.waitForSelector('[aria-label="業務要求定義を使う"][aria-chec
 
 // 文書型のステージ（⑥）も同じ流れで更新できる
 await draftAndCommit("s06", "11-doc-stage");
+// ⑧：⑥のストーリーが機能要求で覆われているかを見る。⑬：⑥の受入基準を取り込む
+await page.goto(`${BASE}/p/${pid}/s/s08`);
+await btn("下書きを作って").click();
+await page.getByRole("button", { name: /件をすべて採用/ }).click();
+await page.getByRole("button", { name: /件をすべて採用/ }).waitFor({ state: "detached" });
+await page.getByText("⑥ストーリーの網羅").waitFor();
+await shot("11d-system-req", true);
+await page.goto(`${BASE}/p/${pid}/s/s13`);
+await page.getByRole("button", { name: /⑥の受入基準を取り込む/ }).click();
+await page.getByRole("button", { name: "⑥の受入基準を取り込み直す" }).waitFor();
+await shot("11e-test-coverage", true);
+await page.goto(`${BASE}/p/${pid}/s/s06`);
+
 // 右のパネル：参照タブで事業フェーズの成果物を見る → AIタブを閉じる・開く
 await btn("参照タブ").click();
 await page.getByText("事業フェーズの成果物").waitFor();

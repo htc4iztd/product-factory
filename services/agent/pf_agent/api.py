@@ -170,6 +170,13 @@ def set_field(product_id: str, stage_id: str, body: FieldValue, c: Caller = Depe
     return engine.stage_detail(p, stage_id)
 
 
+@app.post("/products/{product_id}/stages/s13/import-acceptance")
+def import_acceptance(product_id: str, c: Caller = Depends(caller)):
+    p = _stage_product(c, product_id, "s13", "create")
+    added = engine.import_acceptance(p, c.user)
+    return {"added": added, "stage": engine.stage_detail(p, "s13")}
+
+
 @app.put("/products/{product_id}/stages/{stage_id}/markdown")
 def set_markdown(product_id: str, stage_id: str, body: MarkdownBody, c: Caller = Depends(caller)):
     p = _stage_product(c, product_id, stage_id, "create")

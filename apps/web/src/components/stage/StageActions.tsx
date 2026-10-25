@@ -1,7 +1,7 @@
 "use client";
 import { useState, useTransition } from "react";
 import { AlertTriangle, CheckCircle2, GitCommitHorizontal, Lock, RotateCcw } from "lucide-react";
-import { acknowledge, commit, decide, setStage } from "@/app/(app)/p/[id]/s/[stage]/actions";
+import { acknowledge, commit, decide, importAcceptance, setStage } from "@/app/(app)/p/[id]/s/[stage]/actions";
 
 function useAction() {
   const [error, setError] = useState<string | null>(null);
@@ -98,5 +98,17 @@ export function ClosedBanner({ pid, sid }: { pid: string; sid: string }) {
       <div className="flex-1">このステージは閉じています。開くと対話と編集ができます。{error && <span className="ml-2 text-rose-600">{error}</span>}</div>
       <button disabled={pending} onClick={() => run(() => setStage(pid, sid, { enabled: true }))} className="btn-secondary btn-sm">このステージを開く</button>
     </div>
+  );
+}
+
+export function ImportAcButton({ pid, missing }: { pid: string; missing: number }) {
+  const { error, pending, run } = useAction();
+  return (
+    <span className="inline-flex items-center gap-2">
+      <button disabled={pending} onClick={() => run(() => importAcceptance(pid))} className="btn-secondary btn-sm">
+        {pending ? "取り込み中…" : missing > 0 ? `⑥の受入基準を取り込む（新しく${missing}件）` : "⑥の受入基準を取り込み直す"}
+      </button>
+      {error && <span className="text-xs text-rose-600">{error}</span>}
+    </span>
   );
 }

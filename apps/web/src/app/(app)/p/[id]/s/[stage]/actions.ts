@@ -80,3 +80,7 @@ export async function setMarkdown(pid: string, sid: string, markdown: string): P
     throw e;
   }
 }
+
+export async function importAcceptance(pid: string) {
+  return call(pid, `/stages/s13/import-acceptance`, "POST");
+}

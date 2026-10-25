@@ -81,8 +81,14 @@ function TableInput({ field, rows, onChange }: { field: FieldSpec; rows: Row[]; 
               <tr key={i} className="border-t border-zinc-100">
                 {field.columns.map((c, j) => (
                   <td key={c.key} className="p-1">
-                    {fixed && j === 0 ? (
-                      <span className="px-1.5 font-medium">{String(r[c.key] ?? "")}</span>
+                    {(fixed || field.id_prefix) && j === 0 ? (
+                      <span className="whitespace-nowrap px-1.5 font-mono text-[11px] font-medium text-zinc-500">{String(r[c.key] ?? "") || "自動"}</span>
+                    ) : c.options.length > 0 ? (
+                      <select value={String(r[c.key] ?? "")} onChange={(e) => set(i, c.key, e.target.value)}
+                        className="w-full min-w-[5rem] rounded-md border border-transparent bg-transparent px-1 py-1 outline-none hover:border-zinc-200 focus:border-brand-500 focus:bg-white">
+                        <option value="">—</option>
+                        {c.options.map((o) => <option key={o} value={o}>{o}</option>)}
+                      </select>
                     ) : (
                       <input
                         value={String(r[c.key] ?? "")}

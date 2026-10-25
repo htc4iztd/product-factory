@@ -49,6 +49,9 @@ def _prompt(stage: Stage, fw: Framework, idea: str, draft: dict, upstream: dict[
         "- 前提があいまいなら、まず1〜2個の具体的な質問で詰める。\n"
         "- 矛盾・飛躍・根拠のない数値を見つけたら指摘する。出典のない数値は「要確認」と書く。\n"
         "- 項目を書き換えるべきときだけ proposals に入れる。書き換えない項目は入れない。\n"
+        "- id_prefix のある表は先頭列が ID。既存の行の ID は変えない。新しい行の ID は空でよい（自動で振る）。"
+        "ストーリーID・機能要求IDなど他の行を指す列は「US-01, US-03」のように ID で書く。\n"
+        "- options のある列は、その選択肢のどれかを入れる。\n"
         "- proposals の value は、text はそのまま、list は1行1要素の改行区切り、"
         "table は columns の key を持つオブジェクトの JSON 配列（rows がある表は先頭列にその見出し）、"
         "flows は [{business: 業務名, lanes: [担当名...], nodes: [{id, type: start|task|decision|system|end, "
@@ -80,11 +83,18 @@ def _stub_value(f, idea: str):
     if f.kind == "list":
         return f"{f.label}の候補1（仮）\n{f.label}の候補2（仮）"
     if f.rows:
-        rows = [{f.columns[0].key: r, **{c.key: (100 * (len(f.rows) - i) if c.kind == "number" else f"{c.label}（仮）")
+        rows = [{f.columns[0].key: r, **{c.key: (c.options[min(2, len(c.options) - 1)] if c.options else
+                                                 100 * (len(f.rows) - i) if c.kind == "number" else f"{c.label}（仮）")
                                           for c in f.columns[1:]}} for i, r in enumerate(f.rows)]
     else:
-        rows = [{c.key: (i + 1 if c.kind == "number" else f"{c.label}{i + 1}（仮）") for c in f.columns}
-                for i in range(2)]
+        def cell(c, i):
+            if c.options:
+                return c.options[0]
+            return i + 1 if c.kind == "number" else f"{c.label}{i + 1}（仮）"
+        rows = [{c.key: cell(c, i) for c in f.columns} for i in range(2)]
+        if f.id_prefix:   # ID は自動で振らせる
+            for r in rows:
+                r[f.columns[0].key] = ""
     return json.dumps(rows, ensure_ascii=False)
 
 

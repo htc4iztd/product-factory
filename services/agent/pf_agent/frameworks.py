@@ -21,6 +21,7 @@ class Column:
     key: str
     label: str
     kind: str = "text"      # text | number
+    options: tuple[str, ...] = ()   # 選択肢（画面では選択欄にする）
 
 
 @dataclass(frozen=True)
@@ -32,6 +33,7 @@ class Field:
     required: bool = True
     columns: tuple[Column, ...] = ()
     rows: tuple[str, ...] = ()   # 行の見出しを固定する表（先頭列に入る）
+    id_prefix: str = ""          # 先頭列を ID にする表（空なら US-01 のように自動で振る）
 
 
 @dataclass(frozen=True)
@@ -139,6 +141,68 @@ FRAMEWORKS: dict[str, Framework] = {
         ("人が行う業務（問合せ・決済・審査など）はありますか？", "業務の担当（人・部署・外部・システム）は誰ですか？",
          "今のやり方（as-is）から変わる業務はどれですか？"),
     ),
+    "s06": Framework(
+        "product_spec", "プロダクト仕様（ストーリーマップ・受入基準）",
+        "誰が何をできるようにするかを、ストーリーと受入基準で決める",
+        (
+            Field("personas", "ペルソナ", TB, "代表的な利用者。①の顧客と④の狙う顧客から",
+                  columns=(Column("name", "名前"), Column("profile", "属性"), Column("goal", "目的"),
+                           Column("pain", "困りごと"), Column("context", "使う場面"))),
+            Field("stories", "ユーザーストーリー", TB,
+                  "行動 → ステップ の順に並べる。ストーリーは「〈誰〉として〈何〉をしたい。〈なぜ〉」",
+                  columns=(Column("id", "ID"), Column("activity", "行動"), Column("step", "ステップ"),
+                           Column("story", "ストーリー"), Column("persona", "ペルソナ"),
+                           Column("release", "リリース", options=("MVP", "次", "後で"))),
+                  id_prefix="US"),
+            Field("acceptance", "受入基準", TB, "ストーリーごとに Given / When / Then で書く",
+                  columns=(Column("id", "ID"), Column("story", "ストーリーID"), Column("given", "前提（Given）"),
+                           Column("when", "操作（When）"), Column("then", "結果（Then）")),
+                  id_prefix="AC"),
+            Field("screens", "画面一覧", TB, "画面と、それを使うストーリー",
+                  columns=(Column("id", "ID"), Column("name", "画面名"), Column("purpose", "目的"),
+                           Column("stories", "ストーリーID")),
+                  id_prefix="SC"),
+        ),
+        ("最初のリリースで必須のストーリーは？", "ストーリーの受入基準で、特に外せない条件は？"),
+    ),
+    "s08": Framework(
+        "system_req", "システム要求定義（機能・非機能・外部接続）",
+        "作るシステムが満たすべきことを、IDでストーリーとつなげて決める",
+        (
+            Field("functional", "機能要求", TB, "どのストーリー・業務を支える機能か",
+                  columns=(Column("id", "ID"), Column("name", "機能"), Column("detail", "内容"),
+                           Column("stories", "ストーリーID"), Column("business", "業務"),
+                           Column("priority", "優先度", options=("Must", "Should", "Could", "Won't"))),
+                  id_prefix="FR"),
+            Field("nonfunctional", "非機能要求", TB, "IPA 非機能要求グレードの6分類ごとに水準（0〜5）と目標を決める",
+                  columns=(Column("category", "分類"), Column("level", "水準", options=("0", "1", "2", "3", "4", "5")),
+                           Column("requirement", "要求"), Column("target", "目標値・指標")),
+                  rows=("可用性", "性能・拡張性", "運用・保守性", "移行性", "セキュリティ",
+                        "システム環境・エコロジー")),
+            Field("interfaces", "外部接続", TB, "つなぐ相手とやり取り", required=False,
+                  columns=(Column("id", "ID"), Column("partner", "相手"), Column("method", "方式"),
+                           Column("data", "データ"), Column("direction", "向き", options=("送る", "受ける", "双方向")),
+                           Column("frequency", "頻度")),
+                  id_prefix="IF"),
+        ),
+        ("性能・可用性・コスト上限の目安は？", "個人情報や決済など、扱いに注意が要るデータは？"),
+    ),
+    "s13": Framework(
+        "test_report", "テスト（受入基準の網羅）", "⑥の受入基準を1つずつ確かめ、出してよいかの根拠を残す",
+        (
+            Field("coverage", "受入基準の網羅表", TB, "⑥の受入基準を取り込み、結果と証跡を入れる",
+                  columns=(Column("ac", "受入基準ID"), Column("story", "ストーリーID"), Column("criterion", "基準"),
+                           Column("result", "結果", options=("未実施", "合格", "不合格", "保留")),
+                           Column("evidence", "証跡"), Column("note", "メモ"))),
+            Field("test_cases", "テストケース", TB, "機能要求・受入基準ごとの確認手順", required=False,
+                  columns=(Column("id", "ID"), Column("target", "対象（FR/AC）"), Column("steps", "手順"),
+                           Column("expected", "期待結果"),
+                           Column("result", "結果", options=("未実施", "合格", "不合格", "保留"))),
+                  id_prefix="TC"),
+            Field("summary", "結果のまとめ", T, "残っている不合格・保留と、出してよいかの判断材料"),
+        ),
+        ("受入テストで特に確認したい基準は？",),
+    ),
     "s05": Framework(
         "business_plan", "事業計画（KPIツリー・収益モデル・PL）", "事業として成り立つかを数字で確かめる",
         (
@@ -229,12 +293,39 @@ def coerce(f: Field, value):
         raise ValueError("表は行（オブジェクト）の配列で渡してください")
     keys = [c.key for c in f.columns]
     rows = [{k: _cell(f, k, r.get(k, "")) for k in keys} for r in value]
+    if f.id_prefix:
+        rows = _assign_ids(f, rows)
     if f.rows:
         # 行見出しは固定。見出しが一致する行の値だけを採る
         by = {str(r.get(keys[0], "")): r for r in rows}
         rows = [dict(by.get(h, {}), **{keys[0]: h}) for h in f.rows]
         rows = [{k: r.get(k, "") for k in keys} for r in rows]
     return rows
+
+
+def _assign_ids(f: Field, rows: list[dict]) -> list[dict]:
+    """ID 列が空の行と重複した行に、次の番号を振る（US-01, US-02 …）。中身が空の行は捨てる。"""
+    key = f.columns[0].key
+    rows = [r for r in rows if any(str(v).strip() for k, v in r.items() if k != key)]
+    used: set[str] = set()
+    for r in rows:
+        rid = str(r.get(key, "")).strip()
+        r[key] = rid if rid and rid not in used else ""
+        used.add(r[key])
+    n = 1
+    for r in rows:
+        if not r[key]:
+            while f"{f.id_prefix}-{n:02d}" in used:
+                n += 1
+            r[key] = f"{f.id_prefix}-{n:02d}"
+            used.add(r[key])
+    return rows
+
+
+def ids_in(text) -> list[str]:
+    """「US-01, US-03」のような書き方から ID を取り出す。"""
+    import re
+    return re.findall(r"[A-Z]{2,4}-\d+", str(text or ""))
 
 
 def _coerce_flows(value) -> list[dict]:
@@ -425,5 +516,6 @@ def from_markdown(fw: Framework, markdown: str) -> tuple[dict, list[str]]:
 def spec(fw: Framework) -> list[dict]:
     """画面とLLMに渡す項目の定義。"""
     return [{"key": f.key, "label": f.label, "kind": f.kind, "hint": f.hint, "required": f.required,
-             "columns": [{"key": c.key, "label": c.label, "kind": c.kind} for c in f.columns],
-             "rows": list(f.rows)} for f in fw.fields]
+             "columns": [{"key": c.key, "label": c.label, "kind": c.kind, "options": list(c.options)}
+                         for c in f.columns],
+             "rows": list(f.rows), "id_prefix": f.id_prefix} for f in fw.fields]

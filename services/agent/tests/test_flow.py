@@ -316,3 +316,34 @@ def test_business_requirements_flows(client):
     # 文書から読み戻してもフローは変わらない（フローエディタで編集する）
     r = c.put(f"/products/{pid}/stages/s07/markdown", headers=H, json={"markdown": st["markdown"]}).json()
     assert r["changed"] == [] and any("フローエディタ" in n for n in r["notes"])
+
+
+def test_trace_story_requirement_test(client):
+    c = client
+    pid = new_product(c)
+    stories = [{"id": "US-01", "activity": "家計を締める", "step": "記録", "story": "夫として支出を記録したい",
+                "release": "MVP"},
+               {"activity": "家計を締める", "step": "確認", "story": "妻として残高を見たい", "release": "MVP"},
+               {"id": "US-01", "story": "重複したID"}]
+    st = c.put(f"/products/{pid}/stages/s06/draft", headers=H, json={"field": "stories", "value": stories}).json()
+    assert [r["id"] for r in st["draft"]["stories"]] == ["US-01", "US-02", "US-03"]   # 空と重複に番号を振る
+    acs = [{"story": "US-01", "given": "ログイン済み", "when": "金額を入れて保存", "then": "一覧に出る"}]
+    st = c.put(f"/products/{pid}/stages/s06/draft", headers=H, json={"field": "acceptance", "value": acs}).json()
+    assert st["draft"]["acceptance"][0]["id"] == "AC-01"
+    assert [i["id"] for i in st["trace"]["items"]] == ["US-02", "US-03"]       # 受入基準のないストーリー
+    fr = [{"name": "支出の記録", "stories": "US-01, US-03", "priority": "Must"}]
+    st = c.put(f"/products/{pid}/stages/s08/draft", headers=H, json={"field": "functional", "value": fr}).json()
+    cov = {i["id"]: i["by"] for i in st["trace"]["items"]}
+    assert cov == {"US-01": ["FR-01"], "US-02": [], "US-03": ["FR-01"]}
+    nfr = {r["category"] for r in st["draft"]["nonfunctional"]}
+    assert "セキュリティ" in nfr and len(nfr) == 6
+    # ⑬：⑥の受入基準を取り込み、結果は取り込み直しても残る
+    r = c.post(f"/products/{pid}/stages/s13/import-acceptance", headers=H).json()
+    assert r["added"] == 1 and r["stage"]["draft"]["coverage"][0]["result"] == "未実施"
+    rows = r["stage"]["draft"]["coverage"]
+    rows[0]["result"] = "合格"
+    c.put(f"/products/{pid}/stages/s13/draft", headers=H, json={"field": "coverage", "value": rows})
+    r = c.post(f"/products/{pid}/stages/s13/import-acceptance", headers=H).json()
+    assert r["added"] == 0 and r["stage"]["trace"]["counts"] == {"合格": 1}
+    ov = c.get(f"/products/{pid}", headers=H).json()
+    assert next(p for p in ov["phases"] if p["id"] == "P3")["gate_question"] == "この版で作り始めてよいか"
