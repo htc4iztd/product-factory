@@ -128,6 +128,23 @@ await page.goto(`${BASE}/p/${pid}/s/s05`);
 await page.getByText(/が更新されました。内容を見直し/).waitFor();
 await shot("10-recheck");
 
+// ⑦業務要求定義：業務一覧の階層と、スイムレーンのフローを編集する
+await draftAndCommit("s07", "10b-business", async () => {
+  await page.locator(".react-flow__node-step").first().waitFor();
+  await btn("作業", true).click();
+  await page.getByLabel("部品の名前").fill("在庫を引き当てる");
+  await page.getByLabel("レーン", { exact: true }).selectOption({ index: 1 });
+  await btn("フローを保存").click();
+  await page.getByText("保存していない変更があります").waitFor({ state: "detached" });
+  await page.locator(".react-flow__node-step", { hasText: "在庫を引き当てる" }).waitFor();
+  await shot("10c-business-flow", true);
+  await btn("全画面で編集").click();
+  await page.waitForTimeout(400);
+  await shot("10d-business-flow-full");
+  await page.keyboard.press("Escape");
+  await btn("全画面で編集").waitFor();
+});
+
 // ⑦を閉じる
 await page.goto(`${BASE}/p/${pid}/settings`);
 await page.getByRole("switch", { name: "業務要求定義を使う" }).click();

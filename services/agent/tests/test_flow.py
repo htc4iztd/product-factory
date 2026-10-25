@@ -296,3 +296,23 @@ def test_old_messages_move_to_first_session(client):
     assert [x["title"] for x in st["sessions"]] == ["これまでの対話"] and st["chat"][0]["text"] == "昔の発言"
     st = c.post(f"/products/{pid}/stages/s02/chat", headers=H, json={"message": "続き"}).json()
     assert [m["text"] for m in st["chat"]][:2] == ["昔の発言", "続き"]
+
+
+def test_business_requirements_flows(client):
+    c = client
+    pid = new_product(c)
+    st = accept_all(c, pid, "s07")
+    assert st["framework"]["view"] == "business_req" and st["missing"] == []
+    fl = st["draft"]["flows"][0]
+    assert fl["lanes"] == ["顧客", "担当者", "システム"] and {n["type"] for n in fl["nodes"]} >= {"start", "decision"}
+    assert "```mermaid" in st["markdown"] and 'n3 -->|"はい"| n4' in st["markdown"]
+    # 存在しないノードへの矢印・不明な種類・レーン名での指定はそろえる
+    bad = [{"business": "返品", "lanes": ["顧客", "倉庫"],
+            "nodes": [{"id": "a", "type": "???", "label": "返品申請", "lane": "倉庫"}, {"id": "b", "label": "検品"}],
+            "edges": [{"source": "a", "target": "b"}, {"source": "a", "target": "zzz"}]}]
+    st = c.put(f"/products/{pid}/stages/s07/draft", headers=H, json={"field": "flows", "value": bad}).json()
+    f0 = st["draft"]["flows"][0]
+    assert f0["nodes"][0]["type"] == "task" and f0["nodes"][0]["lane"] == 1 and len(f0["edges"]) == 1
+    # 文書から読み戻してもフローは変わらない（フローエディタで編集する）
+    r = c.put(f"/products/{pid}/stages/s07/markdown", headers=H, json={"markdown": st["markdown"]}).json()
+    assert r["changed"] == [] and any("フローエディタ" in n for n in r["notes"])

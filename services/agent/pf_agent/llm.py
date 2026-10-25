@@ -50,7 +50,9 @@ def _prompt(stage: Stage, fw: Framework, idea: str, draft: dict, upstream: dict[
         "- 矛盾・飛躍・根拠のない数値を見つけたら指摘する。出典のない数値は「要確認」と書く。\n"
         "- 項目を書き換えるべきときだけ proposals に入れる。書き換えない項目は入れない。\n"
         "- proposals の value は、text はそのまま、list は1行1要素の改行区切り、"
-        "table は columns の key を持つオブジェクトの JSON 配列（rows がある表は先頭列にその見出し）。\n\n"
+        "table は columns の key を持つオブジェクトの JSON 配列（rows がある表は先頭列にその見出し）、"
+        "flows は [{business: 業務名, lanes: [担当名...], nodes: [{id, type: start|task|decision|system|end, "
+        "label, lane: レーンの番号, x: 左からの位置(px)}], edges: [{source, target, label}]}] の JSON。\n\n"
         f"## 項目の定義\n{json.dumps(spec(fw), ensure_ascii=False)}\n\n"
         f"## 現在の値\n{json.dumps(draft, ensure_ascii=False)}\n\n"
         f"## プロダクトの意図\n{idea or '（なし）'}\n\n"
@@ -62,6 +64,17 @@ def _prompt(stage: Stage, fw: Framework, idea: str, draft: dict, upstream: dict[
 
 def _stub_value(f, idea: str):
     base = (idea or "このプロダクト")[:30]
+    if f.kind == "flows":
+        return json.dumps([{"business": "受付業務（仮）", "lanes": ["顧客", "担当者", "システム"],
+                            "nodes": [{"id": "n1", "type": "start", "label": "申込む", "lane": 0, "x": 40},
+                                      {"id": "n2", "type": "system", "label": "受付を登録", "lane": 2, "x": 240},
+                                      {"id": "n3", "type": "decision", "label": "内容に不備?", "lane": 1, "x": 440},
+                                      {"id": "n4", "type": "task", "label": "顧客に確認", "lane": 1, "x": 640},
+                                      {"id": "n5", "type": "end", "label": "受付完了", "lane": 0, "x": 840}],
+                            "edges": [{"source": "n1", "target": "n2"}, {"source": "n2", "target": "n3"},
+                                      {"source": "n3", "target": "n4", "label": "はい"},
+                                      {"source": "n3", "target": "n5", "label": "いいえ"},
+                                      {"source": "n4", "target": "n2"}]}], ensure_ascii=False)
     if f.kind == "text":
         return f"{base}の{f.label}（仮）"
     if f.kind == "list":

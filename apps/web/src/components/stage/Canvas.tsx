@@ -1,6 +1,8 @@
 import type { FieldSpec, Row, StageDetail } from "@/lib/agent";
 import { FieldEditor } from "./FieldEditor";
 import { KpiGraph } from "./KpiGraph";
+import { FlowEditor } from "./FlowEditor";
+import type { Flow } from "@/lib/agent";
 
 type Ctx = { pid: string; st: StageDetail; readOnly: boolean; proposed: Set<string> };
 
@@ -220,6 +222,81 @@ function BusinessPlan({ c }: { c: Ctx }) {
   );
 }
 
+// ---------- ⑦ 業務要求定義 ----------
+const KIND_STYLE: Record<string, string> = {
+  コア業務: "border-brand-200 bg-brand-50 text-brand-700", 支援業務: "border-sky-200 bg-sky-50 text-sky-700",
+  管理業務: "border-amber-200 bg-amber-50 text-amber-700",
+};
+
+function BusinessTree({ rows }: { rows: Row[] }) {
+  const items = rows.filter((r) => String(r.name ?? "").trim());
+  if (!items.length) return <p className="text-[13px] text-zinc-400">業務領域 → 業務 → 作業 の順に、下の表かAIで業務を並べてください。</p>;
+  const names = new Set(items.map((r) => String(r.name)));
+  const kids = (p: string) => items.filter((r) => String(r.parent ?? "") === p);
+  const roots = items.filter((r) => !String(r.parent ?? "").trim() || !names.has(String(r.parent)));
+  const Item = ({ r, depth, seen }: { r: Row; depth: number; seen: Set<string> }) => {
+    const name = String(r.name);
+    const next = new Set(seen).add(name);
+    const children = seen.has(name) ? [] : kids(name);
+    return (
+      <li>
+        <div className={`flex flex-wrap items-center gap-2 rounded-lg border px-3 py-2 ${depth === 0 ? "border-zinc-300 bg-zinc-50" : "border-zinc-200 bg-white"}`}>
+          {String(r.level ?? "") && <span className="text-[10px] font-semibold uppercase tracking-wider text-zinc-400">{String(r.level)}</span>}
+          <span className="text-[13px] font-semibold">{name}</span>
+          {String(r.kind ?? "") && <span className={`chip ${KIND_STYLE[String(r.kind)] ?? ""}`}>{String(r.kind)}</span>}
+          {String(r.change ?? "") && <span className="chip border-violet-200 text-violet-700">{String(r.change)}</span>}
+          <span className="ml-auto flex flex-wrap gap-x-3 text-[11px] text-zinc-500">
+            {String(r.actor ?? "") && <span>担当：{String(r.actor)}</span>}
+            {String(r.trigger ?? "") && <span>きっかけ：{String(r.trigger)}</span>}
+            {String(r.output ?? "") && <span>→ {String(r.output)}</span>}
+            {String(r.frequency ?? "") && <span>{String(r.frequency)}</span>}
+          </span>
+        </div>
+        {children.length > 0 && (
+          <ul className="ml-5 mt-1.5 space-y-1.5 border-l border-zinc-200 pl-3">
+            {children.map((c, i) => <Item key={i} r={c} depth={depth + 1} seen={next} />)}
+          </ul>
+        )}
+      </li>
+    );
+  };
+  return <ul className="space-y-1.5">{roots.map((r, i) => <Item key={i} r={r} depth={0} seen={new Set()} />)}</ul>;
+}
+
+function BusinessReq({ c }: { c: Ctx }) {
+  const rows = (c.st.draft.business_map as Row[]) ?? [];
+  const businesses = rows.filter((r) => String(r.name ?? "").trim() && String(r.level ?? "") !== "業務領域").map((r) => String(r.name));
+  return (
+    <div className="space-y-4">
+      <Panel>
+        <div className="mb-3 flex items-center gap-2">
+          <span className="text-[13px] font-medium">業務一覧</span>
+          {c.proposed.has("business_map") && <span className="rounded bg-brand-50 px-1 text-[10px] font-medium text-brand-700">AI案あり</span>}
+          <span className="text-[11px] text-zinc-400">階層：業務領域 → 業務 → 作業　種類：コア業務／支援業務／管理業務</span>
+        </div>
+        <BusinessTree rows={rows} />
+        <details className="mt-3">
+          <summary className="cursor-pointer select-none text-xs text-zinc-500">表で編集する（上位業務の名前で親子をつなぎます）</summary>
+          <div className="mt-2"><F c={c} k="business_map" /></div>
+        </details>
+      </Panel>
+      <Panel>
+        <div className="mb-3 flex items-center gap-2">
+          <span className="text-[13px] font-medium">業務フロー</span>
+          {c.proposed.has("flows") && <span className="rounded bg-brand-50 px-1 text-[10px] font-medium text-brand-700">AI案あり</span>}
+          <span className="text-[11px] text-zinc-400">業務ごとのスイムレーン図。レーンは担当（人・部署・外部・システム）</span>
+        </div>
+        <FlowEditor pid={c.pid} sid={c.st.id} value={(c.st.draft.flows as Flow[]) ?? []} businesses={businesses} readOnly={c.readOnly} />
+      </Panel>
+      <div className="grid gap-4 xl:grid-cols-2">
+        <Panel><F c={c} k="rules" /></Panel>
+        <Panel><F c={c} k="roles" /></Panel>
+      </div>
+      <Panel><F c={c} k="exceptions" /></Panel>
+    </div>
+  );
+}
+
 // ---------- ⑥以降：見出しごとの文書 ----------
 function DocumentView({ c }: { c: Ctx }) {
   return (
@@ -230,7 +307,8 @@ function DocumentView({ c }: { c: Ctx }) {
 }
 
 const VIEWS: Record<string, (p: { c: Ctx }) => React.ReactNode> = {
-  lean_canvas: LeanCanvas, market: Market, competitors: Competitors, vpc: Vpc, business_plan: BusinessPlan, document: DocumentView,
+  lean_canvas: LeanCanvas, market: Market, competitors: Competitors, vpc: Vpc, business_plan: BusinessPlan,
+  business_req: BusinessReq, document: DocumentView,
 };
 
 export function Canvas({ pid, st, readOnly }: { pid: string; st: StageDetail; readOnly: boolean }) {

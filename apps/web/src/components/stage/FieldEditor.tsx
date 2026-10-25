@@ -1,7 +1,7 @@
 "use client";
 import { useState, useTransition } from "react";
 import { Pencil, Plus, Sparkles, Trash2 } from "lucide-react";
-import type { FieldSpec, FieldValue, Row } from "@/lib/agent";
+import type { FieldSpec, FieldValue, Flow, Row } from "@/lib/agent";
 import { setField } from "@/app/(app)/p/[id]/s/[stage]/actions";
 
 type Props = {
@@ -22,6 +22,18 @@ export function FieldView({ field, value, compact }: { field: FieldSpec; value: 
       <ul className="space-y-1">
         {items.map((v, i) => (
           <li key={i} className="flex gap-2"><span className="mt-[7px] h-1 w-1 shrink-0 rounded-full bg-zinc-400" /><span className="break-words">{v}</span></li>
+        ))}
+      </ul>
+    );
+  }
+  if (field.kind === "flows") {
+    const flows = (value as Flow[] | undefined) ?? [];
+    if (!flows.some((f) => f.nodes.length)) return empty;
+    return (
+      <ul className="space-y-1">
+        {flows.map((f, i) => (
+          <li key={i} className="flex gap-2"><span className="font-medium">{f.business}</span>
+            <span className="text-zinc-500">レーン{f.lanes.length}・部品{f.nodes.length}・矢印{f.edges.length}（{f.lanes.join("／")}）</span></li>
         ))}
       </ul>
     );
@@ -108,7 +120,7 @@ export function FieldEditor({ pid, sid, field, value, readOnly, hasProposal, com
   const [pending, start] = useTransition();
 
   function open() {
-    if (readOnly) return;
+    if (readOnly || field.kind === "flows") return;
     setError(null);
     if (field.kind === "table") setRows(((value as Row[]) ?? []).map((r) => ({ ...r })));
     else setText(field.kind === "list" ? ((value as string[]) ?? []).join("\n") : String(value ?? ""));
@@ -134,7 +146,7 @@ export function FieldEditor({ pid, sid, field, value, readOnly, hasProposal, com
           {hasProposal && (compact
             ? <span title="AIの案があります"><Sparkles size={11} className="shrink-0 text-brand-600" /></span>
             : <span className="flex items-center gap-0.5 rounded bg-brand-50 px-1 text-[10px] font-medium text-brand-700"><Sparkles size={10} />AI案</span>)}
-          {!readOnly && !editing && (
+          {!readOnly && !editing && field.kind !== "flows" && (
             <button onClick={open} className={`btn-ghost btn-sm h-6 px-1.5 opacity-40 transition group-hover/field:opacity-100 focus:opacity-100 ${compact ? "absolute -right-1 -top-1" : "ml-auto"}`} aria-label={`${field.label}を編集`}>
               <Pencil size={12} />
             </button>

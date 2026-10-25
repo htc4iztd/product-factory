@@ -84,11 +84,14 @@ export type Overview = { product: Product; phases: Phase[]; stages: StageSummary
 
 export type Column = { key: string; label: string; kind: "text" | "number" };
 export type FieldSpec = {
-  key: string; label: string; kind: "text" | "list" | "table"; hint: string; required: boolean;
+  key: string; label: string; kind: "text" | "list" | "table" | "flows"; hint: string; required: boolean;
   columns: Column[]; rows: string[];
 };
 export type Row = Record<string, string | number>;
-export type FieldValue = string | string[] | Row[];
+export type FlowNode = { id: string; type: "start" | "task" | "decision" | "system" | "end"; label: string; lane: number; x: number };
+export type FlowEdge = { id: string; source: string; target: string; label: string; sourceHandle?: string; targetHandle?: string };
+export type Flow = { business: string; lanes: string[]; nodes: FlowNode[]; edges: FlowEdge[] };
+export type FieldValue = string | string[] | Row[] | Flow[];
 export type Draft = Record<string, FieldValue>;
 export type Proposal = { id: string; field: string; value: FieldValue; reason: string; status: "pending" | "accepted" | "rejected" };
 export type ChatMsg = { id: number; session_id: string | null; role: "user" | "assistant" | "feedback"; actor: string; text: string; proposals: Proposal[]; at: string };

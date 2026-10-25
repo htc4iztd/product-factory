@@ -4,6 +4,7 @@
 - text：文章（Markdown 可）
 - list：箇条書き（文字列の配列）
 - table：表（列が決まった行の配列）。rows を決めた表は行の見出しが固定
+- flows：スイムレーン型の業務フロー（業務ごとに、レーン・ノード・矢印）
 
 版の Markdown（下流ステージとLLMへの入力、監査ログのハッシュ）はここで作る。
 """
@@ -45,7 +46,9 @@ class Framework:
         return next((f for f in self.fields if f.key == key), None)
 
 
-T, L, TB = "text", "list", "table"
+T, L, TB, FL = "text", "list", "table", "flows"
+# フローのノードの種類
+NODE_TYPES = {"start": "開始", "task": "作業", "decision": "判断", "system": "システム処理", "end": "終了"}
 REVIEW = Field("review_condition", "見直し条件", T, "どの前提が崩れたらこの分析をやり直すか")
 
 FRAMEWORKS: dict[str, Framework] = {
@@ -112,6 +115,30 @@ FRAMEWORKS: dict[str, Framework] = {
         ),
         ("北極星指標の候補は？", "撤退を判断する条件は？"),
     ),
+    "s07": Framework(
+        "business_req", "業務要求定義（業務一覧・業務フロー）",
+        "誰がどの業務を、どんな流れとルールで行うか（to-be）を決める",
+        (
+            Field("business_map", "業務一覧", TB,
+                  "業務領域 → 業務 → 作業 の階層で並べる。上位業務の名前で親子をつなぐ",
+                  columns=(Column("name", "業務名"), Column("parent", "上位業務"), Column("level", "階層"),
+                           Column("kind", "種類"), Column("actor", "主担当"), Column("trigger", "きっかけ"),
+                           Column("output", "アウトプット"), Column("frequency", "頻度"),
+                           Column("change", "as-isからの変化"))),
+            Field("flows", "業務フロー", FL,
+                  "業務ごとのスイムレーン図。レーンは担当（人・部署・システム）、ノードは開始・作業・判断・システム処理・終了"),
+            Field("rules", "業務ルール", TB, "業務の判断基準・制約",
+                  columns=(Column("rule", "ルール"), Column("business", "対象業務"), Column("detail", "内容"),
+                           Column("basis", "根拠"))),
+            Field("roles", "役割", TB, "担当ごとの責任と関わる業務",
+                  columns=(Column("role", "役割"), Column("responsibility", "責任"), Column("businesses", "関わる業務"),
+                           Column("headcount", "体制・人数"))),
+            Field("exceptions", "例外とイレギュラー", TB, "通常の流れから外れるケースと対応", required=False,
+                  columns=(Column("business", "業務"), Column("case", "ケース"), Column("handling", "対応"))),
+        ),
+        ("人が行う業務（問合せ・決済・審査など）はありますか？", "業務の担当（人・部署・外部・システム）は誰ですか？",
+         "今のやり方（as-is）から変わる業務はどれですか？"),
+    ),
     "s05": Framework(
         "business_plan", "事業計画（KPIツリー・収益モデル・PL）", "事業として成り立つかを数字で確かめる",
         (
@@ -150,6 +177,8 @@ FRAMEWORK_BY_STAGE = {s.id: framework(s) for s in STAGES}
 
 # ---------------- 値の扱い ----------------
 def empty_value(f: Field):
+    if f.kind == FL:
+        return []
     if f.kind == L:
         return []
     if f.kind == TB:
@@ -166,6 +195,8 @@ def is_filled(f: Field, value) -> bool:
         return bool(str(value or "").strip())
     if f.kind == L:
         return any(str(v).strip() for v in (value or []))
+    if f.kind == FL:
+        return any(fl.get("nodes") for fl in (value or []))
     # 表：行見出し以外のどこかに値がある行が1つ以上
     data_cols = [c.key for c in f.columns[1:]] if f.rows else [c.key for c in f.columns]
     return any(any(str(r.get(k, "")).strip() for k in data_cols) for r in (value or []))
@@ -189,6 +220,8 @@ def coerce(f: Field, value):
         if not isinstance(value, list):
             raise ValueError("list が必要です")
         return [str(v).strip() for v in value if str(v).strip()]
+    if f.kind == FL:
+        return _coerce_flows(value)
     # table
     if isinstance(value, str):
         value = json.loads(value)
@@ -202,6 +235,71 @@ def coerce(f: Field, value):
         rows = [dict(by.get(h, {}), **{keys[0]: h}) for h in f.rows]
         rows = [{k: r.get(k, "") for k in keys} for r in rows]
     return rows
+
+
+def _coerce_flows(value) -> list[dict]:
+    """業務フローの形をそろえる。
+
+    [{business, lanes: [名], nodes: [{id, type, label, lane, x}], edges: [{id, source, target, label}]}]
+    """
+    if isinstance(value, str):
+        value = json.loads(value)
+    if not isinstance(value, list) or not all(isinstance(x, dict) for x in value):
+        raise ValueError("フローはオブジェクトの配列で渡してください")
+    out = []
+    for i, fl in enumerate(value):
+        lanes = [str(x).strip() for x in fl.get("lanes") or [] if str(x).strip()] or ["担当"]
+        nodes, seen = [], set()
+        for j, n in enumerate(fl.get("nodes") or []):
+            nid = str(n.get("id") or f"n{j + 1}")
+            if nid in seen:
+                continue
+            seen.add(nid)
+            lane = n.get("lane", 0)
+            if isinstance(lane, str) and not lane.lstrip("-").isdigit():
+                lane = lanes.index(lane) if lane in lanes else 0   # レーン名で来た場合
+            lane = min(max(int(lane), 0), len(lanes) - 1)
+            try:
+                x = float(n.get("x", 40 + j * 200))
+            except (TypeError, ValueError):
+                x = 40 + j * 200
+            nodes.append({"id": nid, "type": n.get("type") if n.get("type") in NODE_TYPES else "task",
+                          "label": str(n.get("label") or ""), "lane": lane, "x": round(x)})
+        edges = []
+        for k, e in enumerate(fl.get("edges") or []):
+            src, dst = str(e.get("source") or ""), str(e.get("target") or "")
+            if src in seen and dst in seen and src != dst:
+                edge = {"id": str(e.get("id") or f"e{k + 1}"), "source": src, "target": dst,
+                        "label": str(e.get("label") or "")}
+                # 画面で選んだ接続点（左右上下）は残す
+                for h in ("sourceHandle", "targetHandle"):
+                    if e.get(h) in ("l", "r", "t", "b"):
+                        edge[h] = e[h]
+                edges.append(edge)
+        out.append({"business": str(fl.get("business") or f"業務{i + 1}"), "lanes": lanes, "nodes": nodes,
+                    "edges": edges})
+    return out
+
+
+def flows_mermaid(flows: list[dict]) -> list[str]:
+    """フローを Mermaid の flowchart にする（下流ステージとLLMが読むため）。"""
+    shape = {"start": ('(["', '"])'), "end": ('(["', '"])'), "decision": ('{"', '"}'),
+             "system": ('[["', '"]]'), "task": ('["', '"]')}
+    lines: list[str] = []
+    for fl in flows:
+        lines += [f"### {fl['business']}", "```mermaid", "flowchart LR"]
+        for li, lane in enumerate(fl["lanes"]):
+            lines.append(f'  subgraph L{li}["{lane}"]')
+            for n in sorted((n for n in fl["nodes"] if n["lane"] == li), key=lambda n: n["x"]):
+                a, b = shape[n["type"]]
+                label = (n["label"] or NODE_TYPES[n["type"]]).replace('"', "'")
+                lines.append(f"    {n['id']}{a}{label}{b}")
+            lines.append("  end")
+        for e in fl["edges"]:
+            mid = f'|"{e["label"]}"|' if e["label"] else ""
+            lines.append(f"  {e['source']} -->{mid} {e['target']}")
+        lines += ["```", ""]
+    return lines
 
 
 def _cell(f: Field, key: str, v):
@@ -245,6 +343,8 @@ def to_markdown(stage: Stage, fw: Framework, draft: dict) -> str:
             lines.append(str(v or "").strip() or "（未記入）")
         elif f.kind == L:
             lines += [f"- {x}" for x in v or []] or ["（未記入）"]
+        elif f.kind == FL:
+            lines += flows_mermaid(v or []) or ["（未記入）"]
         else:
             rows = pl_rows(v) if (stage.id == "s05" and f.key == "pl") else (v or [])
             if not rows:
@@ -299,6 +399,9 @@ def from_markdown(fw: Framework, markdown: str) -> tuple[dict, list[str]]:
         if f is None:
             notes.append(f"見出し「{label}」は項目にないため反映しませんでした")
             continue
+        if f.kind == FL:
+            notes.append(f"「{label}」は文書からは変えられません（キャンバスのフローエディタで編集してください）")
+            continue
         body = sections[label]
         text = "\n".join(body).strip()
         if text == EMPTY:
@@ -314,7 +417,7 @@ def from_markdown(fw: Framework, markdown: str) -> tuple[dict, list[str]]:
         except (ValueError, TypeError) as e:
             notes.append(f"「{label}」を読めませんでした（{e}）")
     for f in fw.fields:
-        if f.label not in sections:
+        if f.label not in sections and f.kind != FL:
             notes.append(f"見出し「{f.label}」がないため、その項目は変えていません")
     return values, notes
 
