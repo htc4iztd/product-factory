@@ -173,6 +173,23 @@ def put_llm_app(body: LlmBody, c: Caller = Depends(caller)):
     return {"ok": True}
 
 
+@app.post("/settings/llm/models")
+def llm_models(body: LlmTest, c: Caller = Depends(caller)):
+    if body.scope == "app":
+        if not llmconf.is_admin(c.user):
+            raise HTTPException(403, "アプリ全体の既定はプラットフォーム管理者だけが扱えます")
+        conn = llmconf.app_conn()
+    else:
+        if c.base_role != "OWNER":
+            raise HTTPException(403, "テナントの OWNER だけが扱えます")
+        conn = llmconf.resolve(c.tenant)
+    try:
+        return {"ok": True, "provider": conn.provider, "models": llm.list_models(conn)}
+    except Exception as e:  # noqa: BLE001
+        msg = str(e) if isinstance(e, llm.LLMError) else f"{type(e).__name__}: {str(e)[:300]}"
+        return {"ok": False, "provider": conn.provider, "models": [], "error": msg}
+
+
 @app.post("/settings/llm/test")
 def test_llm(body: LlmTest, c: Caller = Depends(caller)):
     if body.scope == "app":
@@ -187,6 +204,9 @@ def test_llm(body: LlmTest, c: Caller = Depends(caller)):
         return llm.ping(conn)
     except Exception as e:  # noqa: BLE001  失敗の中身をそのまま画面に返す
         msg = str(e) if isinstance(e, llm.LLMError) else f"{type(e).__name__}: {str(e)[:300]}"
+        if "NOT_FOUND" in msg or "not_found" in msg or " 404" in msg:
+            msg = ("モデルが見つかりません。提供元でモデルが引退したか、このプロジェクトで使えない名前です。"
+                   "「使えるモデルを取得」で一覧を確かめてください。（" + msg + "）")
         return {"ok": False, "model": conn.chat_model, "error": msg}
 
 

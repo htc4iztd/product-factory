@@ -26,3 +26,12 @@ export async function testLlm(scope: "tenant" | "app"): Promise<LlmTestResult> {
     throw e;
   }
 }
+
+export async function listLlmModels(scope: "tenant" | "app"): Promise<{ ok: boolean; models: string[]; error?: string }> {
+  try {
+    return await agent("/settings/llm/models", { method: "POST", body: { scope } });
+  } catch (e) {
+    if (e instanceof AgentError) return { ok: false, models: [], error: e.message };
+    throw e;
+  }
+}

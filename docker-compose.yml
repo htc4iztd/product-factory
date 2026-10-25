@@ -21,7 +21,7 @@ services:
       PF_INTERNAL_TOKEN: ${PF_INTERNAL_TOKEN:?set PF_INTERNAL_TOKEN}
       PF_LLM: ${PF_LLM:-}
       GOOGLE_API_KEY: ${GOOGLE_API_KEY:-}
-      PF_MODEL: ${PF_MODEL:-gemini-2.5-flash}
+      PF_MODEL: ${PF_MODEL:-gemini-flash-latest}
       PF_SECRET_KEY: ${PF_SECRET_KEY:-}
       PF_ADMIN_EMAILS: ${PF_ADMIN_EMAILS:-}
     depends_on:

@@ -98,6 +98,13 @@ def test_tenant_url_must_be_public(client):
 class _FakeOpenAI(BaseHTTPRequestHandler):
     calls: list = []
 
+    def do_GET(self):  # noqa: N802
+        out = json.dumps({"data": [{"id": "llama3"}, {"id": "qwen2.5"}]}).encode()
+        self.send_response(200)
+        self.send_header("content-type", "application/json")
+        self.end_headers()
+        self.wfile.write(out)
+
     def do_POST(self):  # noqa: N802
         body = json.loads(self.rfile.read(int(self.headers["content-length"])))
         _FakeOpenAI.calls.append({"path": self.path, "auth": self.headers.get("authorization"), "body": body})
@@ -132,6 +139,9 @@ def test_openai_compatible_local_llm_via_app_default(client):
         assert r.status_code == 200, r.text
         t = c.post("/settings/llm/test", headers=ADMIN, json={"scope": "app"}).json()
         assert t["ok"] and t["reply"] == "OK" and t["model"] == "llama3"
+        ms = c.post("/settings/llm/models", headers=ADMIN, json={"scope": "app"}).json()
+        assert ms == {"ok": True, "provider": "openai", "models": ["llama3", "qwen2.5"]}
+        assert c.post("/settings/llm/models", headers=H, json={"scope": "app"}).status_code == 403
         pid = c.post("/products", headers=H, json={"name": "x", "idea": "家計簿"}).json()["id"]
         st = c.post(f"/products/{pid}/stages/s01/chat", headers=H, json={"message": "課題を詰めたい"}).json()
         msg = st["chat"][-1]
@@ -189,3 +199,33 @@ def test_gemini_client_stays_open(monkeypatch):
     monkeypatch.setattr(google.genai, "Client", FakeClient)
     conn = Conn(provider="gemini", chat_model="m", summary_model="m", image_model="", source="app", api_key="k")
     assert llm._text(conn, "m", "hi") == "OK"
+
+
+def test_vertex_model_list_trims_and_filters(monkeypatch):
+    from pf_agent import llm
+    from pf_agent.llmconf import Conn
+
+    class M:
+        def __init__(self, name, actions):
+            self.name, self.supported_actions = name, actions
+
+    seen = {}
+
+    class FakeClient:
+        def __init__(self, **kw):
+            seen["kw"] = kw
+            self.models = self
+
+        def list(self, config=None):
+            seen["config"] = config
+            return [M("publishers/google/models/gemini-3-flash", ["generateContent"]),
+                    M("publishers/google/models/text-embedding-005", ["embedContent"]),
+                    M("publishers/google/models/imagen-4", None)]
+
+    import google.genai
+    monkeypatch.setattr(google.genai, "Client", FakeClient)
+    conn = Conn(provider="vertex", chat_model="x", summary_model="x", image_model="", source="app",
+                project="p", location="global")
+    assert llm.list_models(conn) == ["gemini-3-flash"]
+    assert seen["kw"] == {"vertexai": True, "project": "p", "location": "global"}
+    assert seen["config"] == {"query_base": True}

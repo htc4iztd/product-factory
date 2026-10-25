@@ -31,15 +31,16 @@ PROVIDERS = {
 NEEDS_KEY = {"gemini", "anthropic"}
 DEFAULT_MODELS = {
     "stub": {"chat": "stub", "summary": "stub", "image": "stub"},
-    "gemini": {"chat": "gemini-2.5-flash", "summary": "gemini-2.5-flash", "image": "gemini-3.1-flash-image"},
-    "vertex": {"chat": "gemini-2.5-flash", "summary": "gemini-2.5-flash", "image": "gemini-3.1-flash-image"},
+    # 個別の版は引退する（Vertex の Gemini 2.5 は 2026-10-20 に終了）ので、最新の Flash を指す別名を既定にする
+    "gemini": {"chat": "gemini-flash-latest", "summary": "gemini-flash-latest", "image": "gemini-3.1-flash-image"},
+    "vertex": {"chat": "gemini-flash-latest", "summary": "gemini-flash-latest", "image": "gemini-3.1-flash-image"},
     "anthropic": {"chat": "claude-opus-5-5", "summary": "claude-opus-5-5", "image": ""},
     "openai": {"chat": "", "summary": "", "image": ""},
 }
 # 画面で候補として出すモデル（自由入力もできる）
 SUGGESTED_MODELS = {
-    "gemini": ["gemini-2.5-flash", "gemini-2.5-pro", "gemini-2.5-flash-lite"],
-    "vertex": ["gemini-2.5-flash", "gemini-2.5-pro", "claude-opus-5-5", "claude-sonnet-5-5", "claude-haiku-5-5"],
+    "gemini": ["gemini-flash-latest", "gemini-pro-latest", "gemini-flash-lite-latest"],
+    "vertex": ["gemini-flash-latest", "gemini-pro-latest", "claude-opus-5-5", "claude-sonnet-5-5", "claude-haiku-5-5"],
     "anthropic": ["claude-opus-5-5", "claude-sonnet-5-5", "claude-haiku-5-5"],
     "openai": [],
 }

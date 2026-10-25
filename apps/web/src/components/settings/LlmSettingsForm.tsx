@@ -1,8 +1,8 @@
 "use client";
 import { useState, useTransition } from "react";
-import { CheckCircle2, KeyRound, PlugZap, XCircle } from "lucide-react";
+import { CheckCircle2, KeyRound, List, PlugZap, XCircle } from "lucide-react";
 import type { LlmProvider, LlmSettings, LlmTestResult, LlmView } from "@/lib/agent";
-import { saveLlm, testLlm, type LlmForm } from "@/app/(app)/settings/actions";
+import { listLlmModels, saveLlm, testLlm, type LlmForm } from "@/app/(app)/settings/actions";
 
 type Props = {
   scope: "tenant" | "app"; title: string; note: string; view: LlmView | null; canEdit: boolean;
@@ -27,6 +27,7 @@ export function LlmSettingsForm({ scope, title, note, view, canEdit, allowVertex
   const [f, setF] = useState<LlmForm>(initial);
   const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
   const [test, setTest] = useState<LlmTestResult | null>(null);
+  const [models, setModels] = useState<{ ok: boolean; models: string[]; error?: string } | null>(null);
   const [pending, start] = useTransition();
   const set = <K extends keyof LlmForm>(k: K, v: LlmForm[K]) => { setF((x) => ({ ...x, [k]: v })); setMsg(null); };
 
@@ -44,6 +45,10 @@ export function LlmSettingsForm({ scope, title, note, view, canEdit, allowVertex
       if (r.error) setMsg({ ok: false, text: r.error });
       else { setMsg({ ok: true, text: "保存しました" }); setF((x) => ({ ...x, api_key: "", clear_key: false })); }
     });
+  }
+  function runList() {
+    setModels(null);
+    start(async () => setModels(await listLlmModels(scope)));
   }
   function runTest() {
     setTest(null);
@@ -120,7 +125,7 @@ export function LlmSettingsForm({ scope, title, note, view, canEdit, allowVertex
 
         {real && p !== "stub" && (
           <div className="grid gap-3 sm:grid-cols-3">
-            <datalist id={listId}>{(options.suggested[p] ?? []).map((m) => <option key={m} value={m} />)}</datalist>
+            <datalist id={listId}>{(models?.ok && models.models.length ? models.models : options.suggested[p] ?? []).map((m) => <option key={m} value={m} />)}</datalist>
             {([["chat_model", "対話のモデル"], ["summary_model", "レポートのモデル"]] as const).map(([k, label]) => (
               <div key={k}>
                 <label className="label" htmlFor={`${scope}-${k}`}>{label}</label>
@@ -137,7 +142,7 @@ export function LlmSettingsForm({ scope, title, note, view, canEdit, allowVertex
             )}
           </div>
         )}
-        {real && p !== "stub" && <p className="-mt-2 text-[11px] text-zinc-400">空欄は薄く出ている既定のモデルを使います。{p === "vertex" && "「claude-」で始まるモデル名にすると Claude を使います。"}</p>}
+        {real && p !== "stub" && <p className="-mt-2 text-[11px] text-zinc-400">空欄は薄く出ている既定のモデルを使います。モデルは提供元の都合で引退するので、つながらないときは「使えるモデルを取得」で確かめてください。{p === "vertex" && "「claude-」で始まるモデル名にすると Claude を使います。"}</p>}
 
         {scope === "app" && (
           <label className="flex items-start gap-2 text-[13px]">
@@ -151,8 +156,28 @@ export function LlmSettingsForm({ scope, title, note, view, canEdit, allowVertex
           <button type="button" onClick={runTest} disabled={dirty} className="btn-secondary btn-sm" title={dirty ? "保存してから試せます" : "保存した設定で、AIに短い返事をもらいます"}>
             <PlugZap size={13} />接続テスト
           </button>
+          <button type="button" onClick={runList} disabled={dirty} className="btn-secondary btn-sm" title={dirty ? "保存してから取得できます" : "保存した接続先に、いま使えるモデルを問い合わせます"}>
+            <List size={13} />使えるモデルを取得
+          </button>
           {msg && <span className={`text-xs ${msg.ok ? "text-emerald-600" : "text-rose-600"}`}>{msg.text}</span>}
         </div>
+        {models && (
+          <div className="rounded-md border border-zinc-200 px-3 py-2 text-xs">
+            {!models.ok ? <span className="text-rose-600">取得できません：{models.error}</span>
+              : models.models.length === 0 ? <span className="text-zinc-500">使えるモデルが見つかりませんでした。</span>
+              : (
+                <>
+                  <div className="mb-1.5 text-zinc-500">いま使えるモデル（{models.models.length}）。押すと対話のモデルに入ります（保存で反映）。</div>
+                  <div className="flex max-h-40 flex-wrap gap-1 overflow-y-auto">
+                    {models.models.map((m) => (
+                      <button key={m} type="button" onClick={() => set("chat_model", m)}
+                        className={`chip font-mono hover:border-brand-300 ${f.chat_model === m ? "border-brand-400 bg-brand-50 text-brand-700" : ""}`}>{m}</button>
+                    ))}
+                  </div>
+                </>
+              )}
+          </div>
+        )}
         {test && (
           <div role="status" className={`flex items-start gap-2 rounded-md px-3 py-2 text-xs ${test.ok ? "bg-emerald-50 text-emerald-800" : "bg-rose-50 text-rose-700"}`}>
             {test.ok ? <CheckCircle2 size={14} className="mt-0.5 shrink-0" /> : <XCircle size={14} className="mt-0.5 shrink-0" />}

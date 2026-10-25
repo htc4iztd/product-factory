@@ -48,7 +48,7 @@ jobs:
         env:
           GEMINI: ${{ vars.PF_GEMINI }}
           GH_TOKEN_ON: ${{ vars.PF_GITHUB_TOKEN }}
-          PF_MODEL: ${{ vars.PF_MODEL || 'gemini-2.5-flash' }}
+          PF_MODEL: ${{ vars.PF_MODEL || 'gemini-flash-latest' }}
           PF_IMAGE_MODEL: ${{ vars.PF_IMAGE_MODEL || 'gemini-3.1-flash-image' }}
           ADMINS: ${{ vars.PF_ADMIN_EMAILS }}   # 設定画面でアプリ全体の既定を変えられる人（複数は ; 区切り）
         run: |

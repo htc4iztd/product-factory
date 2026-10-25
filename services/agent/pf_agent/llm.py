@@ -157,6 +157,34 @@ def ping(conn: Conn) -> dict:
     return {"ok": True, "model": conn.chat_model, "reply": reply.strip()[:200], "ms": ms}
 
 
+def list_models(conn: Conn) -> list[str]:
+    """接続先が今使えるモデルの名前。モデルは提供元の都合で引退するので、決め打ちせずにここで確かめる。"""
+    if conn.provider == "stub":
+        return ["stub"]
+    names: list[str] = []
+    if conn.provider in ("gemini", "vertex"):
+        client = _genai(conn)
+        cfg = {"query_base": True} if conn.provider == "vertex" else None
+        for m in client.models.list(config=cfg):
+            actions = m.supported_actions or []
+            if actions and "generateContent" not in actions:
+                continue
+            names.append((m.name or "").rsplit("/", 1)[-1])
+        names = [n for n in names if n.startswith("gemini")]
+    elif conn.provider == "anthropic":
+        client = _anthropic(conn)
+        names = [m.id for m in client.models.list()]
+    elif conn.provider == "openai":
+        if not conn.base_url:
+            raise LLMError("OpenAI 互換 API の URL がありません")
+        _guard_host(conn)
+        headers = {"authorization": f"Bearer {conn.api_key}"} if conn.api_key else {}
+        req = urllib.request.Request(conn.base_url.rstrip("/") + "/models", headers=headers)
+        data = _wrap(lambda: json.loads(urllib.request.urlopen(req, timeout=30).read()))  # noqa: S310
+        names = [m.get("id", "") for m in data.get("data", [])]
+    return sorted({n for n in names if n})
+
+
 # ---------------- 接続ごとの呼び出し ----------------
 def _is_claude(conn: Conn, model: str) -> bool:
     return conn.provider == "anthropic" or (conn.provider == "vertex" and model.startswith("claude"))
