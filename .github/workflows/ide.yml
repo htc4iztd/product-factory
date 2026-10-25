@@ -1,0 +1,48 @@
+name: ide
+# IDE（Code-OSS の Web 版）をソースから作り、Cloud Run（pf-ide）に置く。時間がかかるので ide/ が変わったときだけ動く
+on:
+  push:
+    branches: [main]
+    paths: ["ide/**", ".github/workflows/ide.yml"]
+  workflow_dispatch:
+
+permissions:
+  id-token: write
+  contents: read
+
+env:
+  REGION: ${{ vars.GCP_REGION || 'asia-northeast1' }}
+  PROJECT: ${{ vars.GCP_PROJECT_ID }}
+
+jobs:
+  build-deploy:
+    if: vars.GCP_WIF_PROVIDER != ''
+    runs-on: ubuntu-latest
+    environment: production
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with: { node-version: 24 }
+      - name: native build deps
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends libx11-dev libxkbfile-dev libsecret-1-dev libkrb5-dev
+      - name: build Code-OSS web
+        env:
+          GITHUB_TOKEN: ${{ github.token }}   # ripgrep などの取得で GitHub API の上限に当たらないように
+        run: ide/build.sh ide/dist
+      - uses: google-github-actions/auth@v3
+        with:
+          workload_identity_provider: ${{ vars.GCP_WIF_PROVIDER }}
+          service_account: ${{ vars.GCP_DEPLOY_SA }}
+      - uses: google-github-actions/setup-gcloud@v3
+      - name: image & deploy
+        run: |
+          IMG=$REGION-docker.pkg.dev/$PROJECT/product-factory/ide:${{ github.sha }}
+          gcloud auth configure-docker $REGION-docker.pkg.dev --quiet
+          docker build -t $IMG ide && docker push $IMG
+          # 静的ファイルだけ。外には開かず、web だけが ID トークンで呼ぶ
+          gcloud run deploy pf-ide --region $REGION --image $IMG \
+            --service-account pf-ide@$PROJECT.iam.gserviceaccount.com --no-allow-unauthenticated \
+            --port 8080 --cpu 1 --memory 256Mi --min-instances 0 --max-instances 2
+          echo "ide: $(gcloud run services describe pf-ide --region $REGION --format 'value(status.url)')" >> $GITHUB_STEP_SUMMARY
+          echo "web に反映するには deploy ワークフローをもう一度実行してください（IDE_ORIGIN を読み直す）" >> $GITHUB_STEP_SUMMARY

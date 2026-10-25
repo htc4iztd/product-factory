@@ -1,0 +1,43 @@
+<!DOCTYPE html>
+<!-- Product Factory の IDE。Code-OSS（microsoft/vscode, MIT）の Web 版を /ide から配る。
+     どのプロダクトのコードを開くかは ?p=<プロダクトID> で受け取り、pfrepo://<ID>/ を開く。 -->
+<html>
+	<head>
+		<meta charset="utf-8" />
+		<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no">
+		<link rel="stylesheet" href="/ide/out/vs/workbench/workbench.web.main.internal.css">
+		<title>Product Factory Code</title>
+	</head>
+	<body aria-label=""></body>
+	<script>
+		globalThis._VSCODE_FILE_ROOT = new URL('/ide/out/', location.origin).toString();
+	</script>
+	<script type="module" src="/ide/out/nls.messages.js"></script>
+	<script type="module">
+		import { create, URI } from '/ide/out/vs/workbench/workbench.web.main.internal.js';
+
+		const pid = new URLSearchParams(location.search).get('p') || '';
+		create(document.body, {
+			// 開くのは常にこのプロダクトのリポジトリ。別のフォルダやウィンドウは開かない
+			workspaceProvider: {
+				workspace: { folderUri: URI.from({ scheme: 'pfrepo', authority: pid, path: '/' }) },
+				trusted: true,
+				open: async () => false,
+			},
+			additionalBuiltinExtensions: [URI.from({ scheme: location.protocol.slice(0, -1), authority: location.host, path: '/ide/extensions/pf-repo' })],
+			configurationDefaults: {
+				'pfrepo.apiBase': location.origin,
+				'workbench.colorTheme': 'Default Dark Modern',
+				'workbench.startupEditor': 'none',
+				'workbench.enableExperiments': false,
+				'security.workspace.trust.enabled': false,
+				'telemetry.telemetryLevel': 'off',
+				'files.readonlyInclude': { '**': true },
+				// 日本語の全角記号を「紛らわしい文字」として枠で囲まない
+				'editor.unicodeHighlight.ambiguousCharacters': false,
+			},
+			productConfiguration: { nameShort: 'PF Code', nameLong: 'Product Factory Code', applicationName: 'pf-code', extensionsGallery: undefined },
+			windowIndicator: { label: '$(repo) Product Factory', tooltip: 'Product Factory のリポジトリ（読み取り専用）' },
+		});
+	</script>
+</html>

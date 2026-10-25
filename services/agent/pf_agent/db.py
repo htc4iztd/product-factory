@@ -44,6 +44,8 @@ class Product(Base):
     mode: Mapped[str] = mapped_column(String(12), default="personal")  # personal | corporate
     status: Mapped[str] = mapped_column(String(16), default="active")  # active | stopped
     cover_image_id: Mapped[str | None] = mapped_column(String(32), nullable=True)  # プロダクト・キャンバスの表紙
+    repo: Mapped[str | None] = mapped_column(String(200), nullable=True)          # GitHub の owner/name
+    repo_branch: Mapped[str | None] = mapped_column(String(100), nullable=True)
     created_by: Mapped[str] = mapped_column(String(200))
     created_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), default=_now)
 
@@ -219,7 +221,7 @@ _ADDED_COLUMNS = {
     "stage_runs": {"draft": "JSON", "enabled": "BOOLEAN DEFAULT {true}",
                    "approval_required": "BOOLEAN DEFAULT {false}"},
     "artifacts": {"data": "JSON"},
-    "products": {"cover_image_id": "VARCHAR(32)"},
+    "products": {"cover_image_id": "VARCHAR(32)", "repo": "VARCHAR(200)", "repo_branch": "VARCHAR(100)"},
     "chat_messages": {"session_id": "VARCHAR(32)"},
 }
 

@@ -47,6 +47,7 @@ jobs:
       - name: deploy agent-api
         env:
           GEMINI: ${{ vars.PF_GEMINI }}
+          GH_TOKEN_ON: ${{ vars.PF_GITHUB_TOKEN }}
           PF_MODEL: ${{ vars.PF_MODEL || 'gemini-2.5-flash' }}
           PF_IMAGE_MODEL: ${{ vars.PF_IMAGE_MODEL || 'gemini-3.1-flash-image' }}
         run: |
@@ -54,6 +55,8 @@ jobs:
           ENVS=PF_DB_POOL_SIZE=2,PF_MODEL=$PF_MODEL,PF_IMAGE_MODEL=$PF_IMAGE_MODEL
           # Gemini を使うのは Variables の PF_GEMINI=true のときだけ。それ以外はスタブ
           if [ "$GEMINI" = "true" ]; then SECRETS=$SECRETS,GOOGLE_API_KEY=GOOGLE_API_KEY:latest; else ENVS=$ENVS,PF_LLM=stub; fi
+          # 非公開リポジトリを読むときだけ GITHUB_TOKEN を渡す（Variables の PF_GITHUB_TOKEN=true）
+          if [ "$GH_TOKEN_ON" = "true" ]; then SECRETS=$SECRETS,GITHUB_TOKEN=GITHUB_TOKEN:latest; fi
           gcloud run deploy pf-agent --region $REGION --image $REGION-docker.pkg.dev/$PROJECT/product-factory/agent-api:$SHA \
             --service-account pf-agent@$PROJECT.iam.gserviceaccount.com --no-allow-unauthenticated \
             --port 8100 --cpu 1 --memory 1Gi --cpu-boost --timeout 600 --min-instances 0 --max-instances 1 \
@@ -64,9 +67,11 @@ jobs:
           ALLOW_SIGNUP: ${{ vars.PF_ALLOW_SIGNUP || 'true' }}
         run: |
           AGENT_URL=$(gcloud run services describe pf-agent --region $REGION --format 'value(status.url)')
+          # IDE（ide ワークフローが置く）があれば、その URL を web に渡す
+          IDE_URL=$(gcloud run services describe pf-ide --region $REGION --format 'value(status.url)' 2>/dev/null || true)
           gcloud run deploy pf-web --region $REGION --image $REGION-docker.pkg.dev/$PROJECT/product-factory/web:$SHA \
             --service-account pf-web@$PROJECT.iam.gserviceaccount.com --allow-unauthenticated \
             --port 3000 --cpu 1 --memory 512Mi --cpu-boost --timeout 600 --min-instances 0 --max-instances 1 \
-            --set-env-vars "AGENT_API_URL=$AGENT_URL,AGENT_AUTH=google-id-token,PF_DB_POOL_SIZE=2,PF_ALLOW_SIGNUP=$ALLOW_SIGNUP" \
+            --set-env-vars "AGENT_API_URL=$AGENT_URL,AGENT_AUTH=google-id-token,PF_DB_POOL_SIZE=2,PF_ALLOW_SIGNUP=$ALLOW_SIGNUP,IDE_ORIGIN=$IDE_URL" \
             --set-secrets AUTH_SECRET=AUTH_SECRET:latest,DATABASE_URL=DATABASE_URL:latest,PF_INTERNAL_TOKEN=PF_INTERNAL_TOKEN:latest
           echo "web: $(gcloud run services describe pf-web --region $REGION --format 'value(status.url)')" >> $GITHUB_STEP_SUMMARY

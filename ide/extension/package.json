@@ -1,0 +1,19 @@
+{
+  "name": "pf-repo",
+  "displayName": "Product Factory リポジトリ",
+  "description": "プロダクトの GitHub リポジトリを、Product Factory の API 経由で読み取り専用で開く",
+  "version": "0.1.0",
+  "publisher": "product-factory",
+  "license": "MIT",
+  "engines": { "vscode": "^1.90.0" },
+  "browser": "./extension.js",
+  "activationEvents": ["onFileSystem:pfrepo", "*"],
+  "contributes": {
+    "configuration": {
+      "title": "Product Factory",
+      "properties": {
+        "pfrepo.apiBase": { "type": "string", "default": "", "description": "ファイルを読む API のオリジン" }
+      }
+    }
+  }
+}

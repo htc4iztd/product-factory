@@ -6,18 +6,21 @@ import { auth } from "./auth";
 const BASE = process.env.AGENT_API_URL ?? "http://localhost:8100";
 const TOKEN = process.env.PF_INTERNAL_TOKEN ?? "dev-internal-token";
 // Cloud Run では agent-api を IAM で閉じる。web のサービスアカウントの ID トークンを付けて呼ぶ。
-const ID_TOKEN = process.env.AGENT_AUTH === "google-id-token";
+export const ID_TOKEN = process.env.AGENT_AUTH === "google-id-token";
 
-let idToken: { value: string; exp: number } | null = null;
+const idTokens = new Map<string, { value: string; exp: number }>();
 
-async function googleIdToken(): Promise<string> {
-  if (idToken && idToken.exp > Date.now()) return idToken.value;
-  const url = `http://metadata.google.internal/computeMetadata/v1/instance/service-accounts/default/identity?audience=${encodeURIComponent(BASE)}`;
+// Cloud Run のメタデータサーバーから、audience 宛ての ID トークンを取る（IDE の中継でも使う）
+export async function googleIdToken(audience: string = BASE): Promise<string> {
+  const hit = idTokens.get(audience);
+  if (hit && hit.exp > Date.now()) return hit.value;
+  const url = `http://metadata.google.internal/computeMetadata/v1/instance/service-accounts/default/identity?audience=${encodeURIComponent(audience)}`;
   const res = await fetch(url, { headers: { "Metadata-Flavor": "Google" }, cache: "no-store" });
   if (!res.ok) throw new AgentError(502, `ID トークンを取得できません（${res.status}）`);
   // トークンの有効期限は1時間。余裕を持って50分で取り直す
-  idToken = { value: await res.text(), exp: Date.now() + 50 * 60 * 1000 };
-  return idToken.value;
+  const value = await res.text();
+  idTokens.set(audience, { value, exp: Date.now() + 50 * 60 * 1000 });
+  return value;
 }
 
 export class AgentError extends Error {
@@ -73,7 +76,7 @@ export type StageSummary = {
 };
 export type Product = {
   id: string; name: string; idea: string; scope: string; mode: string; status: string;
-  cover_image_id: string | null; created_at: string;
+  cover_image_id: string | null; repo: string | null; repo_branch: string | null; created_at: string;
 };
 export type CanvasImage = { id: string; kind: string; note: string; prompt: string; model: string; created_by: string; created_at: string };
 export type CanvasInfo = {

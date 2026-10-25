@@ -90,6 +90,11 @@ class Cover(BaseModel):
     image_id: str | None = None
 
 
+class RepoBody(BaseModel):
+    repo: str = Field(default="", max_length=300)
+    branch: str | None = Field(default=None, max_length=100)
+
+
 class Review(BaseModel):
     decision: str = Field(pattern="^(proceed|back|stop)$")
     reason: str = ""
@@ -250,6 +255,25 @@ def delete_image(product_id: str, image_id: str, c: Caller = Depends(caller)):
     p = _product(c, product_id, "business", "create")
     engine.delete_image(p, c.user, image_id)
     return engine.canvas(engine.product(product_id))
+
+
+@app.put("/products/{product_id}/repo")
+def set_repo(product_id: str, body: RepoBody, c: Caller = Depends(caller)):
+    p = _product(c, product_id, "build", "assign")
+    info = engine.set_repo(p, c.user, body.repo, body.branch)
+    return {"repo": info, "product": product_dict(engine.product(product_id))}
+
+
+@app.get("/products/{product_id}/code/tree")
+def code_tree(product_id: str, c: Caller = Depends(caller)):
+    return engine.code_tree(_product(c, product_id, "build", "view"))
+
+
+@app.get("/products/{product_id}/code/file")
+def code_file(product_id: str, path: str, c: Caller = Depends(caller)):
+    data = engine.code_file(_product(c, product_id, "build", "view"), path)
+    return Response(content=data, media_type="application/octet-stream",
+                    headers={"cache-control": "private, max-age=30", "x-content-type-options": "nosniff"})
 
 
 @app.post("/products/{product_id}/phases/{phase_id}/review")

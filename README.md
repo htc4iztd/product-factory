@@ -10,7 +10,8 @@ apps/web          Next.js 16 + Auth.js v5（テナントとロールはセッシ
 services/agent    FastAPI + Google ADK 2.13（ステージ実行・工場DB・監査ログ）
 infra/nginx       リバースプロキシ（外に出すのは web だけ）
 infra/terraform   gcp（Cloud Run の土台：Artifact Registry / Secret Manager / サービスアカウント / Workload Identity）
-.github/workflows ci / infra / deploy
+.github/workflows ci / infra / deploy / ide
+ide               Code-OSS の Web 版（ソースからビルド）と、リポジトリを読む拡張機能
 ```
 
 設計からの差分（R0 時点）
@@ -28,6 +29,7 @@ infra/terraform   gcp（Cloud Run の土台：Artifact Registry / Secret Manager
 - 参照タブでは、事業フェーズ（①〜⑤）の成果物（最新版、なければ下書き）をその場で読める。
 - 文書タブは編集できる。「## 項目名」の見出しごとにキャンバスの項目へ反映する（フローなど文書から読めない項目は変えない）。
 - 「確定」ではなく「更新」と呼ぶ。下書きを更新すると版が1つ増え、その版が最新版になる。
+- 「コード（IDE）」では、プロダクトに GitHub リポジトリ（owner/name とブランチ）をつなぎ、Code-OSS の Web 版で読む（読み取り専用、ターミナルなし）。Code-OSS は `ide/VSCODE_VERSION` のタグからソースでビルドし（`ide/build.sh`）、Microsoft のマーケットプレイスや製品版の資産は使わない。IDE 内の拡張機能（`ide/extension`）が `pfrepo://<プロダクトID>/` のファイルシステムとして web の `/api/p/{id}/code/*` を読み、agent-api が GitHub の REST API から木と中身を取る。非公開リポジトリは `GITHUB_TOKEN`（読み取りだけの fine-grained token）が要る。
 - ループ L1〜L5、トレーサビリティ画面、worker / scheduler は R2。
 - `GOOGLE_API_KEY` が無ければ LLM はスタブ（必須見出しを埋めたダミー成果物）になり、全工程をそのまま通せる。
 
@@ -53,10 +55,11 @@ cd apps/web && npm ci && DATABASE_URL=postgresql://pf@127.0.0.1:5432/pf AUTH_SEC
 
 - `services/agent`: `pytest`（対話・採用・更新・承認と差し戻し・要再確認・設定・テナント分離・対話セッションとレポート・再起動後の対話の継続・文書からの反映）
 - `apps/web`: `BASE=http://localhost:3000 node e2e/full-cycle.mjs`（登録→①〜⑤をAIの下書き・採用・更新で通す→文書タブからの反映→承認と差し戻し→下流の要再確認→ステージの開閉→参照タブ→対話セッションとレポート→振り返り）
+- IDE: `BASE=... node e2e/ide.mjs`（公開リポジトリをつなぎ、Code-OSS でファイルの木と中身が出るか。`IDE_ORIGIN` と GitHub への接続が要る）
 
 ## デプロイ（Cloud Run + Supabase）
 
-web と agent-api を Cloud Run（東京）に置き、DB は Supabase（東京）を使う。nginx はローカル用で、Cloud Run では使わない。
+web と agent-api（と IDE）を Cloud Run（東京）に置き、DB は Supabase（東京）を使う。nginx はローカル用で、Cloud Run では使わない。
 
 ```
 利用者 ─HTTPS→ Cloud Run pf-web（公開） ─ID トークン→ Cloud Run pf-agent（IAM で非公開）
@@ -81,5 +84,7 @@ web と agent-api を Cloud Run（東京）に置き、DB は Supabase（東京�
    - `PF_GEMINI=true`：Gemini を使う（無ければスタブ）。`PF_MODEL` で対話のモデル、`PF_IMAGE_MODEL` で画像のモデルを変えられる。
    - `PF_ALLOW_SIGNUP=false`：自分の登録が済んだら入れて、新規登録を締め切る。
 4. Actions → `deploy` → Run workflow。以後は main への push で `ci` 成功後に自動で更新される。web の URL はジョブのサマリーに出る。
+
+5. **IDE（任意）**：Actions → `ide` → Run workflow（Code-OSS のビルドに30〜60分）。終わったら `deploy` をもう一度実行すると web が IDE の URL を読む。非公開リポジトリを読むときは、読み取りだけの fine-grained token を `gcloud secrets versions add GITHUB_TOKEN` で入れ、Variables に `PF_GITHUB_TOKEN=true` を入れてから `deploy` を実行する。
 
 Supabase の session モードは同時接続数に上限があるので、Cloud Run は各サービス最大1台、DB の接続は各2本（`PF_DB_POOL_SIZE`）にしている。

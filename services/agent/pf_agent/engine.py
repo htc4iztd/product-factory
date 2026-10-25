@@ -14,8 +14,8 @@ from google.adk.sessions import DatabaseSessionService
 from google.genai import types
 from sqlalchemy import select
 
+from . import code, images, llm, repo
 from . import frameworks as fx
-from . import images, llm, repo
 from .db import (
     PhaseReview,
     Product,
@@ -299,6 +299,43 @@ class Engine:
             s.commit()
         repo.log(product.id, None, "human", user, "image.delete", body={"image_id": image_id})
 
+    # ---------------- コード（GitHub リポジトリ） ----------------
+    def set_repo(self, product: Product, user: str, name: str, branch: str | None) -> dict:
+        """プロダクトに GitHub リポジトリをつなぐ（空ならつなぎを外す）。読めることを確かめてから保存する。"""
+        name = name.strip().removeprefix("https://github.com/").removesuffix(".git").strip("/")
+        info: dict = {}
+        if name:
+            try:
+                info = code.check_repo(name)
+            except code.CodeError as e:
+                raise FactoryError(e.status, e.message) from None
+        with session() as s:
+            p = s.get(Product, product.id)
+            p.repo = info.get("full_name")
+            p.repo_branch = ((branch or "").strip() or info.get("default_branch")) if info else None
+            s.commit()
+            body = {"repo": p.repo, "branch": p.repo_branch}
+        repo.log(product.id, None, "human", user, "code.repo", body=body)
+        return info
+
+    @staticmethod
+    def _repo(product: Product) -> tuple[str, str]:
+        if not product.repo:
+            raise FactoryError(409, "リポジトリがつながっていません")
+        return product.repo, product.repo_branch or "main"
+
+    def code_tree(self, product: Product) -> dict:
+        try:
+            return code.tree(*self._repo(product))
+        except code.CodeError as e:
+            raise FactoryError(e.status, e.message) from None
+
+    def code_file(self, product: Product, path: str) -> bytes:
+        try:
+            return code.read_file(*self._repo(product), path)
+        except code.CodeError as e:
+            raise FactoryError(e.status, e.message) from None
+
     # ---------------- phase review (G1〜G4) ----------------
     def review_phase(self, product: Product, phase_id: str, user: str, decision: str,
                      reason: str, back_stage: str | None = None) -> None:
@@ -448,5 +485,6 @@ class Engine:
 
 def product_dict(p: Product) -> dict:
     return {"id": p.id, "name": p.name, "idea": p.idea, "scope": p.scope, "mode": p.mode,
-            "status": p.status, "cover_image_id": p.cover_image_id, "created_by": p.created_by,
+            "status": p.status, "cover_image_id": p.cover_image_id, "repo": p.repo, "repo_branch": p.repo_branch,
+            "created_by": p.created_by,
             "created_at": p.created_at.isoformat()}

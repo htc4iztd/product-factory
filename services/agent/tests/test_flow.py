@@ -347,3 +347,39 @@ def test_trace_story_requirement_test(client):
     assert r["added"] == 0 and r["stage"]["trace"]["counts"] == {"合格": 1}
     ov = c.get(f"/products/{pid}", headers=H).json()
     assert next(p for p in ov["phases"] if p["id"] == "P3")["gate_question"] == "この版で作り始めてよいか"
+
+
+def test_repo_link_and_code_read(client, monkeypatch):
+    """GitHub は呼ばずに、読み取りの経路（つなぐ・一覧・ファイル）を確かめる。"""
+    import json as _json
+
+    from pf_agent import code
+    calls = []
+
+    def fake_get(path, accept="application/vnd.github+json"):
+        calls.append(path)
+        if path == "/repos/acme/kakeibo":
+            return _json.dumps({"full_name": "acme/kakeibo", "default_branch": "main", "private": False}).encode(), {}
+        if path.startswith("/repos/acme/kakeibo/git/trees/main"):
+            tree = [{"path": "src", "type": "tree"}, {"path": "src/app.py", "type": "blob", "size": 12}]
+            return _json.dumps({"sha": "abc", "truncated": False, "tree": tree}).encode(), {}
+        if path.startswith("/repos/acme/kakeibo/contents/src/app.py"):
+            return b"print('hi')\n", {}
+        raise code.CodeError(404, "見つかりません")
+    monkeypatch.setattr(code, "_get", fake_get)
+    code._tree_cache.clear()
+    c = client
+    pid = new_product(c)
+    assert c.get(f"/products/{pid}/code/tree", headers=H).status_code == 409   # まだつないでいない
+    assert c.put(f"/products/{pid}/repo", headers=H, json={"repo": "bad repo"}).status_code == 422
+    r = c.put(f"/products/{pid}/repo", headers=H, json={"repo": "https://github.com/acme/kakeibo.git"}).json()
+    assert r["product"]["repo"] == "acme/kakeibo" and r["product"]["repo_branch"] == "main"
+    t = c.get(f"/products/{pid}/code/tree", headers=H).json()
+    assert [e["type"] for e in t["entries"]] == ["dir", "file"]
+    f = c.get(f"/products/{pid}/code/file", headers=H, params={"path": "src/app.py"})
+    assert f.status_code == 200 and f.content == b"print('hi')\n"
+    assert c.get(f"/products/{pid}/code/file", headers=H, params={"path": "../etc/passwd"}).status_code == 422
+    other = dict(H, **{"x-pf-tenant": "tenant-b"})
+    assert c.get(f"/products/{pid}/code/tree", headers=other).status_code == 404
+    r = c.put(f"/products/{pid}/repo", headers=H, json={"repo": ""}).json()
+    assert r["product"]["repo"] is None

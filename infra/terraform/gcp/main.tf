@@ -46,7 +46,14 @@ resource "google_service_account" "agent" {
   depends_on   = [google_project_service.api]
 }
 
-# agent-api は IAM で閉じ、web だけが呼べるようにする
+# IDE（Code-OSS の静的ファイル）を配るだけのサービスアカウント。権限は持たせない
+resource "google_service_account" "ide" {
+  account_id   = "pf-ide"
+  display_name = "Product Factory IDE (static)"
+  depends_on   = [google_project_service.api]
+}
+
+# agent-api と IDE は IAM で閉じ、web だけが呼べるようにする
 resource "google_project_iam_member" "web_invoker" {
   project = var.project_id
   role    = "roles/run.invoker"
@@ -57,7 +64,7 @@ resource "google_project_iam_member" "web_invoker" {
 # AUTH_SECRET と PF_INTERNAL_TOKEN はここで生成する。
 # DATABASE_URL と GOOGLE_API_KEY は値を state に載せないよう、箱だけ作って値は gcloud で入れる。
 resource "google_secret_manager_secret" "env" {
-  for_each  = toset(["DATABASE_URL", "AUTH_SECRET", "PF_INTERNAL_TOKEN", "GOOGLE_API_KEY"])
+  for_each  = toset(["DATABASE_URL", "AUTH_SECRET", "PF_INTERNAL_TOKEN", "GOOGLE_API_KEY", "GITHUB_TOKEN"])
   secret_id = each.key
   replication {
     auto {}
@@ -89,6 +96,7 @@ locals {
     agent_db     = { sa = google_service_account.agent.email, secret = "DATABASE_URL" }
     agent_int    = { sa = google_service_account.agent.email, secret = "PF_INTERNAL_TOKEN" }
     agent_gemini = { sa = google_service_account.agent.email, secret = "GOOGLE_API_KEY" }
+    agent_github = { sa = google_service_account.agent.email, secret = "GITHUB_TOKEN" }
   }
 }
 resource "google_secret_manager_secret_iam_member" "access" {
@@ -117,7 +125,11 @@ resource "google_artifact_registry_repository_iam_member" "deployer_push" {
 }
 # Cloud Run に実行用サービスアカウントを割り当てるための権限
 resource "google_service_account_iam_member" "deployer_act_as" {
-  for_each           = { web = google_service_account.web.name, agent = google_service_account.agent.name }
+  for_each = {
+    web   = google_service_account.web.name
+    agent = google_service_account.agent.name
+    ide   = google_service_account.ide.name
+  }
   service_account_id = each.value
   role               = "roles/iam.serviceAccountUser"
   member             = "serviceAccount:${google_service_account.deployer.email}"
