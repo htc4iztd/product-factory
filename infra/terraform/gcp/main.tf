@@ -64,7 +64,7 @@ resource "google_project_iam_member" "web_invoker" {
 # AUTH_SECRET と PF_INTERNAL_TOKEN はここで生成する。
 # DATABASE_URL と GOOGLE_API_KEY は値を state に載せないよう、箱だけ作って値は gcloud で入れる。
 resource "google_secret_manager_secret" "env" {
-  for_each  = toset(["DATABASE_URL", "AUTH_SECRET", "PF_INTERNAL_TOKEN", "GOOGLE_API_KEY", "GITHUB_TOKEN", "PF_SECRET_KEY"])
+  for_each  = toset(["DATABASE_URL", "AUTH_SECRET", "PF_INTERNAL_TOKEN", "GOOGLE_API_KEY", "GITHUB_TOKEN", "PF_SECRET_KEY", "GITHUB_WEBHOOK_SECRET"])
   secret_id = each.key
   replication {
     auto {}
@@ -78,6 +78,15 @@ resource "random_password" "auth" {
 resource "random_password" "internal" {
   length  = 40
   special = false
+}
+# GitHub の webhook の署名を確かめる鍵（リポジトリの webhook 設定に同じ値を入れる）
+resource "random_password" "webhook" {
+  length  = 40
+  special = false
+}
+resource "google_secret_manager_secret_version" "webhook" {
+  secret      = google_secret_manager_secret.env["GITHUB_WEBHOOK_SECRET"].id
+  secret_data = random_password.webhook.result
 }
 # 設定画面で入れた API キーを DB で暗号化する鍵
 resource "random_password" "secret_key" {
@@ -102,6 +111,7 @@ locals {
     web_db       = { sa = google_service_account.web.email, secret = "DATABASE_URL" }
     web_auth     = { sa = google_service_account.web.email, secret = "AUTH_SECRET" }
     web_internal = { sa = google_service_account.web.email, secret = "PF_INTERNAL_TOKEN" }
+    web_webhook  = { sa = google_service_account.web.email, secret = "GITHUB_WEBHOOK_SECRET" }
     agent_db     = { sa = google_service_account.agent.email, secret = "DATABASE_URL" }
     agent_int    = { sa = google_service_account.agent.email, secret = "PF_INTERNAL_TOKEN" }
     agent_gemini = { sa = google_service_account.agent.email, secret = "GOOGLE_API_KEY" }

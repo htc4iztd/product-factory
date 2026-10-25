@@ -141,3 +141,25 @@ export async function readNotices(): Promise<void> {
   await agent("/notices/read", { method: "POST" });
   revalidatePath("/notices");
 }
+
+// ---------------- GitHub Issues との同期 ----------------
+export async function configureGithub(pid: string, sync: string, importNew: boolean): Promise<Result> {
+  const r = await run(() => agent(`/products/${pid}/github`, { method: "PUT", body: { sync, import_new: importNew } }));
+  if ("error" in r) return r;
+  revalidatePath(`/p/${pid}/tickets`, "layout");
+  return {};
+}
+
+export async function syncGithub(pid: string): Promise<Result & { updated?: number; created?: number; comments?: number }> {
+  const r = await run(() => agent<{ updated: number; created: number; comments: number }>(`/products/${pid}/github/sync`, { method: "POST" }));
+  if ("error" in r) return r;
+  revalidatePath(`/p/${pid}/tickets`, "layout");
+  return r.ok;
+}
+
+export async function pushTicket(pid: string, n: number): Promise<Result> {
+  const r = await run(() => agent(`/products/${pid}/tickets/${n}/github`, { method: "POST" }));
+  if ("error" in r) return r;
+  revalidatePath(`/p/${pid}/tickets`, "layout");
+  return {};
+}

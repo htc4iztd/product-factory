@@ -4,10 +4,12 @@
 """
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, HTTPException
+import os
+
+from fastapi import APIRouter, Depends, Header, HTTPException
 from pydantic import BaseModel, Field
 
-from . import collab
+from . import collab, ghsync, tenantsec
 from .authz import BASE_ORDER, Caller, caller
 from .db import Product, session
 
@@ -100,9 +102,18 @@ def list_tickets(product_id: str, status: str | None = None, c: Caller = Depends
     return collab.tickets(_p(c, product_id), status)
 
 
+def _sync(p: Product, ticket: dict) -> dict:
+    """同期の対象なら Issue に反映して、その結果をチケットに載せて返す。"""
+    gh = ghsync.push_ticket(p, ticket["number"])
+    if gh is not None:
+        ticket = {**ticket, "external": {**(ticket.get("external") or {}), "github": gh}}
+    return ticket
+
+
 @router.post(P + "/tickets")
 def post_ticket(product_id: str, body: TicketBody, c: Caller = Depends(caller)):
-    return collab.create_ticket(_p(c, product_id, True), c.user, body.model_dump(exclude_none=True))
+    p = _p(c, product_id, True)
+    return _sync(p, collab.create_ticket(p, c.user, body.model_dump(exclude_none=True)))
 
 
 @router.get(P + "/tickets/{number}")
@@ -112,12 +123,16 @@ def get_ticket(product_id: str, number: int, c: Caller = Depends(caller)):
 
 @router.patch(P + "/tickets/{number}")
 def patch_ticket(product_id: str, number: int, body: TicketBody, c: Caller = Depends(caller)):
-    return collab.update_ticket(_p(c, product_id, True), c.user, number, body.model_dump(exclude_unset=True))
+    p = _p(c, product_id, True)
+    return _sync(p, collab.update_ticket(p, c.user, number, body.model_dump(exclude_unset=True)))
 
 
 @router.post(P + "/tickets/{number}/comments")
 def comment_ticket(product_id: str, number: int, body: PostBody, c: Caller = Depends(caller)):
-    return collab.add_post(_p(c, product_id, True), c.user, body.body, ticket_number=number)
+    p = _p(c, product_id, True)
+    post = collab.add_post(p, c.user, body.body, ticket_number=number)
+    ghsync.push_comment(p, number, post["id"])
+    return post
 
 
 # ---------------- チャンネルと発言 ----------------
@@ -170,7 +185,11 @@ def post_decision(product_id: str, body: DecisionBody, c: Caller = Depends(calle
 
 @router.post(P + "/decisions/{number}/decide")
 def decide(product_id: str, number: int, body: DecideBody, c: Caller = Depends(caller)):
-    return collab.decide(_p(c, product_id, True), c.user, number, body.model_dump(exclude_unset=True))
+    p = _p(c, product_id, True)
+    out = collab.decide(p, c.user, number, body.model_dump(exclude_unset=True))
+    if out.get("ticket"):
+        out["ticket"] = _sync(p, out["ticket"])
+    return out
 
 
 # ---------------- 会議 ----------------
@@ -239,3 +258,85 @@ def get_notices(c: Caller = Depends(caller)):
 def read_notices(c: Caller = Depends(caller)):
     collab.read_notices(c.tenant, c.user)
     return {"ok": True}
+
+
+# ---------------- GitHub Issues との同期 ----------------
+class GithubConfig(BaseModel):
+    sync: str
+    import_new: bool = False
+
+
+class TokenBody(BaseModel):
+    token: str | None = Field(default=None, max_length=300)
+
+
+class Webhook(BaseModel):
+    event: str = Field(max_length=60)
+    repo: str = Field(max_length=200)
+
+
+@router.get(P + "/github")
+def github_status(product_id: str, c: Caller = Depends(caller)):
+    return ghsync.status(_p(c, product_id))
+
+
+@router.put(P + "/github")
+def github_configure(product_id: str, body: GithubConfig, c: Caller = Depends(caller)):
+    p = _p(c, product_id, True)
+    if c.base_role not in ("OWNER", "ADMIN"):
+        raise HTTPException(403, "同期の設定は OWNER か ADMIN だけが変えられます")
+    return ghsync.configure(p, c.user, body.sync, body.import_new)
+
+
+@router.post(P + "/github/sync")
+def github_pull(product_id: str, c: Caller = Depends(caller)):
+    return ghsync.pull(_p(c, product_id, True), c.user)
+
+
+@router.post(P + "/tickets/{number}/github")
+def github_push(product_id: str, number: int, c: Caller = Depends(caller)):
+    p = _p(c, product_id, True)
+    collab.ticket(p, number)  # 無ければ 404
+    gh = ghsync.push_ticket(p, number, force=True)
+    return {"github": gh}
+
+
+@router.get("/settings/github")
+def github_token_status(c: Caller = Depends(caller)):
+    _, src = ghsync.token(c.tenant)
+    return {"source": src, "hint": tenantsec.hint(c.tenant, "github_token"), "can_edit": c.base_role == "OWNER"}
+
+
+@router.put("/settings/github")
+def github_token(body: TokenBody, c: Caller = Depends(caller)):
+    if c.base_role != "OWNER":
+        raise HTTPException(403, "トークンはテナントの OWNER だけが変えられます")
+    tenantsec.put(c.tenant, "github_token", (body.token or "").strip() or None, c.user)
+    return github_token_status(c)
+
+
+@router.post("/settings/github/test")
+def github_test(c: Caller = Depends(caller)):
+    tok, src = ghsync.token(c.tenant)
+    if not tok:
+        return {"ok": False, "error": "トークンがありません"}
+    try:
+        me = ghsync.code.call("GET", "/user", tok)
+    except ghsync.code.CodeError as e:
+        return {"ok": False, "error": e.message, "source": src}
+    return {"ok": True, "login": me.get("login"), "source": src}
+
+
+@router.post("/github/webhook")
+def github_webhook(body: Webhook, x_pf_internal_token: str = Header(default="")):
+    """web が署名を確かめたうえで中継する。該当するプロダクトを取り込み直す。"""
+    if x_pf_internal_token != os.environ.get("PF_INTERNAL_TOKEN", "dev-internal-token"):
+        raise HTTPException(401, "invalid internal token")
+    done = []
+    if body.event in ("issues", "issue_comment"):
+        for p in ghsync.products_for_repo(body.repo):
+            try:
+                done.append({"product": p.id, **ghsync.pull(p, "github-webhook")})
+            except ghsync.SyncError as e:
+                done.append({"product": p.id, "error": e.message})
+    return {"ok": True, "pulled": done}

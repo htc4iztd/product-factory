@@ -6,7 +6,8 @@ const { auth } = NextAuth(authConfig);
 
 export default auth((req) => {
   const { pathname } = req.nextUrl;
-  const isPublic = ["/login", "/register", "/api/auth"].some((p) => pathname.startsWith(p));
+  // /api/github/webhook はログインではなく GitHub の署名で確かめる
+  const isPublic = ["/login", "/register", "/api/auth", "/api/github/webhook"].some((p) => pathname.startsWith(p));
   if (!req.auth && !isPublic) {
     const url = new URL("/login", req.url);
     url.searchParams.set("callbackUrl", pathname);

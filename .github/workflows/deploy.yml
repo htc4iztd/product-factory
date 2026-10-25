@@ -53,7 +53,9 @@ jobs:
           ADMINS: ${{ vars.PF_ADMIN_EMAILS }}   # 設定画面でアプリ全体の既定を変えられる人（複数は ; 区切り）
         run: |
           SECRETS=DATABASE_URL=DATABASE_URL:latest,PF_INTERNAL_TOKEN=PF_INTERNAL_TOKEN:latest,PF_SECRET_KEY=PF_SECRET_KEY:latest
-          ENVS=PF_DB_POOL_SIZE=2,PF_MODEL=$PF_MODEL,PF_IMAGE_MODEL=$PF_IMAGE_MODEL,GOOGLE_CLOUD_PROJECT=$PROJECT,PF_ADMIN_EMAILS=$ADMINS
+          # Issue の本文にチケットへのリンクを書くため、web の URL を渡す（初回は空）
+          WEB_URL=$(gcloud run services describe pf-web --region $REGION --format 'value(status.url)' 2>/dev/null || true)
+          ENVS=PF_DB_POOL_SIZE=2,PF_MODEL=$PF_MODEL,PF_IMAGE_MODEL=$PF_IMAGE_MODEL,GOOGLE_CLOUD_PROJECT=$PROJECT,PF_ADMIN_EMAILS=$ADMINS,PF_WEB_URL=$WEB_URL
           # Gemini を使うのは Variables の PF_GEMINI=true のときだけ。それ以外はスタブ
           if [ "$GEMINI" = "true" ]; then SECRETS=$SECRETS,GOOGLE_API_KEY=GOOGLE_API_KEY:latest; else ENVS=$ENVS,PF_LLM=stub; fi
           # 非公開リポジトリを読むときだけ GITHUB_TOKEN を渡す（Variables の PF_GITHUB_TOKEN=true）
@@ -66,7 +68,10 @@ jobs:
       - name: deploy web
         env:
           ALLOW_SIGNUP: ${{ vars.PF_ALLOW_SIGNUP || 'true' }}
+          WEBHOOK_ON: ${{ vars.PF_GITHUB_WEBHOOK }}
         run: |
+          # GitHub の webhook を受けるときだけ署名の鍵を渡す（Variables の PF_GITHUB_WEBHOOK=true。Terraform の apply が先）
+          HOOK=""; if [ "$WEBHOOK_ON" = "true" ]; then HOOK=",GITHUB_WEBHOOK_SECRET=GITHUB_WEBHOOK_SECRET:latest"; fi
           AGENT_URL=$(gcloud run services describe pf-agent --region $REGION --format 'value(status.url)')
           # IDE（ide ワークフローが置く）があれば、その URL を web に渡す
           IDE_URL=$(gcloud run services describe pf-ide --region $REGION --format 'value(status.url)' 2>/dev/null || true)
@@ -74,5 +79,5 @@ jobs:
             --service-account pf-web@$PROJECT.iam.gserviceaccount.com --allow-unauthenticated \
             --port 3000 --cpu 1 --memory 512Mi --cpu-boost --timeout 600 --min-instances 0 --max-instances 1 \
             --set-env-vars "AGENT_API_URL=$AGENT_URL,AGENT_AUTH=google-id-token,PF_DB_POOL_SIZE=2,PF_ALLOW_SIGNUP=$ALLOW_SIGNUP,IDE_ORIGIN=$IDE_URL" \
-            --set-secrets AUTH_SECRET=AUTH_SECRET:latest,DATABASE_URL=DATABASE_URL:latest,PF_INTERNAL_TOKEN=PF_INTERNAL_TOKEN:latest
+            --set-secrets AUTH_SECRET=AUTH_SECRET:latest,DATABASE_URL=DATABASE_URL:latest,PF_INTERNAL_TOKEN=PF_INTERNAL_TOKEN:latest$HOOK
           echo "web: $(gcloud run services describe pf-web --region $REGION --format 'value(status.url)')" >> $GITHUB_STEP_SUMMARY

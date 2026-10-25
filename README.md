@@ -29,7 +29,8 @@ ide               Code-OSS の Web 版（ソースからビルド）と、リポ
 - 参照タブでは、事業フェーズ（①〜⑤）の成果物（最新版、なければ下書き）をその場で読める。
 - 文書タブは編集できる。「## 項目名」の見出しごとにキャンバスの項目へ反映する（フローなど文書から読めない項目は変えない）。
 - 「確定」ではなく「更新」と呼ぶ。下書きを更新すると版が1つ増え、その版が最新版になる。
-- 「チーム」：議論（プロダクトごとのチャンネルとスレッド・メンション・通知）、チケット（TK-n。仕分け待ち→未着手→進行中→レビュー→完了）、決定記録（DEC-n）、会議と議事録（MTG-n）、ドキュメント（DOC-n）。どれも成果物の ID（US-01 など）と同じ書き方で互いを参照でき、本文中の ID はリンクになる。仕様は会話で決まることが多いので、スレッド・会議の文字起こし・外部の会話から AI が「決まったこと」と「宿題」を抜き出し、決定記録（確定待ち）とチケット（仕分け待ち）にする。人が確定した決定は、関係するステージの AI の対話に前提として渡り、ステージの参照タブにも出る。外部の会話（Google Chat・Teams・Gmail・Outlook・Meet・Slack など）はチャンネルにつなぎ、本文ごと取り込むか、要約と決定だけを残すかをチャンネルごとに選ぶ。いまは貼り付けで取り込み、Google Workspace・Microsoft 365 からの自動取り込みと GitHub Issues との同期はこの受け口に後から足す。
+- 「チーム」：議論（プロダクトごとのチャンネルとスレッド・メンション・通知）、チケット（TK-n。仕分け待ち→未着手→進行中→レビュー→完了）、決定記録（DEC-n）、会議と議事録（MTG-n）、ドキュメント（DOC-n）。どれも成果物の ID（US-01 など）と同じ書き方で互いを参照でき、本文中の ID はリンクになる。仕様は会話で決まることが多いので、スレッド・会議の文字起こし・外部の会話から AI が「決まったこと」と「宿題」を抜き出し、決定記録（確定待ち）とチケット（仕分け待ち）にする。人が確定した決定は、関係するステージの AI の対話に前提として渡り、ステージの参照タブにも出る。外部の会話（Google Chat・Teams・Gmail・Outlook・Meet・Slack など）はチャンネルにつなぎ、本文ごと取り込むか、要約と決定だけを残すかをチャンネルごとに選ぶ。いまは貼り付けで取り込み、Google Workspace・Microsoft 365 からの自動取り込みはこの受け口に後から足す。
+- チケットと GitHub Issues の同期：プロダクトごとに「同期しない／⑫⑬（構築）のチケットだけ／すべて」を選ぶ。対象のチケットと手で起票したチケットは、作成・更新（題名・本文・完了で close）・コメントが Issue に出る。GitHub 側の close・reopen・題名の変更・コメントは、チケット画面を開いたとき（前回から1分以上）・「今すぐ取り込む」・webhook で取り込む。GitHub で作られた Issue を「仕分け待ち」のチケットにすることもできる。往復で同じ変更を繰り返さないよう、PF が書いた本文とコメントには印を付け、Issue の updated_at より新しい変更だけを取り込む。トークンはテナントごとに設定画面で入れる（暗号化して保存。なければサーバーの `GITHUB_TOKEN`）。このトークンで非公開リポジトリのコードも読める。
 - 右上の歯車（設定）で、テナントが使う LLM の接続を決める。接続方式は Gemini API・Vertex AI（キー不要。Gemini と Claude）・Anthropic API・OpenAI 互換 API（ローカルLLM など）・スタブ。対話・レポート・画像でモデルを分けられる（画像は Gemini 系だけ）。アプリ全体の既定はプラットフォーム管理者（`PF_ADMIN_EMAILS`）が決め、各テナントの OWNER が自分のキーで上書きできる。API キーは `PF_SECRET_KEY` から作る鍵で暗号化して DB に置き、画面には末尾4文字だけを出す。Vertex AI（キー不要）はアプリの GCP の費用になるので、選べるのはプラットフォーム管理者と、管理者が全テナントに許したときだけ。テナントの OpenAI 互換 URL は https の公開アドレスだけを受け付ける（内部ネットワークへの到達を防ぐ）。
 - 「コード（IDE）」では、プロダクトに GitHub リポジトリ（owner/name とブランチ）をつなぎ、Code-OSS の Web 版で読む（読み取り専用、ターミナルなし）。Code-OSS は `ide/VSCODE_VERSION` のタグからソースでビルドし（`ide/build.sh`）、Microsoft のマーケットプレイスや製品版の資産は使わない。IDE 内の拡張機能（`ide/extension`）が `pfrepo://<プロダクトID>/` のファイルシステムとして web の `/api/p/{id}/code/*` を読み、agent-api が GitHub の REST API から木と中身を取る。非公開リポジトリは `GITHUB_TOKEN`（読み取りだけの fine-grained token）が要る。
 - ループ L1〜L5、トレーサビリティ画面、worker / scheduler は R2。
@@ -58,6 +59,7 @@ cd apps/web && npm ci && DATABASE_URL=postgresql://pf@127.0.0.1:5432/pf AUTH_SEC
 - `services/agent`: `pytest`（対話・採用・更新・承認と差し戻し・要再確認・設定・テナント分離・対話セッションとレポート・再起動後の対話の継続・文書からの反映）
 - `apps/web`: `BASE=http://localhost:3000 node e2e/full-cycle.mjs`（登録→①〜⑤をAIの下書き・採用・更新で通す→文書タブからの反映→承認と差し戻し→下流の要再確認→ステージの開閉→参照タブ→対話セッションとレポート→振り返り）
 - チーム: `BASE=... node e2e/team.mjs`（議論→決定と宿題の抜き出し→決定の確定とステージの参照→チケット→会議の議事録→ドキュメント→外部の会話の取り込み）
+- GitHub: `BASE=... node e2e/github.mjs`（agent-api の `PF_GITHUB_API` を偽の GitHub に向けて、トークン→同期の設定→Issue の起票→GitHub での close の取り込みを通す）
 - IDE: `BASE=... node e2e/ide.mjs`（公開リポジトリをつなぎ、Code-OSS でファイルの木と中身が出るか。`IDE_ORIGIN` と GitHub への接続が要る）
 
 ## デプロイ（Cloud Run + Supabase）
@@ -86,6 +88,7 @@ web と agent-api（と IDE）を Cloud Run に置き、DB は Supabase を使�
 3. **GitHub**：Environment `production` を作る（必要なら Required reviewers を付ける）。Variables に `terraform output` の `GCP_PROJECT_ID`、`GCP_REGION`、`GCP_WIF_PROVIDER`、`GCP_DEPLOY_SA` を入れる。任意で次も入れる。
    - `PF_GEMINI=true`：Gemini を使う（無ければスタブ）。`PF_MODEL` で対話のモデル、`PF_IMAGE_MODEL` で画像のモデルを変えられる。
    - `PF_ALLOW_SIGNUP=false`：自分の登録が済んだら入れて、新規登録を締め切る。
+   - `PF_GITHUB_WEBHOOK=true`：GitHub の webhook を受ける（Terraform の apply の後）。リポジトリの Settings → Webhooks に、Payload URL `https://<web の URL>/api/github/webhook`、Content type `application/json`、Secret に Secret Manager の `GITHUB_WEBHOOK_SECRET` の値、イベントは Issues と Issue comments を入れる。
    - `PF_ADMIN_EMAILS`：プラットフォーム管理者。設定画面でアプリ全体の LLM の既定と Vertex AI の利用を決められる人のメールアドレス（複数は `;` 区切り）。
 4. Actions → `deploy` → Run workflow。以後は main への push で `ci` 成功後に自動で更新される。web の URL はジョブのサマリーに出る。
 

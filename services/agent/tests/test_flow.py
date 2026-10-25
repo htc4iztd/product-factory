@@ -356,7 +356,7 @@ def test_repo_link_and_code_read(client, monkeypatch):
     from pf_agent import code
     calls = []
 
-    def fake_get(path, accept="application/vnd.github+json"):
+    def fake_get(path, accept="application/vnd.github+json", token=None):
         calls.append(path)
         if path == "/repos/acme/kakeibo":
             return _json.dumps({"full_name": "acme/kakeibo", "default_branch": "main", "private": False}).encode(), {}

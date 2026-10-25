@@ -1,5 +1,6 @@
 import Link from "next/link";
-import { agent, type Overview, type TicketDetail } from "@/lib/agent";
+import { agent, type GithubLink, type Overview, type Product, type TicketDetail } from "@/lib/agent";
+import { GithubTicketBox } from "@/components/team/GithubTicketBox";
 import { PageHeader } from "@/components/PageHeader";
 import { ActionForm } from "@/components/team/ActionForm";
 import { RefChips, RefText, when } from "@/components/team/RefText";
@@ -34,7 +35,11 @@ export default async function TicketPage({ params }: { params: Promise<{ id: str
             </ActionForm>
           </section>
         </div>
-        <TicketFields pid={id} ticket={{ ...t, comments: t.comments.length }} stages={ov.stages.map((s) => ({ id: s.id, label: `${s.no} ${s.name}` }))} />
+        <div className="space-y-4">
+          <TicketFields pid={id} ticket={{ ...t, comments: t.comments.length }} stages={ov.stages.map((s) => ({ id: s.id, label: `${s.no} ${s.name}` }))} />
+          <GithubTicketBox pid={id} n={t.number} repo={(ov.product as Product).repo}
+            link={((t.external as { github?: GithubLink } | null)?.github) ?? null} />
+        </div>
       </div>
     </>
   );

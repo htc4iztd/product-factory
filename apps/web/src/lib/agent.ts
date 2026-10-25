@@ -47,6 +47,20 @@ async function call(path: string, init?: { method?: string; body?: unknown }): P
   });
 }
 
+// ログインした人の文脈を持たない内部呼び出し（GitHub の webhook の中継など）。呼び出し元で正当性を確かめてから使う
+export async function agentInternal<T = unknown>(path: string, body: unknown): Promise<T> {
+  const res = await fetch(`${BASE}${path}`, {
+    method: "POST",
+    headers: {
+      "content-type": "application/json", "x-pf-internal-token": TOKEN,
+      ...(ID_TOKEN ? { authorization: `Bearer ${await googleIdToken()}` } : {}),
+    },
+    body: JSON.stringify(body), cache: "no-store",
+  });
+  if (!res.ok) throw new AgentError(res.status, res.statusText);
+  return (await res.json()) as T;
+}
+
 // 画像など JSON 以外をそのまま受け取る
 export async function agentRaw(path: string): Promise<Response> {
   return call(path);
@@ -181,3 +195,10 @@ export type MeetingDetail = Meeting & { agenda: string; transcript: string; minu
 export type DocSummary = { number: number; key: string; title: string; refs: string[]; updated_by: string; updated_at: string };
 export type DocDetail = DocSummary & { body: string };
 export type Notices = { unread: number; items: { id: number; kind: string; text: string; link: string; actor: string; read: boolean; product_id: string; created_at: string }[] };
+
+export type GithubLink = { repo: string; number: number; url: string; state: string; synced_at: string; error: string | null };
+export type GithubStatus = {
+  repo: string | null; sync: "off" | "build" | "all"; import: boolean; synced_at: string | null;
+  token: { source: "tenant" | "server" | "none"; hint: string | null };
+};
+export type GithubToken = { source: "tenant" | "server" | "none"; hint: string | null; can_edit: boolean };

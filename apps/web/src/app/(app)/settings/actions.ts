@@ -35,3 +35,23 @@ export async function listLlmModels(scope: "tenant" | "app"): Promise<{ ok: bool
     throw e;
   }
 }
+
+export async function saveGithubToken(token: string | null): Promise<{ error?: string }> {
+  try {
+    await agent("/settings/github", { method: "PUT", body: { token } });
+  } catch (e) {
+    if (e instanceof AgentError) return { error: e.message };
+    throw e;
+  }
+  revalidatePath("/settings");
+  return {};
+}
+
+export async function testGithub(): Promise<{ ok: boolean; login?: string; source?: string; error?: string }> {
+  try {
+    return await agent("/settings/github/test", { method: "POST" });
+  } catch (e) {
+    if (e instanceof AgentError) return { ok: false, error: e.message };
+    throw e;
+  }
+}

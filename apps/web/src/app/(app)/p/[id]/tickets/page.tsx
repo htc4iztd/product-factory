@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { Plus } from "lucide-react";
-import { agent, type Overview, type Ticket } from "@/lib/agent";
+import { agent, type GithubStatus, type Overview, type Ticket } from "@/lib/agent";
+import { GithubPanel } from "@/components/team/GithubPanel";
 import { PageHeader } from "@/components/PageHeader";
 import { ActionForm } from "@/components/team/ActionForm";
 import { RefChips } from "@/components/team/RefText";
@@ -12,13 +13,15 @@ const COLUMNS = ["triage", "todo", "doing", "review", "done"] as const;
 export default async function TicketsPage({ params, searchParams }: { params: Promise<{ id: string }>; searchParams: Promise<{ closed?: string }> }) {
   const { id } = await params;
   const sp = await searchParams;
-  const [tickets, ov] = await Promise.all([agent<Ticket[]>(`/products/${id}/tickets`), agent<Overview>(`/products/${id}`)]);
+  const [tickets, ov, gh] = await Promise.all([agent<Ticket[]>(`/products/${id}/tickets`), agent<Overview>(`/products/${id}`),
+    agent<GithubStatus>(`/products/${id}/github`)]);
   const closed = tickets.filter((t) => t.status === "closed");
   return (
     <>
       <PageHeader crumbs={<span>チーム</span>} title="チケット"
         sub="誰が・何を・どこまでやるか。US-03 や DEC-2 のように ID を書くと、成果物や決定記録とつながります。会話や会議から AI が起こした宿題は「仕分け待ち」に入ります。" />
       <div className="space-y-6 px-8 py-6">
+        <GithubPanel pid={id} status={gh} />
         <details className="card p-4" open={tickets.length === 0}>
           <summary className="flex cursor-pointer items-center gap-1.5 text-[13px] font-medium"><Plus size={14} />チケットを作る</summary>
           <ActionForm action={createTicket.bind(null, id)} submit="作成" className="mt-3 grid gap-3 md:grid-cols-6">
@@ -50,6 +53,9 @@ export default async function TicketsPage({ params, searchParams }: { params: Pr
                       <div className="mt-2 flex flex-wrap items-center gap-1 text-[11px] text-zinc-500">
                         {t.assignee && <span className="truncate">{t.assignee}</span>}
                         {!!t.comments && <span className="text-zinc-400">💬 {t.comments}</span>}
+                        {(t.external as { github?: { number?: number; error?: string } } | null)?.github?.number && (
+                          <span className="ml-auto font-mono text-zinc-400">#{(t.external as { github: { number: number } }).github.number}</span>
+                        )}
                       </div>
                       {t.refs.length > 0 && <div className="mt-1.5 flex flex-wrap gap-1">{t.refs.slice(0, 4).map((r) => <span key={r} className="chip font-mono">{r}</span>)}</div>}
                     </Link>

@@ -46,6 +46,10 @@ class Product(Base):
     cover_image_id: Mapped[str | None] = mapped_column(String(32), nullable=True)  # プロダクト・キャンバスの表紙
     repo: Mapped[str | None] = mapped_column(String(200), nullable=True)          # GitHub の owner/name
     repo_branch: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    # GitHub Issues との同期：off | build（⑫⑬のチケット）| all。import は GitHub で作られた Issue をチケットにするか
+    gh_sync: Mapped[str] = mapped_column(String(8), default="off")
+    gh_import: Mapped[bool] = mapped_column(Boolean, default=False)
+    gh_synced_at: Mapped[str | None] = mapped_column(String(30), nullable=True)   # 最後に取り込んだ時刻
     created_by: Mapped[str] = mapped_column(String(200))
     created_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), default=_now)
 
@@ -265,6 +269,17 @@ class Notice(Base):
     created_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), default=_now)
 
 
+class TenantSecret(Base):
+    """テナントの秘密情報（GitHub のトークンなど）。値は暗号化して置く。"""
+    __tablename__ = "tenant_secrets"
+    tenant_id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    name: Mapped[str] = mapped_column(String(40), primary_key=True)
+    value_enc: Mapped[str] = mapped_column(Text)
+    hint: Mapped[str] = mapped_column(String(8), default="")
+    updated_by: Mapped[str] = mapped_column(String(200), default="")
+    updated_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), default=_now, onupdate=_now)
+
+
 class LlmSetting(Base):
     """LLM の接続設定。scope は "app"（運用者が決めるアプリ全体の既定）か "t:<テナントID>"（テナントの上書き）。"""
     __tablename__ = "llm_settings"
@@ -355,7 +370,9 @@ _ADDED_COLUMNS = {
     "stage_runs": {"draft": "JSON", "enabled": "BOOLEAN DEFAULT {true}",
                    "approval_required": "BOOLEAN DEFAULT {false}"},
     "artifacts": {"data": "JSON"},
-    "products": {"cover_image_id": "VARCHAR(32)", "repo": "VARCHAR(200)", "repo_branch": "VARCHAR(100)"},
+    "products": {"cover_image_id": "VARCHAR(32)", "repo": "VARCHAR(200)", "repo_branch": "VARCHAR(100)",
+                 "gh_sync": "VARCHAR(8) DEFAULT 'off'", "gh_import": "BOOLEAN DEFAULT {false}",
+                 "gh_synced_at": "VARCHAR(30)"},
     "chat_messages": {"session_id": "VARCHAR(32)"},
     "llm_settings": {"platform_granted": "BOOLEAN DEFAULT {false}"},
 }

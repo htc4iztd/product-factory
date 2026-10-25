@@ -16,7 +16,7 @@ from google.adk.sessions import DatabaseSessionService
 from google.genai import types
 from sqlalchemy import select
 
-from . import code, collab, images, llm, llmconf, repo
+from . import code, collab, ghsync, images, llm, llmconf, repo
 from . import frameworks as fx
 from .db import (
     PhaseReview,
@@ -311,7 +311,7 @@ class Engine:
         info: dict = {}
         if name:
             try:
-                info = code.check_repo(name)
+                info = code.check_repo(name, ghsync.token(product.tenant_id)[0])
             except code.CodeError as e:
                 raise FactoryError(e.status, e.message) from None
         with session() as s:
@@ -331,13 +331,13 @@ class Engine:
 
     def code_tree(self, product: Product) -> dict:
         try:
-            return code.tree(*self._repo(product))
+            return code.tree(*self._repo(product), token=ghsync.token(product.tenant_id)[0])
         except code.CodeError as e:
             raise FactoryError(e.status, e.message) from None
 
     def code_file(self, product: Product, path: str) -> bytes:
         try:
-            return code.read_file(*self._repo(product), path)
+            return code.read_file(*self._repo(product), path, token=ghsync.token(product.tenant_id)[0])
         except code.CodeError as e:
             raise FactoryError(e.status, e.message) from None
 

@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { ChevronLeft, ShieldCheck } from "lucide-react";
-import { agent, type LlmSettings } from "@/lib/agent";
+import { agent, type GithubToken, type LlmSettings } from "@/lib/agent";
+import { GithubTokenForm } from "@/components/settings/GithubTokenForm";
 import { Logo } from "@/components/Logo";
 import { UserMenu } from "@/components/UserMenu";
 import { LlmSettingsForm } from "@/components/settings/LlmSettingsForm";
@@ -8,7 +9,7 @@ import { LlmSettingsForm } from "@/components/settings/LlmSettingsForm";
 const SOURCE: Record<string, string> = { tenant: "このテナントの設定", app: "アプリ全体の既定", env: "サーバーの環境変数" };
 
 export default async function SettingsPage() {
-  const s = await agent<LlmSettings>("/settings/llm");
+  const [s, gh] = await Promise.all([agent<LlmSettings>("/settings/llm"), agent<GithubToken>("/settings/github")]);
   const eff = s.effective;
   return (
     <>
@@ -25,7 +26,7 @@ export default async function SettingsPage() {
             <h1 className="text-2xl font-semibold tracking-tight">設定</h1>
             {s.is_admin && <span className="chip border-brand-200 bg-brand-50 text-brand-700"><ShieldCheck size={11} />プラットフォーム管理者</span>}
           </div>
-          <p className="mt-1 text-sm text-zinc-500">このテナントで使う AI（LLM）の接続を決めます。ステージの開閉と承認は、各プロダクトの「ステージの設定」で決めます。</p>
+          <p className="mt-1 text-sm text-zinc-500">このテナントで使う AI（LLM）と GitHub の接続を決めます。ステージの開閉と承認は、各プロダクトの「ステージの設定」で決めます。</p>
         </div>
 
         <section className="card p-5">
@@ -57,6 +58,8 @@ export default async function SettingsPage() {
             note="上書きしていないテナントは、すべてこの接続を使います。費用はこの接続の持ち主にかかります。Vertex AI の費用は、このアプリを動かしている GCP プロジェクトにかかります。"
             view={s.app} canEdit allowVertex options={s.options} />
         )}
+
+        <GithubTokenForm status={gh} />
       </main>
     </>
   );
