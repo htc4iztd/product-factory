@@ -1,5 +1,6 @@
 import type { FieldSpec, Row, StageDetail } from "@/lib/agent";
 import { FieldEditor } from "./FieldEditor";
+import { KpiGraph } from "./KpiGraph";
 
 type Ctx = { pid: string; st: StageDetail; readOnly: boolean; proposed: Set<string> };
 
@@ -166,28 +167,6 @@ function Vpc({ c }: { c: Ctx }) {
 }
 
 // ---------- ⑤ 事業計画 ----------
-function KpiTree({ rows }: { rows: Row[] }) {
-  const items = rows.filter((r) => String(r.kpi ?? "").trim());
-  if (!items.length) return null;
-  const names = new Set(items.map((r) => String(r.kpi)));
-  const children = (p: string) => items.filter((r) => String(r.parent ?? "") === p);
-  const roots = items.filter((r) => !String(r.parent ?? "").trim() || !names.has(String(r.parent)));
-  const Node = ({ r, depth }: { r: Row; depth: number }) => (
-    <li>
-      <div className={`flex items-center gap-2 rounded-lg border px-2.5 py-1.5 ${depth === 0 ? "border-brand-200 bg-brand-50" : "border-zinc-200 bg-white"}`}>
-        <span className="text-[12px] font-medium">{String(r.kpi)}</span>
-        {String(r.target ?? "") && <span className="ml-auto text-[11px] tabular-nums text-zinc-500">{String(r.target)}</span>}
-      </div>
-      {children(String(r.kpi)).length > 0 && (
-        <ul className="ml-4 mt-1.5 space-y-1.5 border-l border-zinc-200 pl-3">
-          {children(String(r.kpi)).map((ch, i) => <Node key={i} r={ch} depth={depth + 1} />)}
-        </ul>
-      )}
-    </li>
-  );
-  return <ul className="space-y-1.5">{roots.map((r, i) => <Node key={i} r={r} depth={0} />)}</ul>;
-}
-
 function plTotals(rows: Row[]) {
   const by = Object.fromEntries(rows.map((r) => [String(r.item), r]));
   const n = (v: unknown) => Number(v) || 0;
@@ -202,13 +181,19 @@ function BusinessPlan({ c }: { c: Ctx }) {
   const max = Math.max(1, ...totals.map((t) => Math.max(Math.abs(t.sales), Math.abs(t.op))));
   return (
     <div className="space-y-4">
-      <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
-        <Panel>
-          <div className="mb-3 text-[13px] font-medium">KPIツリー</div>
-          <KpiTree rows={(c.st.draft.kpi_tree as Row[]) ?? []} />
-          <div className="mt-4 border-t border-zinc-100 pt-3"><F c={c} k="kpi_tree" /></div>
-        </Panel>
-        <div className="space-y-4">
+      <Panel>
+        <div className="mb-3 flex items-center gap-2">
+          <span className="text-[13px] font-medium">KPIツリー</span>
+          {c.proposed.has("kpi_tree") && <span className="rounded bg-brand-50 px-1 text-[10px] font-medium text-brand-700">AI案あり</span>}
+          <span className="text-[11px] text-zinc-400">上位のKPIを、掛け算・足し算で子KPIに分解します</span>
+        </div>
+        <KpiGraph pid={c.pid} sid={c.st.id} rows={(c.st.draft.kpi_tree as Row[]) ?? []} readOnly={c.readOnly} />
+        <details className="mt-3">
+          <summary className="cursor-pointer select-none text-xs text-zinc-500">表で見る・編集する</summary>
+          <div className="mt-2"><F c={c} k="kpi_tree" /></div>
+        </details>
+      </Panel>
+      <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_minmax(0,1.4fr)]">
           <Panel><F c={c} k="revenue_model" /></Panel>
           <Panel>
             <F c={c} k="pl" />
@@ -226,7 +211,6 @@ function BusinessPlan({ c }: { c: Ctx }) {
               ))}
             </div>
           </Panel>
-        </div>
       </div>
       <div className="grid gap-4 md:grid-cols-2">
         <Panel><F c={c} k="investment" /></Panel>

@@ -21,6 +21,8 @@ infra/terraform   gcp（Cloud Run の土台：Artifact Registry / Secret Manager
 - プロダクトごとに、ステージを使うか（開閉）と、確定に承認を求めるかを設定できる。承認の既定は個人モードがなし、法人モードがあり。
 - 成果物は文章ではなく項目ごとの値（下書き）で持つ。P1〜P2 はフレームワーク（①リーンキャンバス、②TAM/SAM/SOM、③競合比較とポジショニング、④バリュープロポジションキャンバス、⑤KPIツリー・PL）、⑥以降は見出しごとの文書。確定すると版になり、Markdown にして下流と監査に渡す。
 - 各ステージの右側でAIと対話する。AIは項目ごとの書き換え案を出し、人が採用したものだけが下書きに入る。対話の1往復は ADK の Workflow（発言と案を作る → 案を項目の型で検査して保存）で動く。
+- サイドバーの最上部に「プロダクト・キャンバス」を置く。①リーンキャンバスと④バリュープロポジションの値（確定版を優先、なければ下書き）から画像生成AIでプロダクトの全体像（利用シーン／画面イメージ／コンセプト）を描き、表紙として同じテナントの人と共有する。画像は使ったプロンプトと一緒に工場DBに残す。モデルは `PF_IMAGE_MODEL`（既定 `gemini-3.1-flash-image`）、APIキーがなければ仮のSVG。
+- ⑤のKPIツリーはグラフで編集する（KPIを選んで子を足す、点をドラッグして親子をつなぎ替える、分解の式 × / + を決める）。値は表と同じ行（KPI・親KPI・分解の式・目標値・計測方法）で持つので、AIの案もそのまま使える。
 - ループ L1〜L5、トレーサビリティ画面、worker / scheduler は R2。
 - `GOOGLE_API_KEY` が無ければ LLM はスタブ（必須見出しを埋めたダミー成果物）になり、全工程をそのまま通せる。
 
@@ -71,7 +73,7 @@ web と agent-api を Cloud Run（東京）に置き、DB は Supabase（東京�
    ```
    state は Cloud Shell の手元に残る（リポジトリには入れない）。
 3. **GitHub**：Environment `production` を作る（必要なら Required reviewers を付ける）。Variables に `terraform output` の `GCP_PROJECT_ID`、`GCP_REGION`、`GCP_WIF_PROVIDER`、`GCP_DEPLOY_SA` を入れる。任意で次も入れる。
-   - `PF_GEMINI=true`：Gemini を使う（無ければスタブ）。`PF_MODEL` でモデルを変えられる。
+   - `PF_GEMINI=true`：Gemini を使う（無ければスタブ）。`PF_MODEL` で対話のモデル、`PF_IMAGE_MODEL` で画像のモデルを変えられる。
    - `PF_ALLOW_SIGNUP=false`：自分の登録が済んだら入れて、新規登録を締め切る。
 4. Actions → `deploy` → Run workflow。以後は main への push で `ci` 成功後に自動で更新される。web の URL はジョブのサマリーに出る。
 

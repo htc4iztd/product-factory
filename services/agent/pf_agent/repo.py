@@ -80,6 +80,11 @@ def current_artifact(product_id: str, stage_id: str) -> Artifact | None:
         return _artifact(s, product_id, stage_id, _run(s, product_id, stage_id).current_version)
 
 
+def confirmed_artifact(product_id: str, stage_id: str) -> Artifact | None:
+    with session() as s:
+        return _artifact(s, product_id, stage_id, _run(s, product_id, stage_id).approved_version)
+
+
 def versions(product_id: str, stage_id: str) -> list[dict]:
     with session() as s:
         rows = s.execute(select(Artifact).where(Artifact.product_id == product_id, Artifact.stage_id == stage_id)

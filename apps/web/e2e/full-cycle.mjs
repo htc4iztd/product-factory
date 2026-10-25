@@ -29,7 +29,7 @@ await page.waitForURL(/\/p\/[0-9a-f]+$/);
 const pid = page.url().split("/p/")[1];
 await shot("01-overview", true);
 
-async function draftAndCommit(sid, shotName) {
+async function draftAndCommit(sid, shotName, beforeCommit) {
   await page.goto(`${BASE}/p/${pid}/s/${sid}`);
   await btn("下書きを作って").click();
   const all = page.getByRole("button", { name: /件をすべて採用/ });
@@ -38,6 +38,7 @@ async function draftAndCommit(sid, shotName) {
   await all.click();
   await all.waitFor({ state: "detached" });
   if (shotName) await shot(`${shotName}-canvas`);
+  if (beforeCommit) await beforeCommit();
   await btn(/^確定/).first().click();
   await btn("確定", true).click();
   await page.getByText(/確定版 v\d+/).first().waitFor();
@@ -57,7 +58,25 @@ await page.getByText("確定版 v2").waitFor();
 await draftAndCommit("s02", "03-market");
 await draftAndCommit("s03", "04-competitors");
 await draftAndCommit("s04", "05-vpc");
-await draftAndCommit("s05", "06-plan");
+await draftAndCommit("s05", "06-plan", async () => {
+  // KPIツリーをグラフで編集する：KPIを選ぶ → 子を足す → 分解の式を決める → 保存
+  await page.locator(".react-flow__node").first().click();
+  await btn("子KPIを追加").click();
+  await page.getByLabel("名前").fill("解約率");
+  await page.getByLabel("分解の式（子KPIの組み立て方）").selectOption("×");
+  await btn("変更を保存").click();
+  await page.getByText("保存していない変更があります").waitFor({ state: "detached" });
+  await page.locator(".react-flow__node", { hasText: "解約率" }).waitFor();
+  await shot("06-plan-kpi-graph");
+});
+
+// プロダクト・キャンバス：最初の1枚を生成すると表紙になり、サイドバーに出る
+await page.goto(`${BASE}/p/${pid}/canvas`);
+await btn("最初の1枚を生成する").click();
+await page.getByAltText(/プロダクトイメージ/).waitFor();
+await btn("生成する").click();
+await page.getByText("これまでの絵（2）").waitFor();
+await shot("06b-product-canvas", true);
 await page.goto(`${BASE}/p/${pid}/s/s05?tab=doc`);
 await shot("07-doc", true);
 

@@ -115,9 +115,10 @@ FRAMEWORKS: dict[str, Framework] = {
     "s05": Framework(
         "business_plan", "事業計画（KPIツリー・収益モデル・PL）", "事業として成り立つかを数字で確かめる",
         (
-            Field("kpi_tree", "KPIツリー", TB, "親KPIの名前で木にする（最上位は親なし）",
-                  columns=(Column("kpi", "KPI"), Column("parent", "親KPI"), Column("target", "目標値"),
-                           Column("measure", "計測方法"))),
+            Field("kpi_tree", "KPIツリー", TB,
+                  "親KPIの名前で木にする（最上位は親なし）。分解の式は子KPIの組み立て方（× か +）",
+                  columns=(Column("kpi", "KPI"), Column("parent", "親KPI"), Column("relation", "分解の式"),
+                           Column("target", "目標値"), Column("measure", "計測方法"))),
             Field("revenue_model", "収益モデル", T, "誰から、何に、いくら、どの頻度で受け取るか"),
             Field("pl", "PL計画（万円）", TB, "粗利と営業利益は自動で計算する",
                   columns=(Column("item", "項目"), Column("y1", "1年目", "number"),

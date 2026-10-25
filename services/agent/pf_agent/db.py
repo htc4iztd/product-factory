@@ -11,6 +11,7 @@ from sqlalchemy import (
     DateTime,
     ForeignKey,
     Integer,
+    LargeBinary,
     String,
     Text,
     UniqueConstraint,
@@ -42,6 +43,7 @@ class Product(Base):
     scope: Mapped[str] = mapped_column(String(10), default="mvp")      # mvp | poc
     mode: Mapped[str] = mapped_column(String(12), default="personal")  # personal | corporate
     status: Mapped[str] = mapped_column(String(16), default="active")  # active | stopped
+    cover_image_id: Mapped[str | None] = mapped_column(String(32), nullable=True)  # プロダクト・キャンバスの表紙
     created_by: Mapped[str] = mapped_column(String(200))
     created_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), default=_now)
 
@@ -90,6 +92,21 @@ class PhaseReview(Base):
     decision: Mapped[str] = mapped_column(String(16))   # proceed | back | stop
     reason: Mapped[str] = mapped_column(Text, default="")
     actor: Mapped[str] = mapped_column(String(200))
+    created_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), default=_now)
+
+
+class ProductImage(Base):
+    """プロダクト・キャンバスの画像。画像生成AIの出力を、使ったプロンプトと一緒に残す。"""
+    __tablename__ = "product_images"
+    id: Mapped[str] = mapped_column(String(32), primary_key=True, default=_id)
+    product_id: Mapped[str] = mapped_column(ForeignKey("products.id"), index=True)
+    kind: Mapped[str] = mapped_column(String(16))           # scene | ui | concept
+    note: Mapped[str] = mapped_column(Text, default="")
+    prompt: Mapped[str] = mapped_column(Text)
+    model: Mapped[str] = mapped_column(String(80))
+    mime: Mapped[str] = mapped_column(String(40))
+    data: Mapped[bytes] = mapped_column(LargeBinary)
+    created_by: Mapped[str] = mapped_column(String(200))
     created_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), default=_now)
 
 
@@ -176,6 +193,7 @@ _ADDED_COLUMNS = {
     "stage_runs": {"draft": "JSON", "enabled": "BOOLEAN DEFAULT {true}",
                    "approval_required": "BOOLEAN DEFAULT {false}"},
     "artifacts": {"data": "JSON"},
+    "products": {"cover_image_id": "VARCHAR(32)"},
 }
 
 

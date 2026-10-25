@@ -15,8 +15,17 @@ from google.genai import types
 from sqlalchemy import select
 
 from . import frameworks as fx
-from . import repo
-from .db import PhaseReview, Product, StageRun, async_session_db_url, init_db, pool_kwargs, session
+from . import images, repo
+from .db import (
+    PhaseReview,
+    Product,
+    ProductImage,
+    StageRun,
+    async_session_db_url,
+    init_db,
+    pool_kwargs,
+    session,
+)
 from .stages import (
     ACCEPT_AS_IS,
     APPROVE,
@@ -177,6 +186,69 @@ class Engine:
                 raise FactoryError(404, f"unknown stage {sid}")
             repo.update_settings(product.id, sid, user, cfg.get("enabled"), cfg.get("approval_required"))
 
+    # ---------------- プロダクト・キャンバス ----------------
+    def canvas(self, product: Product) -> dict:
+        with session() as s:
+            rows = s.execute(select(ProductImage.id, ProductImage.kind, ProductImage.note, ProductImage.prompt,
+                                    ProductImage.model, ProductImage.created_by, ProductImage.created_at)
+                             .where(ProductImage.product_id == product.id)
+                             .order_by(ProductImage.created_at.desc())).all()
+        return {"product": product_dict(product), "kinds": images.KINDS, "model": images.model_name(),
+                "facts": images.summary(product.id),
+                "images": [{"id": r.id, "kind": r.kind, "note": r.note, "prompt": r.prompt, "model": r.model,
+                            "created_by": r.created_by, "created_at": r.created_at.isoformat()} for r in rows]}
+
+    def generate_image(self, product: Product, user: str, kind: str, note: str) -> str:
+        if product.status != "active":
+            raise FactoryError(409, "このプロダクトは中止されています")
+        if kind not in images.KINDS:
+            raise FactoryError(422, f"kind は {list(images.KINDS)} のどれか")
+        facts = images.summary(product.id)
+        prompt = images.build_prompt(kind, product.name, product.idea, facts, note)
+        try:
+            data, mime = images.generate(kind, prompt, product.name, facts)
+        except Exception as e:  # 生成の失敗はそのまま画面に返す
+            raise FactoryError(502, f"画像を生成できませんでした：{e}") from None
+        with session() as s:
+            img = ProductImage(product_id=product.id, kind=kind, note=note, prompt=prompt,
+                               model=images.model_name(), mime=mime, data=data, created_by=user)
+            s.add(img)
+            s.flush()
+            p = s.get(Product, product.id)
+            if not p.cover_image_id:
+                p.cover_image_id = img.id   # 最初の1枚は自動で表紙にする
+            s.commit()
+            image_id = img.id
+        repo.log(product.id, None, "agent", f"image-agent ({images.model_name()})", "image.generate",
+                 body={"image_id": image_id, "kind": kind, "note": note, "prompt": prompt})
+        return image_id
+
+    @staticmethod
+    def image(product: Product, image_id: str) -> ProductImage:
+        with session() as s:
+            img = s.get(ProductImage, image_id)
+        if img is None or img.product_id != product.id:
+            raise FactoryError(404, "画像が見つかりません")
+        return img
+
+    def set_cover(self, product: Product, user: str, image_id: str | None) -> None:
+        if image_id:
+            self.image(product, image_id)
+        with session() as s:
+            s.get(Product, product.id).cover_image_id = image_id
+            s.commit()
+        repo.log(product.id, None, "human", user, "image.cover", body={"image_id": image_id})
+
+    def delete_image(self, product: Product, user: str, image_id: str) -> None:
+        self.image(product, image_id)
+        with session() as s:
+            s.delete(s.get(ProductImage, image_id))
+            p = s.get(Product, product.id)
+            if p.cover_image_id == image_id:
+                p.cover_image_id = None
+            s.commit()
+        repo.log(product.id, None, "human", user, "image.delete", body={"image_id": image_id})
+
     # ---------------- phase review (G1〜G4) ----------------
     def review_phase(self, product: Product, phase_id: str, user: str, decision: str,
                      reason: str, back_stage: str | None = None) -> None:
@@ -249,4 +321,5 @@ class Engine:
 
 def product_dict(p: Product) -> dict:
     return {"id": p.id, "name": p.name, "idea": p.idea, "scope": p.scope, "mode": p.mode,
-            "status": p.status, "created_by": p.created_by, "created_at": p.created_at.isoformat()}
+            "status": p.status, "cover_image_id": p.cover_image_id, "created_by": p.created_by,
+            "created_at": p.created_at.isoformat()}

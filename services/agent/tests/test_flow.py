@@ -191,3 +191,28 @@ def test_chat_survives_restart(tmp_path, monkeypatch):
         ev = await e2.sessions.get_session(app_name="product-factory", user_id=p.id, session_id=sid)
         assert len(ev.events) >= 2
     asyncio.run(go())
+
+
+def test_product_canvas_images(client):
+    c = client
+    pid = new_product(c)
+    accept_all(c, pid, "s01")
+    cv = c.get(f"/products/{pid}/canvas", headers=H).json()
+    assert {f["label"] for f in cv["facts"]} >= {"課題", "独自の価値提案"} and cv["images"] == []
+    assert all(f["source"] == "下書き" for f in cv["facts"])
+    r = c.post(f"/products/{pid}/images", headers=H, json={"kind": "scene", "note": "朝の食卓"})
+    assert r.status_code == 200, r.text
+    first = r.json()["image_id"]
+    assert r.json()["product"]["cover_image_id"] == first   # 最初の1枚は表紙になる
+    assert "no text" in r.json()["images"][0]["prompt"] and "朝の食卓" in r.json()["images"][0]["prompt"]
+    raw = c.get(f"/products/{pid}/images/{first}", headers=H)
+    assert raw.status_code == 200 and raw.headers["content-type"].startswith("image/svg+xml")
+    assert b"<script" not in raw.content
+    second = c.post(f"/products/{pid}/images", headers=H, json={"kind": "ui"}).json()["image_id"]
+    cv = c.put(f"/products/{pid}/cover", headers=H, json={"image_id": second}).json()
+    assert cv["product"]["cover_image_id"] == second
+    cv = c.delete(f"/products/{pid}/images/{second}", headers=H).json()
+    assert cv["product"]["cover_image_id"] is None and len(cv["images"]) == 1
+    other = dict(H, **{"x-pf-tenant": "tenant-b"})
+    assert c.get(f"/products/{pid}/images/{first}", headers=other).status_code == 404
+    assert c.post(f"/products/{pid}/images", headers=H, json={"kind": "nope"}).status_code == 422

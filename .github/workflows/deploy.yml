@@ -48,9 +48,10 @@ jobs:
         env:
           GEMINI: ${{ vars.PF_GEMINI }}
           PF_MODEL: ${{ vars.PF_MODEL || 'gemini-2.5-flash' }}
+          PF_IMAGE_MODEL: ${{ vars.PF_IMAGE_MODEL || 'gemini-3.1-flash-image' }}
         run: |
           SECRETS=DATABASE_URL=DATABASE_URL:latest,PF_INTERNAL_TOKEN=PF_INTERNAL_TOKEN:latest
-          ENVS=PF_DB_POOL_SIZE=2,PF_MODEL=$PF_MODEL
+          ENVS=PF_DB_POOL_SIZE=2,PF_MODEL=$PF_MODEL,PF_IMAGE_MODEL=$PF_IMAGE_MODEL
           # Gemini を使うのは Variables の PF_GEMINI=true のときだけ。それ以外はスタブ
           if [ "$GEMINI" = "true" ]; then SECRETS=$SECRETS,GOOGLE_API_KEY=GOOGLE_API_KEY:latest; else ENVS=$ENVS,PF_LLM=stub; fi
           gcloud run deploy pf-agent --region $REGION --image $REGION-docker.pkg.dev/$PROJECT/product-factory/agent-api:$SHA \

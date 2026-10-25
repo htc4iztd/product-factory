@@ -4,7 +4,7 @@ from __future__ import annotations
 from contextlib import asynccontextmanager
 
 from fastapi import Depends, FastAPI, HTTPException
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, Response
 from pydantic import BaseModel, Field
 from sqlalchemy import select
 
@@ -70,6 +70,15 @@ class StageSetting(BaseModel):
 
 class Settings(BaseModel):
     stages: dict[str, StageSetting]
+
+
+class ImageRequest(BaseModel):
+    kind: str = Field(pattern="^(scene|ui|concept)$")
+    note: str = Field(default="", max_length=2000)
+
+
+class Cover(BaseModel):
+    image_id: str | None = None
 
 
 class Review(BaseModel):
@@ -164,6 +173,39 @@ def settings(product_id: str, body: Settings, c: Caller = Depends(caller)):
     p = _product(c, product_id, "business", "assign")
     engine.update_settings(p, c.user, {k: v.model_dump() for k, v in body.stages.items()})
     return engine.overview(engine.product(product_id))
+
+
+@app.get("/products/{product_id}/canvas")
+def canvas(product_id: str, c: Caller = Depends(caller)):
+    return engine.canvas(_product(c, product_id, "business", "view"))
+
+
+@app.post("/products/{product_id}/images")
+def generate_image(product_id: str, body: ImageRequest, c: Caller = Depends(caller)):
+    p = _product(c, product_id, "business", "create")
+    image_id = engine.generate_image(p, c.user, body.kind, body.note)
+    return {"image_id": image_id, **engine.canvas(engine.product(product_id))}
+
+
+@app.get("/products/{product_id}/images/{image_id}")
+def image(product_id: str, image_id: str, c: Caller = Depends(caller)):
+    img = engine.image(_product(c, product_id, "business", "view"), image_id)
+    return Response(content=img.data, media_type=img.mime,
+                    headers={"cache-control": "private, max-age=86400", "x-content-type-options": "nosniff"})
+
+
+@app.put("/products/{product_id}/cover")
+def set_cover(product_id: str, body: Cover, c: Caller = Depends(caller)):
+    p = _product(c, product_id, "business", "create")
+    engine.set_cover(p, c.user, body.image_id)
+    return engine.canvas(engine.product(product_id))
+
+
+@app.delete("/products/{product_id}/images/{image_id}")
+def delete_image(product_id: str, image_id: str, c: Caller = Depends(caller)):
+    p = _product(c, product_id, "business", "create")
+    engine.delete_image(p, c.user, image_id)
+    return engine.canvas(engine.product(product_id))
 
 
 @app.post("/products/{product_id}/phases/{phase_id}/review")

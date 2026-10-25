@@ -26,10 +26,10 @@ export class AgentError extends Error {
   }
 }
 
-export async function agent<T = unknown>(path: string, init?: { method?: string; body?: unknown }): Promise<T> {
+async function call(path: string, init?: { method?: string; body?: unknown }): Promise<Response> {
   const session = await auth();
   if (!session?.user?.tenantId || !session.user.role) throw new AgentError(401, "ログインしてください");
-  const res = await fetch(`${BASE}${path}`, {
+  return fetch(`${BASE}${path}`, {
     method: init?.method ?? "GET",
     headers: {
       "content-type": "application/json",
@@ -42,6 +42,15 @@ export async function agent<T = unknown>(path: string, init?: { method?: string;
     body: init?.body === undefined ? undefined : JSON.stringify(init.body),
     cache: "no-store",
   });
+}
+
+// 画像など JSON 以外をそのまま受け取る
+export async function agentRaw(path: string): Promise<Response> {
+  return call(path);
+}
+
+export async function agent<T = unknown>(path: string, init?: { method?: string; body?: unknown }): Promise<T> {
+  const res = await call(path, init);
   if (!res.ok) {
     let detail = res.statusText;
     try {
@@ -62,7 +71,15 @@ export type StageSummary = {
   enabled: boolean; approval_required: boolean; pending_kind: string | null;
   current_version: number; approved_version: number;
 };
-export type Product = { id: string; name: string; idea: string; scope: string; mode: string; status: string; created_at: string };
+export type Product = {
+  id: string; name: string; idea: string; scope: string; mode: string; status: string;
+  cover_image_id: string | null; created_at: string;
+};
+export type CanvasImage = { id: string; kind: string; note: string; prompt: string; model: string; created_by: string; created_at: string };
+export type CanvasInfo = {
+  product: Product; kinds: Record<string, string>; model: string;
+  facts: { stage: string; label: string; value: string; source: string }[]; images: CanvasImage[];
+};
 export type Overview = { product: Product; phases: Phase[]; stages: StageSummary[] };
 
 export type Column = { key: string; label: string; kind: "text" | "number" };
