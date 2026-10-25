@@ -3,8 +3,8 @@ import { PageHeader } from "@/components/PageHeader";
 
 const KIND: Record<string, string> = {
   "product.create": "プロダクト作成", "chat.user": "発言", "chat.assistant": "AIの発言", "chat.feedback": "修正指示",
-  "draft.accept": "案を採用", "draft.reject": "案を却下", "draft.edit": "編集", commit: "確定", approval: "承認判断",
-  completed: "確定版の更新", status: "状態の変化", settings: "設定変更", "recheck.ack": "要再確認を確認",
+  "draft.accept": "案を採用", "draft.reject": "案を却下", "draft.edit": "編集", commit: "更新", approval: "承認判断",
+  completed: "最新版の更新", status: "状態の変化", settings: "設定変更", "recheck.ack": "要再確認を確認",
 };
 
 export default async function AuditPage({ params }: { params: Promise<{ id: string }> }) {

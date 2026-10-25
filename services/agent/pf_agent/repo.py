@@ -94,7 +94,7 @@ def versions(product_id: str, stage_id: str) -> list[dict]:
 
 
 def confirmed_artifacts(product_id: str, stage_ids) -> dict[str, str]:
-    """上流として使う、使用中ステージの確定版（Markdown）。"""
+    """上流として使う、使用中ステージの最新版（Markdown）。"""
     out = {}
     with session() as s:
         for sid in stage_ids:
@@ -157,6 +157,27 @@ def set_field(product_id: str, stage_id: str, key: str, value, actor: str, sourc
     return d
 
 
+def set_fields(product_id: str, stage_id: str, values: dict, actor: str, source: str) -> list[str]:
+    """複数の項目をまとめて書き換える（文書からの反映）。変わった項目の key を返す。"""
+    fw = fx.FRAMEWORK_BY_STAGE[stage_id]
+    with session() as s:
+        r = _run(s, product_id, stage_id)
+        d = copy.deepcopy(r.draft) if r.draft is not None else _initial_draft(s, r)
+        changed = [k for k, v in values.items() if fw.get(k) is not None and d.get(k) != v]
+        if not changed:
+            return []
+        for k in changed:
+            d[k] = values[k]
+        r.draft = d
+        old = _touch(r)
+        new = r.status
+        s.commit()
+    log(product_id, stage_id, "human", actor, f"draft.{source}", body={k: values[k] for k in changed})
+    if old:
+        log(product_id, stage_id, "system", "factory", "status", body={"from": old, "to": new})
+    return changed
+
+
 # ---------------- 対話 ----------------
 def add_chat(product_id: str, stage_id: str, role: str, actor: str, text: str,
              proposals: list | None = None) -> int:
@@ -213,9 +234,9 @@ def decide_proposal(product_id: str, stage_id: str, message_id: int, proposal_id
     return draft(product_id, stage_id)
 
 
-# ---------------- 確定と承認 ----------------
+# ---------------- 更新と承認 ----------------
 def commit(product_id: str, stage_id: str, actor: str, note: str) -> dict:
-    """下書きを新しい版として確定する。承認が要るなら承認待ち、要らなければ完了。"""
+    """下書きを新しい版として更新する。承認が要るなら承認待ち、要らなければ完了。"""
     stage = STAGE_BY_ID[stage_id]
     fw = fx.FRAMEWORK_BY_STAGE[stage_id]
     d = draft(product_id, stage_id)
@@ -241,7 +262,7 @@ def commit(product_id: str, stage_id: str, actor: str, note: str) -> dict:
 
 
 def complete_stage(product_id: str, stage_id: str, decision: str | None) -> list[str]:
-    """版を確定し、確定版が変わったときは参照している下流を「要再確認」にする（設計書 4.3）。"""
+    """版を最新版にし、最新版が変わったときは参照している下流を「要再確認」にする（設計書 4.3）。"""
     rechecked: list[str] = []
     with session() as s:
         r = _run(s, product_id, stage_id)
@@ -284,7 +305,7 @@ def update_settings(product_id: str, stage_id: str, actor: str, enabled: bool | 
         if approval_required is not None:
             r.approval_required = approval_required
         after = {"enabled": r.enabled, "approval_required": r.approval_required}
-        # 承認待ちのまま承認を外したら、その版で確定する
+        # 承認待ちのまま承認を外したら、その版を最新版にする
         release = not r.approval_required and r.status == AWAITING_APPROVAL
         s.commit()
     if before != after:

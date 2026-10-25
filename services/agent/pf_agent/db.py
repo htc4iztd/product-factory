@@ -61,10 +61,10 @@ class StageRun(Base):
     audit_retries: Mapped[int] = mapped_column(Integer, default=0)
     audit_findings: Mapped[list | None] = mapped_column(JSON, nullable=True)
     current_version: Mapped[int] = mapped_column(Integer, default=0)
-    approved_version: Mapped[int] = mapped_column(Integer, default=0)   # 確定した最新の版
-    # 作業中の下書き（フレームワークの項目ごとの値）。確定すると Artifact の版になる
+    approved_version: Mapped[int] = mapped_column(Integer, default=0)   # 最新版（更新済みの最新の版）
+    # 作業中の下書き（フレームワークの項目ごとの値）。更新すると Artifact の版になる
     draft: Mapped[dict | None] = mapped_column(JSON, nullable=True)
-    # プロダクトごとの設定：このステージを使うか、確定に承認が要るか
+    # プロダクトごとの設定：このステージを使うか、更新に承認が要るか
     enabled: Mapped[bool] = mapped_column(Boolean, default=True)
     approval_required: Mapped[bool] = mapped_column(Boolean, default=False)
     updated_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), default=_now, onupdate=_now)

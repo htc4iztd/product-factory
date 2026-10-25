@@ -1,11 +1,11 @@
 import Link from "next/link";
-import Markdown from "react-markdown";
-import remarkGfm from "remark-gfm";
 import { ArrowRight, Lock } from "lucide-react";
 import { agent, type StageDetail } from "@/lib/agent";
 import { StatusBadge, StatusDot } from "@/components/StatusBadge";
 import { Canvas } from "@/components/stage/Canvas";
-import { ChatPanel } from "@/components/stage/ChatPanel";
+import { cookies } from "next/headers";
+import { AiDrawer } from "@/components/stage/AiDrawer";
+import { DocEditor } from "@/components/stage/DocEditor";
 import { ApprovalPanel, ClosedBanner, CommitButton, RecheckBanner } from "@/components/stage/StageActions";
 
 type Props = { params: Promise<{ id: string; stage: string }>; searchParams: Promise<{ tab?: string }> };
@@ -16,6 +16,8 @@ export default async function StagePage({ params, searchParams }: Props) {
   const { id, stage } = await params;
   const tab = (await searchParams).tab ?? "canvas";
   const st = await agent<StageDetail>(`/products/${id}/stages/${stage}`);
+  const panel = (await cookies()).get("pf_ai")?.value;
+  const drawer = panel === "closed" || panel === "ref" ? panel : "ai";
   const here = `/p/${id}/s/${stage}`;
   const awaiting = st.status === "awaiting_approval";
   const readOnly = !st.enabled;
@@ -39,7 +41,7 @@ export default async function StagePage({ params, searchParams }: Props) {
           <div className="flex items-center gap-3">
             <div className="text-right text-[11px] leading-4 text-zinc-400">
               <div>必須項目 <span className="tabular-nums text-zinc-700">{filled}/{required}</span></div>
-              <div>{st.approved_version ? `確定版 v${st.approved_version}` : "未確定"}{st.dirty && st.approved_version > 0 ? "・未確定の変更あり" : ""}</div>
+              <div>{st.approved_version ? `最新版 v${st.approved_version}` : "版なし"}{st.dirty && st.approved_version > 0 ? "・未更新の変更あり" : ""}</div>
             </div>
             {st.approval_required && <span className="chip"><Lock size={11} />承認あり</span>}
             {st.enabled && !awaiting && (
@@ -70,17 +72,15 @@ export default async function StagePage({ params, searchParams }: Props) {
             {st.status === "needs_recheck" && <RecheckBanner pid={id} sid={stage} inputs={st.inputs.map((s) => s.no + s.name).join("・")} />}
             {awaiting && st.pending && <ApprovalPanel pid={id} sid={stage} version={st.pending.version} findings={st.audit_findings ?? []} />}
             {tab === "canvas" && <Canvas pid={id} st={st} readOnly={readOnly} />}
-            {tab === "doc" && (
-              <div className="card prose-md mx-auto max-w-3xl p-8"><Markdown remarkPlugins={[remarkGfm]}>{st.markdown}</Markdown></div>
-            )}
+            {tab === "doc" && <DocEditor pid={id} sid={stage} markdown={st.markdown} fields={st.framework.fields} readOnly={readOnly} />}
             {tab === "history" && (
               <div className="card divide-y divide-zinc-100">
-                {st.versions.length === 0 && <p className="p-6 text-center text-[13px] text-zinc-500">まだ確定した版はありません。</p>}
+                {st.versions.length === 0 && <p className="p-6 text-center text-[13px] text-zinc-500">まだ版はありません。</p>}
                 {st.versions.map((v) => (
                   <div key={v.version} className="flex items-center gap-4 px-5 py-3 text-[13px]">
                     <span className="w-10 font-semibold">v{v.version}</span>
-                    {v.version === st.approved_version ? <span className="chip border-emerald-200 text-emerald-700">確定版</span>
-                      : v.confirmed ? <span className="chip">過去の確定版</span> : <span className="chip border-amber-200 text-amber-700">承認待ち・差し戻し</span>}
+                    {v.version === st.approved_version ? <span className="chip border-emerald-200 text-emerald-700">最新版</span>
+                      : v.confirmed ? <span className="chip">過去の版</span> : <span className="chip border-amber-200 text-amber-700">承認待ち・差し戻し</span>}
                     <span className="font-mono text-[11px] text-zinc-400">{v.sha256.slice(0, 12)}</span>
                     <span className="ml-auto text-xs text-zinc-400">{new Date(v.created_at).toLocaleString("ja-JP")}</span>
                   </div>
@@ -89,10 +89,8 @@ export default async function StagePage({ params, searchParams }: Props) {
             )}
           </div>
         </section>
-        <aside className="w-[400px] shrink-0 border-l border-zinc-200 bg-zinc-50/60">
-          <ChatPanel pid={id} sid={stage} chat={st.chat} fields={st.framework.fields} prompts={st.framework.prompts}
-            disabled={!st.enabled ? "ステージを開くと対話できます" : null} />
-        </aside>
+        <AiDrawer initial={drawer} references={st.references} pid={id} sid={stage} chat={st.chat} fields={st.framework.fields} prompts={st.framework.prompts}
+          disabled={!st.enabled ? "ステージを開くと対話できます" : null} />
       </div>
     </div>
   );

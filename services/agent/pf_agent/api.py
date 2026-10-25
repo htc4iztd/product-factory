@@ -47,6 +47,10 @@ class FieldValue(BaseModel):
     value: str | list | None = None
 
 
+class MarkdownBody(BaseModel):
+    markdown: str = Field(max_length=200_000)
+
+
 class ProposalDecision(BaseModel):
     message_id: int
     proposal_id: str
@@ -138,6 +142,13 @@ def set_field(product_id: str, stage_id: str, body: FieldValue, c: Caller = Depe
     p = _stage_product(c, product_id, stage_id, "create")
     engine.set_field(p, stage_id, c.user, body.field, body.value)
     return engine.stage_detail(p, stage_id)
+
+
+@app.put("/products/{product_id}/stages/{stage_id}/markdown")
+def set_markdown(product_id: str, stage_id: str, body: MarkdownBody, c: Caller = Depends(caller)):
+    p = _stage_product(c, product_id, stage_id, "create")
+    result = engine.set_markdown(p, stage_id, c.user, body.markdown)
+    return {**result, "stage": engine.stage_detail(p, stage_id)}
 
 
 @app.post("/products/{product_id}/stages/{stage_id}/proposals")

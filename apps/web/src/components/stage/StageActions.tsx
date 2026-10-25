@@ -26,14 +26,14 @@ export function CommitButton({ pid, sid, missing, dirty, approval, hasVersion }:
   const disabled = hasVersion && !dirty;
   return (
     <div className="relative">
-      <button disabled={disabled} onClick={() => setOpen((v) => !v)} className="btn-primary" title={disabled ? "確定版から変更がありません" : undefined}>
-        <GitCommitHorizontal size={15} />{approval ? "確定して承認に回す" : "確定する"}
+      <button disabled={disabled} onClick={() => setOpen((v) => !v)} className="btn-primary" title={disabled ? "最新版から変更がありません" : undefined}>
+        <GitCommitHorizontal size={15} />{approval ? "更新して承認に回す" : "更新する"}
       </button>
       {open && (
         <div className="absolute right-0 top-10 z-20 w-80 space-y-3 rounded-xl border border-zinc-200 bg-white p-4 shadow-pop">
-          <div className="text-[13px] font-semibold">新しい版として確定</div>
+          <div className="text-[13px] font-semibold">新しい版として更新</div>
           <p className="text-xs text-zinc-500">
-            {approval ? "承認者が承認すると確定版になります。" : "すぐに確定版になります。"}
+            {approval ? "承認されると最新版になります。" : "すぐに最新版になります。"}
             この版を参照している下流のステージは「要再確認」になります。
           </p>
           {missing.length > 0 && (
@@ -47,7 +47,7 @@ export function CommitButton({ pid, sid, missing, dirty, approval, hasVersion }:
           <div className="flex justify-end gap-2">
             <button onClick={() => setOpen(false)} className="btn-ghost btn-sm">やめる</button>
             <button disabled={pending} onClick={() => run(() => commit(pid, sid, note, missing.length > 0), () => setOpen(false))} className="btn-primary btn-sm">
-              {pending ? "確定中…" : missing.length > 0 ? "空欄のまま確定" : "確定"}
+              {pending ? "更新中…" : missing.length > 0 ? "空欄のまま更新" : "更新"}
             </button>
           </div>
         </div>
@@ -63,7 +63,7 @@ export function ApprovalPanel({ pid, sid, version, findings }: { pid: string; si
     <div className="rounded-xl border border-amber-200 bg-amber-50/60 p-4">
       <div className="flex items-center gap-2 text-[13px] font-semibold text-amber-900"><Lock size={14} />v{version} が承認待ちです</div>
       <p className="mt-1 text-xs text-amber-800">
-        {findings.length ? `確定時の検査で ${findings.length} 件の指摘があります：${findings.join("、")}` : "確定時の検査は合格しています。"}
+        {findings.length ? `更新時の検査で ${findings.length} 件の指摘があります：${findings.join("、")}` : "更新時の検査は合格しています。"}
       </p>
       <textarea value={comment} onChange={(e) => setComment(e.target.value)} rows={2} className="input mt-3 bg-white"
         placeholder="理由・修正指示（Request Changes と Accept as-is では必須）" />
@@ -83,7 +83,7 @@ export function RecheckBanner({ pid, sid, inputs }: { pid: string; sid: string; 
     <div className="flex flex-wrap items-center gap-3 rounded-xl border border-rose-200 bg-rose-50/60 px-4 py-3 text-[13px] text-rose-900">
       <RotateCcw size={15} />
       <div className="flex-1">
-        上流（{inputs}）の確定版が変わりました。内容を見直し、直す場合は編集して確定し直してください。
+        上流（{inputs}）が更新されました。内容を見直し、直す場合は編集して更新してください。
         {error && <span className="ml-2 text-rose-600">{error}</span>}
       </div>
       <button disabled={pending} onClick={() => run(() => acknowledge(pid, sid))} className="btn-secondary btn-sm">変更不要として確認済みにする</button>

@@ -216,3 +216,44 @@ def test_product_canvas_images(client):
     other = dict(H, **{"x-pf-tenant": "tenant-b"})
     assert c.get(f"/products/{pid}/images/{first}", headers=other).status_code == 404
     assert c.post(f"/products/{pid}/images", headers=H, json={"kind": "nope"}).status_code == 422
+
+
+def test_markdown_round_trip_and_edit(client):
+    c = client
+    pid = new_product(c)
+    for sid in ("s01", "s03", "s05"):
+        st = accept_all(c, pid, sid)
+        # 何も変えずに文書をそのまま戻しても、値は変わらない
+        r = c.put(f"/products/{pid}/stages/{sid}/markdown", headers=H, json={"markdown": st["markdown"]}).json()
+        assert r["changed"] == [] and r["stage"]["draft"] == st["draft"], (sid, r["notes"])
+    md = c.get(f"/products/{pid}/stages/s01", headers=H).json()["markdown"]
+    md = md.replace("- 課題の候補1（仮）", "- 家計の締めに毎月2時間かかる")
+    md = md.replace("## 独自の価値提案\n", "## 独自の価値提案\n5分で締まる家計簿\n", 1)
+    md += "\n## 余計な見出し\nなにか\n"
+    r = c.put(f"/products/{pid}/stages/s01/markdown", headers=H, json={"markdown": md}).json()
+    assert set(r["changed"]) == {"problem", "uvp"}
+    assert r["stage"]["draft"]["problem"][0] == "家計の締めに毎月2時間かかる"
+    assert r["stage"]["draft"]["uvp"].startswith("5分で締まる家計簿")
+    assert any("余計な見出し" in n for n in r["notes"])
+    # 表：PLの数値を文書で直すと表に反映される（計算行は無視）
+    md = c.get(f"/products/{pid}/stages/s05", headers=H).json()["markdown"]
+    md = md.replace("| 売上 | 300 | 300 | 300 |", "| 売上 | 1,500 | 3000 | 6000 |")
+    r = c.put(f"/products/{pid}/stages/s05/markdown", headers=H, json={"markdown": md}).json()
+    pl = {row["item"]: row for row in r["stage"]["draft"]["pl"]}
+    assert r["changed"] == ["pl"] and pl["売上"]["y1"] == 1500 and list(pl) == ["売上", "原価", "販管費"]
+
+
+def test_business_references_in_design_stage(client):
+    c = client
+    pid = new_product(c)
+    accept_all(c, pid, "s01")
+    c.post(f"/products/{pid}/stages/s01/commit", headers=H, json={})
+    accept_all(c, pid, "s04")      # 下書きのまま
+    refs = {r["id"]: r for r in c.get(f"/products/{pid}/stages/s08", headers=H).json()["references"]}
+    assert list(refs) == ["s01", "s02", "s03", "s04", "s05"]
+    assert refs["s01"]["source"] == "最新版 v1" and "## 課題" in refs["s01"]["markdown"]
+    assert refs["s04"]["source"] == "下書き" and "## 北極星指標" in refs["s04"]["markdown"]
+    # 自分自身と閉じたステージは出さない
+    c.put(f"/products/{pid}/settings", headers=H, json={"stages": {"s02": {"enabled": False}}})
+    ids = [r["id"] for r in c.get(f"/products/{pid}/stages/s01", headers=H).json()["references"]]
+    assert ids == ["s03", "s04", "s05"]

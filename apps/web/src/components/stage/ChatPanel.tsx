@@ -1,11 +1,11 @@
 "use client";
 import { useEffect, useRef, useState, useTransition } from "react";
-import { ArrowUp, Check, CheckCheck, MessageSquareWarning, Sparkles, X } from "lucide-react";
+import { ArrowUp, Check, CheckCheck, MessageSquareWarning, PanelRightClose, Sparkles, X } from "lucide-react";
 import type { ChatMsg, FieldSpec, Proposal } from "@/lib/agent";
 import { acceptAll, decideProposal, sendChat } from "@/app/(app)/p/[id]/s/[stage]/actions";
 import { FieldView } from "./FieldEditor";
 
-type Props = { pid: string; sid: string; chat: ChatMsg[]; fields: FieldSpec[]; prompts: string[]; disabled?: string | null };
+type Props = { pid: string; sid: string; chat: ChatMsg[]; fields: FieldSpec[]; prompts: string[]; disabled?: string | null; onClose?: () => void };
 
 function ProposalCard({ p, field, onDecide, busy }: { p: Proposal; field?: FieldSpec; onDecide: (accept: boolean) => void; busy: boolean }) {
   const done = p.status !== "pending";
@@ -28,7 +28,7 @@ function ProposalCard({ p, field, onDecide, busy }: { p: Proposal; field?: Field
   );
 }
 
-export function ChatPanel({ pid, sid, chat, fields, prompts, disabled }: Props) {
+export function ChatPanel({ pid, sid, chat, fields, prompts, disabled, onClose }: Props) {
   const [text, setText] = useState("");
   const [sent, setSent] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -62,6 +62,9 @@ export function ChatPanel({ pid, sid, chat, fields, prompts, disabled }: Props) 
         <div className="flex h-6 w-6 items-center justify-center rounded-md bg-gradient-to-br from-brand-500 to-violet-500 text-white"><Sparkles size={13} /></div>
         <div className="text-[13px] font-semibold">AIと詰める</div>
         <span className="ml-auto text-[11px] text-zinc-400">案は採用するまで反映されません</span>
+        {onClose && (
+          <button onClick={onClose} className="btn-ghost btn-sm h-7 w-7 p-0" title="AIタブを閉じる（]）" aria-label="AIタブを閉じる"><PanelRightClose size={15} /></button>
+        )}
       </div>
 
       <div className="flex-1 space-y-4 overflow-y-auto px-4 py-4">

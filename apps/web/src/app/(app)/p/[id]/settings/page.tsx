@@ -33,7 +33,7 @@ export default async function SettingsPage({ params }: { params: Promise<{ id: s
   return (
     <>
       <PageHeader crumbs={<span>ステージの設定</span>} title="ステージの設定"
-        sub="このプロダクトで使うステージと、確定に承認を求めるかを決めます。閉じたステージは、上流としても参照されません。"
+        sub="このプロダクトで使うステージと、更新に承認を求めるかを決めます。閉じたステージは、上流としても参照されません。"
         actions={
           <form action={update} className="flex gap-2">
             <button name="op" value="*:approval_required:1" className="btn-secondary">すべて承認あり</button>

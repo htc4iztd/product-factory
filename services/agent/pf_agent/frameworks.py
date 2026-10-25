@@ -5,7 +5,7 @@
 - list：箇条書き（文字列の配列）
 - table：表（列が決まった行の配列）。rows を決めた表は行の見出しが固定
 
-確定した版の Markdown（下流ステージとLLMへの入力、監査ログのハッシュ）はここで作る。
+版の Markdown（下流ステージとLLMへの入力、監査ログのハッシュ）はここで作る。
 """
 from __future__ import annotations
 
@@ -172,7 +172,7 @@ def is_filled(f: Field, value) -> bool:
 
 
 def check(fw: Framework, draft: dict) -> list[str]:
-    """確定前の検査（決定的に判定できるものだけ）。空なら合格。"""
+    """更新前の検査（決定的に判定できるものだけ）。空なら合格。"""
     return [f"必須の項目「{f.label}」が空です" for f in fw.fields
             if f.required and not is_filled(f, (draft or {}).get(f.key))]
 
@@ -257,6 +257,66 @@ def to_markdown(stage: Stage, fw: Framework, draft: dict) -> str:
                                                   for c in f.columns) + " |")
         lines.append("")
     return "\n".join(lines).rstrip() + "\n"
+
+
+EMPTY = "（未記入）"
+
+
+def _parse_table(f: Field, body: list[str]) -> list[dict]:
+    rows = [ln.strip() for ln in body if ln.strip().startswith("|")]
+    if not rows:
+        return []
+    cells = [[c.strip() for c in r.strip().strip("|").split("|")] for r in rows]
+    header, data = cells[0], [c for c in cells[1:] if not all(set(x) <= set("-: ") for x in c)]
+    # 見出しの名前で列を対応づける。合わない列は並び順で対応づける
+    by_label = {c.label: c.key for c in f.columns}
+    keys = [by_label.get(h) or (f.columns[i].key if i < len(f.columns) else None) for i, h in enumerate(header)]
+    return [{k: v for k, v in zip(keys, row, strict=False) if k} for row in data]
+
+
+def from_markdown(fw: Framework, markdown: str) -> tuple[dict, list[str]]:
+    """to_markdown の逆。「## 項目名」ごとに本文を読み、項目の型にそろえて返す。
+
+    返り値は（読めた項目の値, 注意）。文書にない項目は返さない（＝変更しない）。
+    """
+    sections: dict[str, list[str]] = {}
+    order: list[str] = []
+    cur = None
+    for line in markdown.splitlines():
+        if line.startswith("## "):
+            cur = line[3:].strip()
+            sections[cur] = []
+            order.append(cur)
+        elif line.startswith("# ") and cur is None:
+            continue    # 文書の題名
+        elif cur is not None:
+            sections[cur].append(line)
+    by_label = {f.label: f for f in fw.fields}
+    values: dict = {}
+    notes: list[str] = []
+    for label in order:
+        f = by_label.get(label)
+        if f is None:
+            notes.append(f"見出し「{label}」は項目にないため反映しませんでした")
+            continue
+        body = sections[label]
+        text = "\n".join(body).strip()
+        if text == EMPTY:
+            text, body = "", []
+        try:
+            if f.kind == T:
+                values[f.key] = coerce(f, text)
+            elif f.kind == L:
+                items = [ln for ln in body if ln.strip() and ln.strip() != EMPTY]
+                values[f.key] = coerce(f, "\n".join(items))
+            else:
+                values[f.key] = coerce(f, _parse_table(f, body))
+        except (ValueError, TypeError) as e:
+            notes.append(f"「{label}」を読めませんでした（{e}）")
+    for f in fw.fields:
+        if f.label not in sections:
+            notes.append(f"見出し「{f.label}」がないため、その項目は変えていません")
+    return values, notes
 
 
 def spec(fw: Framework) -> list[dict]:

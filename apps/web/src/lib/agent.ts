@@ -102,6 +102,7 @@ export type StageDetail = {
   draft: Draft; chat: ChatMsg[]; markdown: string;
   versions: { version: number; confirmed: boolean; sha256: string; created_at: string }[];
   inputs: StageRef[]; downstream: StageRef[];
+  references: { id: string; no: string; name: string; framework: string; status: string; source: string; markdown: string }[];
 };
 export type AuditRow = {
   id: number; at: string; stage_id: string | null; actor_type: string; actor: string; kind: string;
@@ -110,5 +111,5 @@ export type AuditRow = {
 
 export const STATUS_LABEL: Record<string, string> = {
   not_started: "未着手", in_progress: "作業中", awaiting_approval: "承認待ち", revising: "修正中",
-  completed: "確定", skipped: "スキップ", needs_recheck: "要再確認",
+  completed: "更新済み", skipped: "スキップ", needs_recheck: "要再確認",
 };

@@ -2,7 +2,7 @@
 
 工程（17工程を14ステージにまとめたもの）の並びと、ステージ間の入力関係・変更の伝播は、
 この決定的なコードが持つ。工程の順序でロックはしない。どのステージからでも始められ、
-確定版が変わると参照している下流が「要再確認」になる。
+最新版が変わると参照している下流が「要再確認」になる。
 
 各ステージの中では、ビルダーとAIの対話を ADK の Workflow（workflow.py）が動かし、
 ステージごとに1つのセッションを使う。
@@ -130,6 +130,13 @@ class Engine:
         except (ValueError, TypeError) as e:
             raise FactoryError(422, f"値の形が合いません：{e}") from None
 
+    def set_markdown(self, product: Product, stage_id: str, user: str, markdown: str) -> dict:
+        """文書タブで書いた Markdown を、見出しごとに項目へ反映する。"""
+        self._stage(product, stage_id)
+        values, notes = fx.from_markdown(fx.FRAMEWORK_BY_STAGE[stage_id], markdown)
+        changed = repo.set_fields(product.id, stage_id, values, user, "markdown")
+        return {"changed": changed, "notes": notes}
+
     def decide_proposal(self, product: Product, stage_id: str, user: str, message_id: int,
                         proposal_id: str, accept: bool) -> None:
         self._stage(product, stage_id)
@@ -144,7 +151,7 @@ class Engine:
         stage = self._stage(product, stage_id)
         run = repo.get_run(product.id, stage_id)
         if run.status == AWAITING_APPROVAL:
-            raise FactoryError(409, "承認待ちです。承認するか、修正指示を出してから確定し直してください")
+            raise FactoryError(409, "承認待ちです。承認するか、修正指示を出してから更新し直してください")
         d = repo.draft(product.id, stage_id)
         fw = fx.FRAMEWORK_BY_STAGE[stage.id]
         findings = fx.check(fw, d)
@@ -152,11 +159,11 @@ class Engine:
             raise FactoryError(422, "必須の項目が空です：" + "、".join(findings))
         cur = repo.current_artifact(product.id, stage_id)
         if cur is not None and cur.data == d and run.approved_version == cur.version:
-            raise FactoryError(409, "確定版から変更がありません")
+            raise FactoryError(409, "最新版から変更がありません")
         return repo.commit(product.id, stage_id, user, note)
 
     def acknowledge(self, product: Product, stage_id: str, user: str) -> None:
-        """上流が変わっても内容を変えなくてよいと判断したとき、確定版のまま「確定」に戻す。"""
+        """上流が変わっても内容を変えなくてよいと判断したとき、最新版のまま「更新済み」に戻す。"""
         self._stage(product, stage_id)
         if repo.get_run(product.id, stage_id).status != NEEDS_RECHECK:
             raise FactoryError(409, "要再確認ではありません")
@@ -316,7 +323,24 @@ class Engine:
             "inputs": [{"id": i, "no": STAGE_BY_ID[i].no, "name": STAGE_BY_ID[i].name,
                         "status": rs[i].status, "enabled": rs[i].enabled} for i in st.inputs],
             "downstream": [{"id": s.id, "no": s.no, "name": s.name} for s in STAGES if stage_id in s.inputs],
+            "references": self._references(product, stage_id, rs),
         }
+
+    @staticmethod
+    def _references(product: Product, stage_id: str, rs: dict) -> list[dict]:
+        """事業フェーズ（P1〜P2）の成果物。最新版があれば最新版、なければ下書きを Markdown で返す。"""
+        out = []
+        for st in STAGES:
+            if st.phase not in ("P1", "P2") or st.id == stage_id or not rs[st.id].enabled:
+                continue
+            art = repo.confirmed_artifact(product.id, st.id)
+            if art is not None:
+                md, source = art.content, f"最新版 v{art.version}"
+            else:
+                md, source = fx.to_markdown(st, fx.FRAMEWORK_BY_STAGE[st.id], repo.draft(product.id, st.id)), "下書き"
+            out.append({"id": st.id, "no": st.no, "name": st.name, "framework": fx.FRAMEWORK_BY_STAGE[st.id].title,
+                        "status": rs[st.id].status, "source": source, "markdown": md})
+        return out
 
 
 def product_dict(p: Product) -> dict:

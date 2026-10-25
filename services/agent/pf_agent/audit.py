@@ -1,6 +1,6 @@
 """Markdown の見出しごとの本文を取り出す（文章だけで作っていた頃の版を下書きに移すときに使う）。
 
-確定前の検査は frameworks.check が項目単位で行う。
+更新前の検査は frameworks.check が項目単位で行う。
 """
 from __future__ import annotations
 

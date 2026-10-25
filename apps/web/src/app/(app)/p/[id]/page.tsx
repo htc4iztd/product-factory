@@ -18,12 +18,12 @@ export default async function ProductPage({ params }: { params: Promise<{ id: st
   const phases = Object.fromEntries(ov.phases.map((p) => [p.id, p]));
   const pct = active.length ? Math.round((done / active.length) * 100) : 0;
   const stats = [
-    { label: "確定", value: `${done} / ${active.length}`, icon: CheckCircle2, tone: "text-emerald-600" },
+    { label: "更新済み", value: `${done} / ${active.length}`, icon: CheckCircle2, tone: "text-emerald-600" },
     { label: "承認待ち", value: waiting.length, icon: Clock, tone: "text-amber-600" },
     { label: "要再確認", value: recheck.length, icon: AlertTriangle, tone: "text-rose-600" },
     { label: "閉じている", value: ov.stages.length - active.length, icon: CircleDashed, tone: "text-zinc-400" },
   ];
-  const todo = [...waiting.map((s) => ({ s, why: "承認待ち" })), ...recheck.map((s) => ({ s, why: "上流の確定版が変わりました" }))];
+  const todo = [...waiting.map((s) => ({ s, why: "承認待ち" })), ...recheck.map((s) => ({ s, why: "上流が更新されました" }))];
 
   return (
     <>
@@ -129,7 +129,7 @@ export default async function ProductPage({ params }: { params: Promise<{ id: st
                     <div className="mt-2 font-semibold">{s.name}</div>
                     <div className="mt-0.5 text-[13px] text-zinc-500">{s.framework}</div>
                     <div className="mt-3 flex items-center gap-2 text-[11px] text-zinc-400">
-                      {s.approved_version > 0 ? <span>確定版 v{s.approved_version}</span> : <span>未確定</span>}
+                      {s.approved_version > 0 ? <span>最新版 v{s.approved_version}</span> : <span>版なし</span>}
                       {s.approval_required && <span className="flex items-center gap-1"><Lock size={11} />承認あり</span>}
                     </div>
                   </Link>

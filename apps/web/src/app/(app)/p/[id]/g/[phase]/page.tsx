@@ -52,7 +52,7 @@ export default async function GatePage({ params, searchParams }: Props) {
             </Link>
           ))}
         </section>
-        {!ph.complete && <p className="text-[13px] text-amber-700">使用中のステージのうち {ph.active - ph.done} 件がまだ確定していません。</p>}
+        {!ph.complete && <p className="text-[13px] text-amber-700">使用中のステージのうち {ph.active - ph.done} 件がまだ一度も更新されていません。</p>}
         {ph.review && (
           <div className="card p-4 text-[13px]">
             <div className="section-title mb-1">直近の記録</div>

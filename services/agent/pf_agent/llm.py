@@ -54,7 +54,7 @@ def _prompt(stage: Stage, fw: Framework, idea: str, draft: dict, upstream: dict[
         f"## 項目の定義\n{json.dumps(spec(fw), ensure_ascii=False)}\n\n"
         f"## 現在の値\n{json.dumps(draft, ensure_ascii=False)}\n\n"
         f"## プロダクトの意図\n{idea or '（なし）'}\n\n"
-        f"## 上流ステージの確定版\n{ups}\n\n"
+        f"## 上流ステージの最新版\n{ups}\n\n"
         f"## これまでの対話\n{hist}\n\n"
         f"## ビルダーの今回の発言\n{message}\n"
     )
