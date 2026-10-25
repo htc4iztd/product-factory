@@ -64,7 +64,14 @@ export default async function CodePage({ params, searchParams }: Props) {
         <span className="text-[11px] text-zinc-400">読み取り専用・Code-OSS（Web 版）</span>
         <a href={`/p/${id}/code?edit=1`} className="btn-ghost btn-sm ml-auto">リポジトリを変える</a>
       </header>
-      <iframe title="IDE" src={`/ide/index.html?p=${encodeURIComponent(id)}`} className="min-h-0 w-full flex-1 border-0 bg-[#1f1f1f]" />
+      {process.env.IDE_ORIGIN ? (
+        <iframe title="IDE" src={`/ide/index.html?p=${encodeURIComponent(id)}`} className="min-h-0 w-full flex-1 border-0 bg-[#1f1f1f]" />
+      ) : (
+        <div className="mx-auto mt-16 max-w-lg space-y-2 px-8 text-[13px] leading-6 text-zinc-600">
+          <p className="font-medium text-zinc-900">IDE がまだ配置されていません</p>
+          <p>リポジトリはつながっています。GitHub の Actions で <code className="kbd">ide</code> ワークフローを実行すると、IDE が配置され、この画面で開けるようになります。</p>
+        </div>
+      )}
     </div>
   );
 }

@@ -44,5 +44,9 @@ jobs:
           gcloud run deploy pf-ide --region $REGION --image $IMG \
             --service-account pf-ide@$PROJECT.iam.gserviceaccount.com --no-allow-unauthenticated \
             --port 8080 --cpu 1 --memory 256Mi --min-instances 0 --max-instances 2
-          echo "ide: $(gcloud run services describe pf-ide --region $REGION --format 'value(status.url)')" >> $GITHUB_STEP_SUMMARY
-          echo "web に反映するには deploy ワークフローをもう一度実行してください（IDE_ORIGIN を読み直す）" >> $GITHUB_STEP_SUMMARY
+          IDE_URL=$(gcloud run services describe pf-ide --region $REGION --format 'value(status.url)')
+          echo "ide: $IDE_URL" >> $GITHUB_STEP_SUMMARY
+          # web に IDE の URL を渡す（web がまだ無いときは deploy が渡す）
+          if gcloud run services describe pf-web --region $REGION >/dev/null 2>&1; then
+            gcloud run services update pf-web --region $REGION --update-env-vars IDE_ORIGIN=$IDE_URL
+          fi

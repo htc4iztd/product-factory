@@ -59,7 +59,7 @@ cd apps/web && npm ci && DATABASE_URL=postgresql://pf@127.0.0.1:5432/pf AUTH_SEC
 
 ## デプロイ（Cloud Run + Supabase）
 
-web と agent-api（と IDE）を Cloud Run（東京）に置き、DB は Supabase（東京）を使う。nginx はローカル用で、Cloud Run では使わない。
+web と agent-api（と IDE）を Cloud Run に置き、DB は Supabase を使う。リージョンは DB と揃える（Terraform の `region` と Variables の `GCP_REGION`。既定は東京 `asia-northeast1`）。nginx はローカル用で、Cloud Run では使わない。
 
 ```
 利用者 ─HTTPS→ Cloud Run pf-web（公開） ─ID トークン→ Cloud Run pf-agent（IAM で非公開）
@@ -67,13 +67,13 @@ web と agent-api（と IDE）を Cloud Run（東京）に置き、DB は Supaba
                          Supabase Postgres（session モードの接続プール）
 ```
 
-1. **Supabase**：東京リージョンでプロジェクトを作る。
+1. **Supabase**：Cloud Run と同じ地域でプロジェクトを作る。
    - Connect → **Session pooler** の接続文字列を控え、末尾に `?sslmode=require` を付ける（パスワードに記号があれば URL エンコードする）。
    - テーブルはサーバーからだけ使うので、Project Settings → Data API を無効にする。
 2. **GCP**：課金を有効にしたプロジェクトで Cloud Shell を開き、土台を作って秘密値を入れる。
    ```bash
    git clone https://github.com/<owner>/<name> && cd <name>/infra/terraform/gcp
-   terraform init && terraform apply -var project_id=<PROJECT_ID> -var github_repo=<owner>/<name>
+   terraform init && terraform apply -var project_id=<PROJECT_ID> -var github_repo=<owner>/<name> -var region=<REGION>
    gcloud config set project <PROJECT_ID>
    read -rs V && printf '%s' "$V" | gcloud secrets versions add DATABASE_URL --data-file=-     # 1 の接続文字列
    read -rs V && printf '%s' "$V" | gcloud secrets versions add GOOGLE_API_KEY --data-file=-   # Gemini を使うときだけ
@@ -85,6 +85,6 @@ web と agent-api（と IDE）を Cloud Run（東京）に置き、DB は Supaba
    - `PF_ALLOW_SIGNUP=false`：自分の登録が済んだら入れて、新規登録を締め切る。
 4. Actions → `deploy` → Run workflow。以後は main への push で `ci` 成功後に自動で更新される。web の URL はジョブのサマリーに出る。
 
-5. **IDE（任意）**：Actions → `ide` → Run workflow（Code-OSS のビルドに30〜60分）。終わったら `deploy` をもう一度実行すると web が IDE の URL を読む。非公開リポジトリを読むときは、読み取りだけの fine-grained token を `gcloud secrets versions add GITHUB_TOKEN` で入れ、Variables に `PF_GITHUB_TOKEN=true` を入れてから `deploy` を実行する。
+5. **IDE（任意）**：Actions → `ide` → Run workflow（Code-OSS のビルドに30〜60分）。終わると web に IDE の URL（`IDE_ORIGIN`）が入る。非公開リポジトリを読むときは、読み取りだけの fine-grained token を `gcloud secrets versions add GITHUB_TOKEN` で入れ、Variables に `PF_GITHUB_TOKEN=true` を入れてから `deploy` を実行する。
 
 Supabase の session モードは同時接続数に上限があるので、Cloud Run は各サービス最大1台、DB の接続は各2本（`PF_DB_POOL_SIZE`）にしている。
