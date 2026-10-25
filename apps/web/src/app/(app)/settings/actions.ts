@@ -18,9 +18,9 @@ export async function saveLlm(scope: "tenant" | "app", form: LlmForm): Promise<{
   return {};
 }
 
-export async function testLlm(scope: "tenant" | "app"): Promise<LlmTestResult> {
+export async function testLlm(scope: "tenant" | "app", model?: string): Promise<LlmTestResult> {
   try {
-    return await agent<LlmTestResult>("/settings/llm/test", { method: "POST", body: { scope } });
+    return await agent<LlmTestResult>("/settings/llm/test", { method: "POST", body: { scope, model: model ?? null } });
   } catch (e) {
     if (e instanceof AgentError) return { ok: false, model: "", error: e.message };
     throw e;

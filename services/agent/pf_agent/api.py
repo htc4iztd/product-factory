@@ -110,6 +110,7 @@ class LlmBody(BaseModel):
 
 class LlmTest(BaseModel):
     scope: str = Field(default="tenant", pattern="^(tenant|app)$")
+    model: str | None = Field(default=None, max_length=120)  # 保存前に別のモデルで試すとき
 
 
 class Review(BaseModel):
@@ -200,13 +201,15 @@ def test_llm(body: LlmTest, c: Caller = Depends(caller)):
         if c.base_role != "OWNER":
             raise HTTPException(403, "接続テストはテナントの OWNER だけができます")
         conn = llmconf.resolve(c.tenant)
+    if body.model:
+        conn.chat_model = body.model.strip()
     try:
         return llm.ping(conn)
     except Exception as e:  # noqa: BLE001  失敗の中身をそのまま画面に返す
         msg = str(e) if isinstance(e, llm.LLMError) else f"{type(e).__name__}: {str(e)[:300]}"
         if "NOT_FOUND" in msg or "not_found" in msg or " 404" in msg:
             msg = ("モデルが見つかりません。提供元でモデルが引退したか、このプロジェクトで使えない名前です。"
-                   "「使えるモデルを取得」で一覧を確かめてください。（" + msg + "）")
+                   "「使えるモデルを取得」の一覧から選んで試してください。（" + msg + "）")
         return {"ok": False, "model": conn.chat_model, "error": msg}
 
 

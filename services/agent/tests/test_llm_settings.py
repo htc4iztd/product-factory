@@ -139,6 +139,8 @@ def test_openai_compatible_local_llm_via_app_default(client):
         assert r.status_code == 200, r.text
         t = c.post("/settings/llm/test", headers=ADMIN, json={"scope": "app"}).json()
         assert t["ok"] and t["reply"] == "OK" and t["model"] == "llama3"
+        t2 = c.post("/settings/llm/test", headers=ADMIN, json={"scope": "app", "model": "qwen2.5"}).json()
+        assert t2["ok"] and t2["model"] == "qwen2.5" and _FakeOpenAI.calls[-1]["body"]["model"] == "qwen2.5"
         ms = c.post("/settings/llm/models", headers=ADMIN, json={"scope": "app"}).json()
         assert ms == {"ok": True, "provider": "openai", "models": ["llama3", "qwen2.5"]}
         assert c.post("/settings/llm/models", headers=H, json={"scope": "app"}).status_code == 403

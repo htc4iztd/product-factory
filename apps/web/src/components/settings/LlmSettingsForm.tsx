@@ -28,6 +28,7 @@ export function LlmSettingsForm({ scope, title, note, view, canEdit, allowVertex
   const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
   const [test, setTest] = useState<LlmTestResult | null>(null);
   const [models, setModels] = useState<{ ok: boolean; models: string[]; error?: string } | null>(null);
+  const [tried, setTried] = useState<Record<string, "testing" | "ok" | "ng">>({});
   const [pending, start] = useTransition();
   const set = <K extends keyof LlmForm>(k: K, v: LlmForm[K]) => { setF((x) => ({ ...x, [k]: v })); setMsg(null); };
 
@@ -46,8 +47,20 @@ export function LlmSettingsForm({ scope, title, note, view, canEdit, allowVertex
       else { setMsg({ ok: true, text: "保存しました" }); setF((x) => ({ ...x, api_key: "", clear_key: false })); }
     });
   }
+  // 一覧は提供元の目録なので、引退したモデルも混じる。押したモデルをその場で1回呼んで確かめる
+  function tryModel(m: string) {
+    set("chat_model", m);
+    setTried((t) => ({ ...t, [m]: "testing" }));
+    setTest(null);
+    start(async () => {
+      const r = await testLlm(scope, m);
+      setTried((t) => ({ ...t, [m]: r.ok ? "ok" : "ng" }));
+      setTest(r);
+    });
+  }
   function runList() {
     setModels(null);
+    setTried({});
     start(async () => setModels(await listLlmModels(scope)));
   }
   function runTest() {
@@ -167,11 +180,17 @@ export function LlmSettingsForm({ scope, title, note, view, canEdit, allowVertex
               : models.models.length === 0 ? <span className="text-zinc-500">使えるモデルが見つかりませんでした。</span>
               : (
                 <>
-                  <div className="mb-1.5 text-zinc-500">いま使えるモデル（{models.models.length}）。押すと対話のモデルに入ります（保存で反映）。</div>
+                  <div className="mb-1.5 text-zinc-500">
+                    提供元の目録にあるモデル（{models.models.length}）。引退したものも混じるので、押すとその場で呼んで確かめ、対話のモデルに入れます（保存で反映）。
+                  </div>
                   <div className="flex max-h-40 flex-wrap gap-1 overflow-y-auto">
                     {models.models.map((m) => (
-                      <button key={m} type="button" onClick={() => set("chat_model", m)}
-                        className={`chip font-mono hover:border-brand-300 ${f.chat_model === m ? "border-brand-400 bg-brand-50 text-brand-700" : ""}`}>{m}</button>
+                      <button key={m} type="button" onClick={() => tryModel(m)}
+                        className={`chip font-mono hover:border-brand-300 ${tried[m] === "ok" ? "border-emerald-300 bg-emerald-50 text-emerald-700"
+                          : tried[m] === "ng" ? "border-rose-200 bg-rose-50 text-rose-600 line-through"
+                          : f.chat_model === m ? "border-brand-400 bg-brand-50 text-brand-700" : ""}`}>
+                        {tried[m] === "ok" && <CheckCircle2 size={11} />}{tried[m] === "testing" && "… "}{m}
+                      </button>
                     ))}
                   </div>
                 </>
