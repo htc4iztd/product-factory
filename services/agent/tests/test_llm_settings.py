@@ -142,3 +142,19 @@ def test_openai_compatible_local_llm_via_app_default(client):
         assert last["body"]["response_format"] == {"type": "json_object"}
     finally:
         srv.shutdown()
+
+
+def test_platform_admin_can_choose_vertex_for_own_tenant(client):
+    c = client
+    # 全テナントへの許可は出ていない
+    assert c.get("/settings/llm", headers=H).json()["allow_tenant_vertex"] is False
+    s = c.get("/settings/llm", headers=ADMIN).json()
+    assert s["is_admin"] and s["admin_configured"] and s["allow_tenant_vertex"] is True
+    r = c.put("/settings/llm/tenant", headers=ADMIN, json={"provider": "vertex", "chat_model": "claude-opus-5-5"})
+    assert r.status_code == 200, r.text
+    from pf_agent import llmconf
+    t = llmconf.resolve("tenant-ops")
+    assert (t.provider, t.chat_model, t.project, t.source) == ("vertex", "claude-opus-5-5", "my-proj", "tenant")
+    # 一般テナントは選べないまま
+    assert c.put("/settings/llm/tenant", headers=H, json={"provider": "vertex"}).status_code == 403
+    assert llmconf.resolve("tenant-a").provider == "stub"

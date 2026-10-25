@@ -139,8 +139,10 @@ def _llm_error(e: llmconf.ConfigError):
 def get_llm(c: Caller = Depends(caller)):
     admin = llmconf.is_admin(c.user)
     return {
-        "can_edit": c.base_role == "OWNER", "is_admin": admin,
-        "allow_tenant_vertex": llmconf.allow_tenant_vertex(),
+        "can_edit": c.base_role == "OWNER", "is_admin": admin, "admin_configured": llmconf.admin_configured(),
+        # プラットフォーム管理者は自分のテナントでも Vertex AI を選べる。既に許された設定は持ち主が変えられる
+        "allow_tenant_vertex": admin or llmconf.allow_tenant_vertex() or bool(
+            (t := llmconf.view(f"t:{c.tenant}")) and t["platform_granted"] and t["provider"] == "vertex"),
         "tenant": llmconf.view(f"t:{c.tenant}"),
         "app": llmconf.view("app") if admin else None,
         "effective": llmconf.describe(llmconf.resolve(c.tenant)),
@@ -154,7 +156,7 @@ def put_llm_tenant(body: LlmBody, c: Caller = Depends(caller)):
     if c.base_role != "OWNER":
         raise HTTPException(403, "LLM の接続はテナントの OWNER だけが変えられます")
     try:
-        llmconf.save(f"t:{c.tenant}", c.tenant, c.user, body.model_dump())
+        llmconf.save(f"t:{c.tenant}", c.tenant, c.user, body.model_dump(), by_admin=llmconf.is_admin(c.user))
     except llmconf.ConfigError as e:
         _llm_error(e)
     return {"ok": True}
@@ -163,7 +165,7 @@ def put_llm_tenant(body: LlmBody, c: Caller = Depends(caller)):
 @app.put("/settings/llm/app")
 def put_llm_app(body: LlmBody, c: Caller = Depends(caller)):
     if not llmconf.is_admin(c.user):
-        raise HTTPException(403, "アプリ全体の既定は運用者だけが変えられます")
+        raise HTTPException(403, "アプリ全体の既定はプラットフォーム管理者だけが変えられます")
     try:
         llmconf.save("app", c.tenant, c.user, body.model_dump())
     except llmconf.ConfigError as e:
@@ -175,7 +177,7 @@ def put_llm_app(body: LlmBody, c: Caller = Depends(caller)):
 def test_llm(body: LlmTest, c: Caller = Depends(caller)):
     if body.scope == "app":
         if not llmconf.is_admin(c.user):
-            raise HTTPException(403, "アプリ全体の既定は運用者だけが試せます")
+            raise HTTPException(403, "アプリ全体の既定はプラットフォーム管理者だけが試せます")
         conn = llmconf.app_conn()
     else:
         if c.base_role != "OWNER":

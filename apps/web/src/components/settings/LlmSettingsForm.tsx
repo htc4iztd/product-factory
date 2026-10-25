@@ -66,7 +66,7 @@ export function LlmSettingsForm({ scope, title, note, view, canEdit, allowVertex
             {scope === "tenant" && <option value="inherit">{inheritLabel}</option>}
             {(Object.keys(options.providers) as LlmProvider[]).map((k) => (
               <option key={k} value={k} disabled={k === "vertex" && !allowVertex}>
-                {options.providers[k]}{k === "vertex" && !allowVertex ? "（運用者の許可が必要）" : ""}
+                {options.providers[k]}{k === "vertex" && !allowVertex ? "（プラットフォーム管理者の許可が必要）" : ""}
               </option>
             ))}
           </select>

@@ -1,10 +1,11 @@
 """LLM の接続設定。
 
-- アプリ全体の既定（scope="app"）は運用者（PF_ADMIN_EMAILS）が決める。
+- アプリ全体の既定（scope="app"）はプラットフォーム管理者（PF_ADMIN_EMAILS）が決める。
 - テナントは OWNER が自分の接続で上書きできる（scope="t:<テナントID>"）。行が無ければ既定を使う。
 - どちらも無ければ環境変数（GOOGLE_API_KEY / PF_LLM / PF_MODEL）に従う。何も無ければスタブ。
 - API キーは PF_SECRET_KEY から作る鍵で暗号化して DB に置き、画面には末尾4文字だけを返す。
-- キー不要の Vertex AI はアプリ（運用者）の GCP の費用になるので、テナントは運用者が許したときだけ選べる。
+- キー不要の Vertex AI はアプリの GCP の費用になる。選べるのはプラットフォーム管理者と、
+  管理者が全テナントに許したときだけ。
 - OpenAI 互換の URL（ローカルLLM など）は、テナントからは公開アドレスだけを受け付ける（内部への到達を防ぐ）。
 """
 from __future__ import annotations
@@ -62,7 +63,7 @@ class Conn:
     base_url: str | None = None
     project: str | None = None
     location: str | None = None
-    allow_private: bool = False  # OpenAI 互換の URL に内部アドレスを許すか（運用者の設定だけ）
+    allow_private: bool = False  # OpenAI 互換の URL に内部アドレスを許すか（プラットフォーム管理者の設定だけ）
 
     def label(self, use: str = "chat") -> str:
         return {"chat": self.chat_model, "summary": self.summary_model, "image": self.image_model}[use] or self.provider
@@ -93,6 +94,10 @@ def _decrypt(token: str | None) -> str | None:
 
 
 # ---------------- 権限 ----------------
+def admin_configured() -> bool:
+    return bool(os.environ.get("PF_ADMIN_EMAILS", "").strip())
+
+
 def is_admin(email: str) -> bool:
     admins = {e.lower() for e in re.split(r"[,;\s]+", os.environ.get("PF_ADMIN_EMAILS", "")) if e}
     return email.lower() in admins
@@ -168,10 +173,10 @@ def resolve(tenant_id: str) -> Conn:
     r = _row(f"t:{tenant_id}")
     if r is None:
         return app_conn()
-    if r.provider == "vertex" and not allow_tenant_vertex():
-        return app_conn()  # 運用者が許可を外したら既定に戻す
+    if r.provider == "vertex" and not (r.platform_granted or allow_tenant_vertex()):
+        return app_conn()  # プラットフォーム管理者が許可を外したら既定に戻す
     c = _conn(r, "tenant")
-    if c.provider == "vertex":  # テナントは運用者のプロジェクトだけを使う
+    if c.provider == "vertex":  # テナントはプラットフォーム管理者のプロジェクトだけを使う
         c.project = _default_project()
     return c
 
@@ -188,6 +193,7 @@ def view(scope: str) -> dict | None:
     return {"provider": r.provider, "chat_model": r.chat_model, "summary_model": r.summary_model,
             "image_model": r.image_model, "base_url": r.base_url, "project": r.project, "location": r.location,
             "key_hint": r.key_hint, "has_key": bool(r.key_enc), "allow_tenant_vertex": r.allow_tenant_vertex,
+            "platform_granted": r.platform_granted,
             "updated_by": r.updated_by, "updated_at": r.updated_at.isoformat() if r.updated_at else None}
 
 
@@ -199,8 +205,11 @@ def describe(c: Conn) -> dict:
             "location": c.location if c.provider == "vertex" else None}
 
 
-def save(scope: str, tenant_id: str, user: str, body: dict) -> None:
-    """provider が "inherit" ならテナントの上書きを消す。api_key は空なら据え置き、clear_key で消す。"""
+def save(scope: str, tenant_id: str, user: str, body: dict, by_admin: bool = False) -> None:
+    """provider が "inherit" ならテナントの上書きを消す。api_key は空なら据え置き、clear_key で消す。
+
+    by_admin：プラットフォーム管理者による保存。管理者は自分のテナントでも Vertex AI を選べる。
+    """
     is_app = scope == "app"
     provider = body.get("provider", "")
     with session() as s:
@@ -213,8 +222,9 @@ def save(scope: str, tenant_id: str, user: str, body: dict) -> None:
             return
         if provider not in PROVIDERS:
             raise ConfigError(422, f"接続方式は {list(PROVIDERS)} のどれか")
-        if provider == "vertex" and not is_app and not allow_tenant_vertex():
-            raise ConfigError(403, "Vertex AI（キー不要）はアプリの運用者が許可したときだけ選べます")
+        granted = bool(row and row.platform_granted and row.provider == "vertex")
+        if provider == "vertex" and not (is_app or by_admin or granted or allow_tenant_vertex()):
+            raise ConfigError(403, "Vertex AI（キー不要）はアプリのプラットフォーム管理者が許可したときだけ選べます")
         if row is None:
             row = LlmSetting(scope=scope, provider=provider)
             s.add(row)
@@ -238,6 +248,8 @@ def save(scope: str, tenant_id: str, user: str, body: dict) -> None:
             raise ConfigError(422, f"{PROVIDERS[provider]} には API キーが要ります")
         if is_app:
             row.allow_tenant_vertex = bool(body.get("allow_tenant_vertex"))
+        else:
+            row.platform_granted = provider == "vertex" and (by_admin or granted)
         row.updated_by = user
         _audit(s, tenant_id, user, scope, {
             "provider": provider, "chat_model": row.chat_model, "summary_model": row.summary_model,

@@ -167,6 +167,8 @@ class LlmSetting(Base):
     key_hint: Mapped[str | None] = mapped_column(String(8), nullable=True)     # 画面に出す末尾4文字
     # app のみ：テナントにキー不要の Vertex を許す
     allow_tenant_vertex: Mapped[bool] = mapped_column(Boolean, default=False)
+    # テナントの行のみ：プラットフォーム管理者が自分で選んだ Vertex（全テナントへの許可がなくても有効）
+    platform_granted: Mapped[bool] = mapped_column(Boolean, default=False)
     updated_by: Mapped[str] = mapped_column(String(200), default="")
     updated_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), default=_now, onupdate=_now)
 
@@ -242,6 +244,7 @@ _ADDED_COLUMNS = {
     "artifacts": {"data": "JSON"},
     "products": {"cover_image_id": "VARCHAR(32)", "repo": "VARCHAR(200)", "repo_branch": "VARCHAR(100)"},
     "chat_messages": {"session_id": "VARCHAR(32)"},
+    "llm_settings": {"platform_granted": "BOOLEAN DEFAULT {false}"},
 }
 
 

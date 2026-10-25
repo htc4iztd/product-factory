@@ -132,14 +132,14 @@ export type LlmProvider = "stub" | "gemini" | "vertex" | "anthropic" | "openai";
 export type LlmView = {
   provider: LlmProvider; chat_model: string; summary_model: string; image_model: string;
   base_url: string | null; project: string | null; location: string | null;
-  key_hint: string | null; has_key: boolean; allow_tenant_vertex: boolean; updated_by: string; updated_at: string | null;
+  key_hint: string | null; has_key: boolean; allow_tenant_vertex: boolean; platform_granted: boolean; updated_by: string; updated_at: string | null;
 };
 export type LlmEffective = {
   provider: LlmProvider; provider_label: string; source: "tenant" | "app" | "env";
   chat_model: string; summary_model: string; image_model: string; base_url: string | null; location: string | null;
 };
 export type LlmSettings = {
-  can_edit: boolean; is_admin: boolean; allow_tenant_vertex: boolean;
+  can_edit: boolean; is_admin: boolean; admin_configured: boolean; allow_tenant_vertex: boolean;
   tenant: LlmView | null; app: LlmView | null; effective: LlmEffective; app_effective: LlmEffective;
   options: {
     providers: Record<LlmProvider, string>;

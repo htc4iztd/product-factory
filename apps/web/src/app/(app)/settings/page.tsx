@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { ChevronLeft } from "lucide-react";
+import { ChevronLeft, ShieldCheck } from "lucide-react";
 import { agent, type LlmSettings } from "@/lib/agent";
 import { Logo } from "@/components/Logo";
 import { UserMenu } from "@/components/UserMenu";
@@ -21,7 +21,10 @@ export default async function SettingsPage() {
       <main className="mx-auto max-w-4xl space-y-8 px-6 py-10">
         <div>
           <Link href="/" className="mb-3 flex items-center gap-1 text-xs text-zinc-500 hover:text-zinc-900"><ChevronLeft size={14} />すべてのプロダクト</Link>
-          <h1 className="text-2xl font-semibold tracking-tight">設定</h1>
+          <div className="flex items-center gap-2">
+            <h1 className="text-2xl font-semibold tracking-tight">設定</h1>
+            {s.is_admin && <span className="chip border-brand-200 bg-brand-50 text-brand-700"><ShieldCheck size={11} />プラットフォーム管理者</span>}
+          </div>
           <p className="mt-1 text-sm text-zinc-500">このテナントで使う AI（LLM）の接続を決めます。ステージの開閉と承認は、各プロダクトの「ステージの設定」で決めます。</p>
         </div>
 
@@ -42,9 +45,16 @@ export default async function SettingsPage() {
           view={s.tenant} canEdit={s.can_edit} allowVertex={s.allow_tenant_vertex} options={s.options}
           inheritLabel={`アプリ全体の既定を使う（${s.app_effective.provider_label}・${s.app_effective.chat_model || "—"}）`} />
 
+        {!s.admin_configured && s.can_edit && (
+          <p className="rounded-md border border-amber-200 bg-amber-50 px-4 py-3 text-xs leading-5 text-amber-800">
+            プラットフォーム管理者が設定されていません。GitHub の Variables に <code>PF_ADMIN_EMAILS</code>（ログインに使うメールアドレス。複数は ; 区切り）を入れて deploy を実行すると、
+            その人がアプリ全体の既定と Vertex AI（キー不要）の接続を決められるようになります。
+          </p>
+        )}
+
         {s.is_admin && (
-          <LlmSettingsForm scope="app" title="アプリ全体の既定（運用者）"
-            note="上書きしていないテナントは、すべてこの接続を使います。費用はこの接続の持ち主にかかります。"
+          <LlmSettingsForm scope="app" title="アプリ全体の既定（プラットフォーム管理者）"
+            note="上書きしていないテナントは、すべてこの接続を使います。費用はこの接続の持ち主にかかります。Vertex AI の費用は、このアプリを動かしている GCP プロジェクトにかかります。"
             view={s.app} canEdit allowVertex options={s.options} />
         )}
       </main>
