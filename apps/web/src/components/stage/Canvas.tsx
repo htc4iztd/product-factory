@@ -4,6 +4,7 @@ import { KpiGraph } from "./KpiGraph";
 import { FlowEditor } from "./FlowEditor";
 import type { Flow, Trace } from "@/lib/agent";
 import { ImportAcButton } from "./StageActions";
+import { tableFilled } from "./table";
 
 type Ctx = { pid: string; st: StageDetail; readOnly: boolean; proposed: Set<string> };
 
@@ -276,7 +277,7 @@ function BusinessReq({ c }: { c: Ctx }) {
           <span className="text-[11px] text-zinc-400">階層：業務領域 → 業務 → 作業　種類：コア業務／支援業務／管理業務</span>
         </div>
         <BusinessTree rows={rows} />
-        <details className="mt-3">
+        <details className="mt-3" open={isBlank(c, "business_map")}>
           <summary className="cursor-pointer select-none text-xs text-zinc-500">表で編集する（上位業務の名前で親子をつなぎます）</summary>
           <div className="mt-2"><F c={c} k="business_map" /></div>
         </details>
@@ -312,9 +313,15 @@ function Title({ c, k, label, note }: { c: Ctx; k: string; label: string; note?:
   );
 }
 
+// 空の表は畳まずに開いておく（最初の1行をすぐ書けるように）
+function isBlank(c: Ctx, k: string) {
+  const f = c.st.framework.fields.find((x) => x.key === k) as FieldSpec;
+  return !c.readOnly && !tableFilled(f, c.st.draft[k]);
+}
+
 function EditTable({ c, k, label = "表で編集する" }: { c: Ctx; k: string; label?: string }) {
   return (
-    <details className="mt-3">
+    <details className="mt-3" open={isBlank(c, k)}>
       <summary className="cursor-pointer select-none text-xs text-zinc-500">{label}</summary>
       <div className="mt-2"><F c={c} k={k} /></div>
     </details>

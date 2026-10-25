@@ -2,12 +2,22 @@
 import { useState, useTransition } from "react";
 import { Pencil, Plus, Sparkles, Trash2 } from "lucide-react";
 import type { FieldSpec, FieldValue, Flow, Row } from "@/lib/agent";
+import { tableFilled } from "./table";
 import { setField } from "@/app/(app)/p/[id]/s/[stage]/actions";
 
 type Props = {
   pid: string; sid: string; field: FieldSpec; value: FieldValue; readOnly?: boolean;
   hasProposal?: boolean; compact?: boolean; hideLabel?: boolean;
 };
+
+// 空の表を最初から1行（固定行の表はその行）出しておくための初期値
+function startRows(field: FieldSpec, value: FieldValue): Row[] {
+  const blank = () => Object.fromEntries(field.columns.map((c) => [c.key, ""])) as Row;
+  const rows = ((value as Row[] | undefined) ?? []).map((r) => ({ ...r }));
+  if (rows.length) return rows;
+  if (field.rows.length) return field.rows.map((label) => ({ ...blank(), [field.columns[0].key]: label }));
+  return [blank()];
+}
 
 export function FieldView({ field, value, compact }: { field: FieldSpec; value: FieldValue; compact?: boolean }) {
   const empty = <span className="text-zinc-400">{field.hint || "未記入"}</span>;
@@ -39,8 +49,7 @@ export function FieldView({ field, value, compact }: { field: FieldSpec; value: 
     );
   }
   const rows = (value as Row[] | undefined) ?? [];
-  const filled = rows.some((r) => field.columns.slice(field.rows.length ? 1 : 0).some((c) => String(r[c.key] ?? "").trim()));
-  if (!filled) return empty;
+  if (!tableFilled(field, value)) return empty;
   return (
     <div className="overflow-x-auto">
       <table className={`w-full border-collapse ${compact ? "text-[11px]" : "text-xs"}`}>
@@ -94,7 +103,8 @@ function TableInput({ field, rows, onChange }: { field: FieldSpec; rows: Row[]; 
                         value={String(r[c.key] ?? "")}
                         onChange={(e) => set(i, c.key, e.target.value)}
                         inputMode={c.kind === "number" ? "decimal" : undefined}
-                        className={`w-full min-w-[5rem] rounded-md border border-transparent bg-transparent px-1.5 py-1 outline-none hover:border-zinc-200 focus:border-brand-500 focus:bg-white ${c.kind === "number" ? "text-right tabular-nums" : ""}`}
+                        placeholder={c.label}
+                        className={`w-full min-w-[5rem] rounded-md border border-transparent bg-transparent px-1.5 py-1 outline-none placeholder:text-zinc-300 hover:border-zinc-200 focus:border-brand-500 focus:bg-white ${c.kind === "number" ? "text-right tabular-nums" : ""}`}
                       />
                     )}
                   </td>
@@ -119,16 +129,22 @@ function TableInput({ field, rows, onChange }: { field: FieldSpec; rows: Row[]; 
 }
 
 export function FieldEditor({ pid, sid, field, value, readOnly, hasProposal, compact, hideLabel }: Props) {
-  const [editing, setEditing] = useState(false);
+  // 空の表は「編集」を押さなくても、最初から入力できる行を出しておく
+  const blankTable = !readOnly && field.kind === "table" && !tableFilled(field, value);
+  const [opened, setEditing] = useState(false);
+  const editing = opened || blankTable;
   const [text, setText] = useState("");
-  const [rows, setRows] = useState<Row[]>([]);
+  const [draftRows, setRows] = useState<Row[]>([]);
+  const [dirty, setDirty] = useState(false);
+  // 手を付けていない空の表は、いつも今の値から作り直す（AIの案が入ったときなどに古い行を残さない）
+  const rows = blankTable && !dirty ? startRows(field, value) : draftRows;
   const [error, setError] = useState<string | null>(null);
   const [pending, start] = useTransition();
 
   function open() {
     if (readOnly || field.kind === "flows") return;
     setError(null);
-    if (field.kind === "table") setRows(((value as Row[]) ?? []).map((r) => ({ ...r })));
+    if (field.kind === "table") setRows(startRows(field, value));
     else setText(field.kind === "list" ? ((value as string[]) ?? []).join("\n") : String(value ?? ""));
     setEditing(true);
   }
@@ -137,8 +153,12 @@ export function FieldEditor({ pid, sid, field, value, readOnly, hasProposal, com
     start(async () => {
       const r = await setField(pid, sid, field.key, v);
       if (r.error) setError(r.error);
-      else setEditing(false);
+      else { setEditing(false); setDirty(false); }
     });
+  }
+  function cancel() {
+    if (blankTable) { setDirty(false); setError(null); }
+    else setEditing(false);
   }
 
   return (
@@ -161,8 +181,9 @@ export function FieldEditor({ pid, sid, field, value, readOnly, hasProposal, com
       )}
       {editing ? (
         <div className="space-y-2">
+          {blankTable && field.hint && <p className="text-[12px] text-zinc-400">{field.hint}</p>}
           {field.kind === "table" ? (
-            <TableInput field={field} rows={rows} onChange={setRows} />
+            <TableInput field={field} rows={rows} onChange={(r) => { setRows(r); setDirty(true); }} />
           ) : (
             <textarea
               autoFocus
@@ -170,7 +191,7 @@ export function FieldEditor({ pid, sid, field, value, readOnly, hasProposal, com
               onChange={(e) => setText(e.target.value)}
               onKeyDown={(e) => {
                 if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) save();
-                if (e.key === "Escape") setEditing(false);
+                if (e.key === "Escape") cancel();
               }}
               rows={Math.max(3, text.split("\n").length + 1)}
               placeholder={field.kind === "list" ? "1行に1つずつ" : field.hint}
@@ -179,8 +200,8 @@ export function FieldEditor({ pid, sid, field, value, readOnly, hasProposal, com
           )}
           {error && <p className="text-xs text-rose-600">{error}</p>}
           <div className="flex items-center gap-2">
-            <button onClick={save} disabled={pending} className="btn-primary btn-sm">{pending ? "保存中…" : "保存"}</button>
-            <button onClick={() => setEditing(false)} className="btn-ghost btn-sm">キャンセル</button>
+            <button onClick={save} disabled={pending || (blankTable && !dirty)} className="btn-primary btn-sm">{pending ? "保存中…" : "保存"}</button>
+            {(!blankTable || dirty) && <button onClick={cancel} className="btn-ghost btn-sm">{blankTable ? "元に戻す" : "キャンセル"}</button>}
             {field.kind !== "table" && <span className="ml-auto text-[10px] text-zinc-400"><span className="kbd">⌘</span>+<span className="kbd">Enter</span> で保存</span>}
           </div>
         </div>
