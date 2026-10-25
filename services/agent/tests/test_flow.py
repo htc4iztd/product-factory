@@ -383,3 +383,26 @@ def test_repo_link_and_code_read(client, monkeypatch):
     assert c.get(f"/products/{pid}/code/tree", headers=other).status_code == 404
     r = c.put(f"/products/{pid}/repo", headers=H, json={"repo": ""}).json()
     assert r["product"]["repo"] is None
+
+
+def test_intake_conversation_then_create(client):
+    c = client
+    say = []
+    r = c.post("/products/intake", headers=H, json={"messages": []}).json()
+    assert r["ready"] is False and "作りたい" in r["reply"]
+    answers = ("共働き世帯の家計簿アプリ", "共働きの夫婦。月末の締めに時間がかかる",
+               "レシートを撮るだけで記録する。まずは MVP で")
+    for text in answers:
+        say += [{"role": "assistant", "text": r["reply"]}, {"role": "user", "text": text}]
+        r = c.post("/products/intake", headers=H, json={"messages": say}).json()
+    assert r["ready"] is True and r["scope"] == "mvp" and r["customer_segments"]
+    canvas = {"customer_segments": r["customer_segments"], "problem": r["problem"], "solution": r["solution"],
+              "nope": ["x"]}
+    p = c.post("/products", headers=H, json={"name": "家計簿", "idea": r["idea"], "scope": r["scope"],
+                                              "canvas": canvas}).json()
+    st = c.get(f"/products/{p['id']}/stages/s01", headers=H).json()
+    assert st["draft"]["customer_segments"] == ["共働きの夫婦。月末の締めに時間がかかる"]
+    assert st["draft"]["solution"] == ["レシートを撮るだけで記録する。まずは MVP で"]
+    assert st["status"] == "in_progress"
+    viewer = {**H, "x-pf-role": "MEMBER"}
+    assert c.post("/products/intake", headers=viewer, json={"messages": []}).status_code == 403

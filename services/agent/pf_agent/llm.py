@@ -208,6 +208,61 @@ def extract(conn: Conn, product: str, kind: str, text: str) -> Extracted:
     return _json(conn, conn.summary_model, prompt, Extracted)
 
 
+class Intake(BaseModel):
+    """新しいプロダクトを作る前の聞き取り。分かったことだけを埋め、足りなければ次の質問を reply に書く。"""
+    reply: str
+    name: str
+    idea: str
+    scope: str                    # mvp | poc | 空
+    customer_segments: list[str]
+    problem: list[str]
+    solution: list[str]
+    uvp: str
+    ready: bool
+
+
+INTAKE_QUESTIONS = (
+    "どんなプロダクトを作りたいですか？思いついたままで構いません。",
+    "それは誰の、どんな困りごとを解決しますか？",
+    "どうやって解決しますか？最初は小さく出して使ってもらう（MVP）か、技術や需要を確かめる（PoC）かも教えてください。",
+)
+
+
+def _stub_intake(messages: list[dict]) -> Intake:
+    said = [m["text"].strip() for m in messages if m["role"] == "user" and m["text"].strip()]
+    idea = said[0] if said else ""
+    who = said[1] if len(said) > 1 else ""
+    how = said[2] if len(said) > 2 else ""
+    ready = len(said) >= 3
+    reply = INTAKE_QUESTIONS[len(said)] if not ready else (
+        "ありがとうございます。右の内容でプロダクトを作れます。直したいところは右で書き換えてください。")
+    scope = ("poc" if "poc" in how.lower() else "mvp") if how else ""
+    return Intake(reply=reply, name=idea[:20], idea=idea, scope=scope,
+                  customer_segments=[who] if who else [], problem=[who] if who else [], solution=[how] if how else [],
+                  uvp="", ready=ready)
+
+
+def intake(conn: Conn, messages: list[dict]) -> Intake:
+    if conn.provider == "stub":
+        return _stub_intake(messages)
+    hist = "\n".join(f"{'ビルダー' if m['role'] == 'user' else 'AI'}: {m['text']}" for m in messages[-30:])
+    prompt = (
+        "あなたは新しいプロダクトの立ち上げを手伝う聞き手です。ビルダーとの対話から、プロダクトを作るのに必要なことを"
+        "聞き取ります。日本語で、短く直接的に、一度に1〜2問だけ聞いてください。前置きや称賛は書かない。\n"
+        "聞き取る項目：name（プロダクト名。決まっていなければ短い仮の名前を提案）、idea（何を作るかを1〜2文で）、"
+        "customer_segments（誰のためか）、problem（その人の困りごと。上位3つまで）、solution（どう解決するか）、"
+        "uvp（選ばれる理由を一文で。分からなければ空）、"
+        "scope（小さく出して使ってもらうなら mvp、技術や需要を確かめるなら poc。"
+        "分からなければ空）。\n"
+        "対話に出たことだけを入れ、推測で埋めない。曖昧な答えは具体的に聞き直す。"
+        "name・idea・customer_segments・problem・solution がそろったら ready を true にし、"
+        "reply では内容を確かめる一言を書く。"
+        "そろっていなければ ready は false にし、reply に次の質問を書く。\n\n"
+        f"## これまでの対話\n{hist or '（まだありません。最初の質問をしてください）'}\n"
+    )
+    return _json(conn, conn.chat_model, prompt, Intake)
+
+
 def ping(conn: Conn) -> dict:
     """接続テスト。短い文を1つ返してもらい、かかった時間を測る。"""
     if conn.provider == "stub":

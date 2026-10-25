@@ -66,7 +66,7 @@ class Engine:
 
     # ---------------- products ----------------
     def create_product(self, tenant: str, user: str, name: str, idea: str,
-                       scope: str = "mvp", mode: str = "personal") -> Product:
+                       scope: str = "mvp", mode: str = "personal", canvas: dict | None = None) -> Product:
         # 承認の既定：法人モードは全ステージ必須、個人モードは不要（あとで設定で変えられる）
         approval = mode == "corporate"
         with session() as s:
@@ -79,6 +79,18 @@ class Engine:
             s.commit()
         repo.log(p.id, None, "human", user, "product.create",
                  body={"name": name, "idea": idea, "scope": scope, "mode": mode})
+        if canvas:  # 聞き取りで分かったことを①の下書きに入れる（本人の答えなので案にせず直接入れる）
+            fw = fx.FRAMEWORK_BY_STAGE["s01"]
+            values = {}
+            for k, v in canvas.items():
+                f = fw.get(k)
+                if f is not None and v:
+                    try:
+                        values[k] = fx.coerce(f, v)
+                    except (ValueError, TypeError):
+                        continue
+            if values:
+                repo.set_fields(p.id, "s01", values, user, "intake")
         return p
 
     @staticmethod

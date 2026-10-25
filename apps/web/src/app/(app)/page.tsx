@@ -1,24 +1,11 @@
 import Link from "next/link";
-import { redirect } from "next/navigation";
-import { ArrowUpRight, Boxes, Plus } from "lucide-react";
+import { ArrowUpRight, Boxes, Plus, Sparkles } from "lucide-react";
 import { agent, type Product } from "@/lib/agent";
 import { Logo } from "@/components/Logo";
 import { UserMenu } from "@/components/UserMenu";
 
 export default async function Home() {
   const products = await agent<Product[]>("/products");
-  async function create(formData: FormData) {
-    "use server";
-    const p = await agent<Product>("/products", {
-      method: "POST",
-      body: {
-        name: String(formData.get("name") ?? ""),
-        idea: String(formData.get("idea") ?? ""),
-        scope: String(formData.get("scope") ?? "mvp"),
-      },
-    });
-    redirect(`/p/${p.id}`);
-  }
   return (
     <>
       <header className="sticky top-0 z-10 border-b border-zinc-200 bg-white/80 backdrop-blur">
@@ -38,7 +25,7 @@ export default async function Home() {
               <div className="card flex flex-col items-center justify-center gap-3 px-6 py-16 text-center">
                 <div className="flex h-10 w-10 items-center justify-center rounded-full bg-zinc-100 text-zinc-500"><Boxes size={18} /></div>
                 <div className="font-medium">まだプロダクトがありません</div>
-                <p className="max-w-sm text-sm text-zinc-500">右のフォームから最初のプロダクトを作ると、リーンキャンバスから始められます。</p>
+                <p className="max-w-sm text-sm text-zinc-500">「新しいプロダクトをつくる」から、AI との対話で最初のプロダクトを作れます。</p>
               </div>
             ) : (
               <div className="grid gap-3 sm:grid-cols-2">
@@ -65,31 +52,11 @@ export default async function Home() {
               </div>
             )}
           </section>
-          <form action={create} className="card h-fit space-y-4 p-5">
-            <div className="flex items-center gap-2 font-semibold"><Plus size={16} />新しいプロダクト</div>
-            <div>
-              <label className="label" htmlFor="name">名前</label>
-              <input id="name" name="name" required placeholder="例：家計簿アプリ" className="input" />
-            </div>
-            <div>
-              <label className="label" htmlFor="idea">作りたいもの・解きたい課題</label>
-              <textarea id="idea" name="idea" rows={4} placeholder="誰のどんな課題を、どう解きたいか。AIとの対話の出発点になります。" className="input" />
-            </div>
-            <fieldset>
-              <legend className="label">進め方</legend>
-              <div className="grid grid-cols-2 gap-2">
-                {[["mvp", "MVP", "全工程を使う"], ["poc", "PoC", "市場・競合分析を閉じる"]].map(([v, t, d]) => (
-                  <label key={v} className="cursor-pointer rounded-lg border border-zinc-200 p-3 text-[13px] has-[:checked]:border-brand-500 has-[:checked]:ring-4 has-[:checked]:ring-brand-100">
-                    <input type="radio" name="scope" value={v} defaultChecked={v === "mvp"} className="sr-only" />
-                    <div className="font-medium">{t}</div>
-                    <div className="text-[11px] text-zinc-500">{d}</div>
-                  </label>
-                ))}
-              </div>
-              <p className="mt-2 text-[11px] text-zinc-400">使うステージと承認の要否は、あとから設定で変えられます。</p>
-            </fieldset>
-            <button className="btn-primary w-full">作成</button>
-          </form>
+          <div className="card h-fit space-y-3 p-5">
+            <div className="flex items-center gap-2 font-semibold"><Sparkles size={16} className="text-brand-600" />新しいプロダクト</div>
+            <p className="text-[13px] leading-6 text-zinc-500">AI が質問するので、答えていくだけで作れます。答えた内容は①リーンキャンバスの下書きに入ります。</p>
+            <Link href="/new" className="btn-primary w-full"><Plus size={16} />新しいプロダクトをつくる</Link>
+          </div>
         </div>
       </main>
     </>

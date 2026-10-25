@@ -12,6 +12,20 @@ fs.mkdirSync(SHOTS, { recursive: true });
 const browser = await chromium.launch();
 const page = await browser.newPage({ viewport: { width: 1440, height: 960 } });
 page.setDefaultTimeout(20000);
+
+// 新しいプロダクトは AI の聞き取りで作る（スタブは3つ答えると作れる）
+async function createProduct(name, idea) {
+  await page.goto(`${BASE}/new`);
+  for (const a of [idea, "共働きの夫婦。月末の締めに時間がかかる", "レシートを撮るだけで記録する。まずは MVP で"]) {
+    await page.getByText("考えています…").waitFor({ state: "detached" });
+    await page.getByLabel("返事").fill(a);
+    await page.getByRole("button", { name: "送信", exact: true }).click();
+  }
+  await page.getByText("作れます", { exact: true }).waitFor();
+  await page.getByLabel("プロダクト名").fill(name);
+  await page.getByRole("button", { name: "この内容でプロダクトをつくる" }).click();
+  await page.waitForURL(/\/p\/[0-9a-f]+$/);
+}
 const shot = (n, full = false) => page.screenshot({ path: `${SHOTS}/${n}.png`, fullPage: full });
 const btn = (name, exact = false) => page.getByRole("button", { name, exact });
 const openCreate = () => page.evaluate(() => {
@@ -34,10 +48,7 @@ await btn("接続テスト").last().click();
 await page.getByText("つながりました（octo）").waitFor();
 
 await page.goto(`${BASE}/`);
-await page.fill("input[name=name]", "GH連携");
-await page.fill("textarea[name=idea]", "x");
-await btn("作成", true).click();
-await page.waitForURL(/\/p\/[0-9a-f]+$/);
+await createProduct("GH連携", "x");
 const pid = page.url().split("/p/")[1];
 await page.goto(`${BASE}/p/${pid}/code?edit=1`);
 await page.fill("#repo", "acme/app");

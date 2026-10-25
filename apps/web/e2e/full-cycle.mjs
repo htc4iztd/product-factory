@@ -11,6 +11,20 @@ const email = `e2e-${Date.now()}@example.com`;
 const browser = await chromium.launch();
 const page = await browser.newPage({ viewport: { width: 1440, height: 960 } });
 page.setDefaultTimeout(20000);
+
+// 新しいプロダクトは AI の聞き取りで作る（スタブは3つ答えると作れる）
+async function createProduct(name, idea) {
+  await page.goto(`${BASE}/new`);
+  for (const a of [idea, "共働きの夫婦。月末の締めに時間がかかる", "レシートを撮るだけで記録する。まずは MVP で"]) {
+    await page.getByText("考えています…").waitFor({ state: "detached" });
+    await page.getByLabel("返事").fill(a);
+    await page.getByRole("button", { name: "送信", exact: true }).click();
+  }
+  await page.getByText("作れます", { exact: true }).waitFor();
+  await page.getByLabel("プロダクト名").fill(name);
+  await page.getByRole("button", { name: "この内容でプロダクトをつくる" }).click();
+  await page.waitForURL(/\/p\/[0-9a-f]+$/);
+}
 const shot = (n, full = false) => page.screenshot({ path: `${SHOTS}/${n}.png`, fullPage: full });
 const btn = (name, exact = false) => page.getByRole("button", { name, exact });
 
@@ -22,10 +36,7 @@ await page.fill("input[name=password]", "password123");
 await btn("登録して始める").click();
 await page.waitForURL(`${BASE}/`);
 
-await page.fill("input[name=name]", "家計簿アプリ");
-await page.fill("textarea[name=idea]", "共働き世帯の家計を5分で締められるアプリ");
-await btn("作成", true).click();
-await page.waitForURL(/\/p\/[0-9a-f]+$/);
+await createProduct("家計簿アプリ", "共働き世帯の家計を5分で締められるアプリ");
 const pid = page.url().split("/p/")[1];
 await shot("01-overview", true);
 
@@ -214,14 +225,15 @@ await shot("14-audit");
 // 設定：このテナントの LLM 接続を決め、接続テストする（キーの要る方式はキーが無いと保存できない）
 await page.getByRole("link", { name: "設定", exact: true }).first().click();
 await page.waitForURL(`${BASE}/settings`);
-const provider = page.getByLabel("接続方式");
+const llm = page.getByRole("region", { name: "このテナントの接続" });
+const provider = llm.getByLabel("接続方式");
 await provider.selectOption("anthropic");
-await btn("保存", true).click();
+await llm.getByRole("button", { name: "保存", exact: true }).click();
 await page.getByText("API キーが要ります").waitFor();
 await provider.selectOption("stub");
-await btn("保存", true).click();
+await llm.getByRole("button", { name: "保存", exact: true }).click();
 await page.getByText("保存しました").waitFor();
-await btn("接続テスト").click();
+await llm.getByRole("button", { name: "接続テスト" }).click();
 await page.getByRole("status").getByText(/つながりました/).waitFor();
 await page.getByText("このテナントの設定").waitFor();
 await shot("15-settings", true);

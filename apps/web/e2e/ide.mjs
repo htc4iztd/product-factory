@@ -7,6 +7,20 @@ fs.mkdirSync(SHOTS, { recursive: true });
 const browser = await chromium.launch();
 const page = await browser.newPage({ viewport: { width: 1440, height: 900 } });
 page.setDefaultTimeout(30000);
+
+// 新しいプロダクトは AI の聞き取りで作る（スタブは3つ答えると作れる）
+async function createProduct(name, idea) {
+  await page.goto(`${BASE}/new`);
+  for (const a of [idea, "共働きの夫婦。月末の締めに時間がかかる", "レシートを撮るだけで記録する。まずは MVP で"]) {
+    await page.getByText("考えています…").waitFor({ state: "detached" });
+    await page.getByLabel("返事").fill(a);
+    await page.getByRole("button", { name: "送信", exact: true }).click();
+  }
+  await page.getByText("作れます", { exact: true }).waitFor();
+  await page.getByLabel("プロダクト名").fill(name);
+  await page.getByRole("button", { name: "この内容でプロダクトをつくる" }).click();
+  await page.waitForURL(/\/p\/[0-9a-f]+$/);
+}
 const errs = [];
 page.on("console", (m) => { if (m.type() === "error") errs.push(m.text().slice(0, 200)); });
 page.on("response", (r) => { if (r.status() >= 400) errs.push(`${r.status()} ${r.url()}`); });
@@ -16,10 +30,7 @@ await page.fill("input[name=email]", `ide-${Date.now()}@example.com`);
 await page.fill("input[name=password]", "password123");
 await page.getByRole("button", { name: "登録して始める" }).click();
 await page.waitForURL(`${BASE}/`);
-await page.fill("input[name=name]", "IDEテスト");
-await page.fill("textarea[name=idea]", "コードを見る");
-await page.getByRole("button", { name: "作成", exact: true }).click();
-await page.waitForURL(/\/p\/[0-9a-f]+$/);
+await createProduct("IDEテスト", "コードを見る");
 const pid = page.url().split("/p/")[1];
 await page.getByRole("link", { name: /コード（IDE）/ }).click();
 await page.fill("#repo", "https://github.com/htc4iztd/product-factory");

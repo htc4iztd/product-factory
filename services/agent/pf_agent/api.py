@@ -50,6 +50,17 @@ class CreateProduct(BaseModel):
     idea: str = ""
     scope: str = Field(default="mvp", pattern="^(mvp|poc)$")
     mode: str = Field(default="personal", pattern="^(personal|corporate)$")
+    # 聞き取りで分かった①リーンキャンバスの値（下書きに入れる）
+    canvas: dict[str, str | list[str]] | None = None
+
+
+class IntakeMessage(BaseModel):
+    role: str = Field(pattern="^(user|assistant)$")
+    text: str = Field(max_length=8000)
+
+
+class IntakeBody(BaseModel):
+    messages: list[IntakeMessage] = Field(max_length=60)
 
 
 class Chat(BaseModel):
@@ -236,8 +247,22 @@ def list_products(c: Caller = Depends(caller)):
 def create_product(body: CreateProduct, c: Caller = Depends(caller)):
     if c.base_role not in ("OWNER", "ADMIN"):
         raise HTTPException(403, "プロダクトを作れるのは ADMIN 以上")
-    p = engine.create_product(c.tenant, c.user, body.name, body.idea, body.scope, body.mode)
+    p = engine.create_product(c.tenant, c.user, body.name, body.idea, body.scope, body.mode, body.canvas)
     return product_dict(p)
+
+
+@app.post("/products/intake")
+def product_intake(body: IntakeBody, c: Caller = Depends(caller)):
+    """新しいプロダクトを作る前の聞き取り（保存しない）。"""
+    if c.base_role not in ("OWNER", "ADMIN"):
+        raise HTTPException(403, "プロダクトを作れるのは ADMIN 以上")
+    try:
+        out = llm.intake(llmconf.resolve(c.tenant), [m.model_dump() for m in body.messages])
+    except Exception as e:  # noqa: BLE001  失敗は対話の中で伝える
+        why = str(e) if isinstance(e, llm.LLMError) else type(e).__name__
+        return {"reply": f"AIの呼び出しに失敗しました（{why}）。もう一度送るか、設定の接続を確かめてください。",
+                "error": True}
+    return out.model_dump()
 
 
 @app.get("/products/{product_id}")
