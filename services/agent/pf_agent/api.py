@@ -40,6 +40,11 @@ class CreateProduct(BaseModel):
 
 class Chat(BaseModel):
     message: str = Field(min_length=1, max_length=8000)
+    session_id: str | None = None
+
+
+class SessionBody(BaseModel):
+    title: str = Field(default="", max_length=200)
 
 
 class FieldValue(BaseModel):
@@ -121,9 +126,9 @@ def overview(product_id: str, c: Caller = Depends(caller)):
 
 
 @app.get("/products/{product_id}/stages/{stage_id}")
-def stage_detail(product_id: str, stage_id: str, c: Caller = Depends(caller)):
+def stage_detail(product_id: str, stage_id: str, session: str | None = None, c: Caller = Depends(caller)):
     p = _product(c, product_id, STAGE_GROUP.get(stage_id, "business"), "view")
-    return engine.stage_detail(p, stage_id)
+    return engine.stage_detail(p, stage_id, session)
 
 
 def _stage_product(c: Caller, product_id: str, stage_id: str, op: str):
@@ -133,7 +138,28 @@ def _stage_product(c: Caller, product_id: str, stage_id: str, op: str):
 @app.post("/products/{product_id}/stages/{stage_id}/chat")
 async def chat(product_id: str, stage_id: str, body: Chat, c: Caller = Depends(caller)):
     p = _stage_product(c, product_id, stage_id, "create")
-    await engine.chat(p, stage_id, c.user, body.message)
+    session_id = await engine.chat(p, stage_id, c.user, body.message, body.session_id)
+    return engine.stage_detail(p, stage_id, session_id)
+
+
+@app.post("/products/{product_id}/stages/{stage_id}/sessions")
+def new_session(product_id: str, stage_id: str, body: SessionBody, c: Caller = Depends(caller)):
+    p = _stage_product(c, product_id, stage_id, "create")
+    session_id = engine.new_session(p, stage_id, c.user, body.title)
+    return engine.stage_detail(p, stage_id, session_id)
+
+
+@app.put("/products/{product_id}/stages/{stage_id}/sessions/{session_id}")
+def rename_session(product_id: str, stage_id: str, session_id: str, body: SessionBody, c: Caller = Depends(caller)):
+    p = _stage_product(c, product_id, stage_id, "create")
+    engine.rename_session(p, stage_id, c.user, session_id, body.title)
+    return engine.stage_detail(p, stage_id, session_id)
+
+
+@app.post("/products/{product_id}/stages/{stage_id}/report")
+def make_report(product_id: str, stage_id: str, c: Caller = Depends(caller)):
+    p = _stage_product(c, product_id, stage_id, "create")
+    engine.make_report(p, stage_id, c.user)
     return engine.stage_detail(p, stage_id)
 
 

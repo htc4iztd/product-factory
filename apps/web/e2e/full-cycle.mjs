@@ -76,7 +76,7 @@ await draftAndCommit("s05", "06-plan", async () => {
   // KPIツリーをグラフで編集する：KPIを選ぶ → 子を足す → 分解の式を決める → 保存
   await page.locator(".react-flow__node").first().click();
   await btn("子KPIを追加").click();
-  await page.getByLabel("名前").fill("解約率");
+  await page.getByLabel("名前", { exact: true }).fill("解約率");
   await page.getByLabel("分解の式（子KPIの組み立て方）").selectOption("×");
   await btn("変更を保存").click();
   await page.getByText("保存していない変更があります").waitFor({ state: "detached" });
@@ -146,6 +146,19 @@ await btn("AIタブを閉じる").click();
 await btn("AIタブを閉じる").waitFor({ state: "detached" });
 await btn("AIタブ").click();
 await btn("下書きを作って").waitFor();
+// 対話セッション：新しいセッションで話し、前のセッションに戻れる。レポートで全セッションを要約する
+await btn("新しいセッション").click();
+await page.getByText("考えていることをそのまま書いてください").waitFor();
+await btn("矛盾や抜けを指摘して").click();
+await page.getByText(/すべての項目が埋まっています|項目の/).last().waitFor();
+const sessions = page.getByLabel("対話セッション");
+await sessions.selectOption({ index: 1 });
+await page.getByText(/項目の下書きを提案します/).waitFor();
+await page.getByRole("button", { name: "レポート", exact: true }).click();
+await btn("レポートを作成").click();
+await page.getByText("決まったこと（採用した案）").waitFor();
+await shot("11c-report");
+await page.getByRole("button", { name: "対話", exact: true }).click();
 
 await page.goto(`${BASE}/p/${pid}/g/P1`);
 await btn("進む", true).click();

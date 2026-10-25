@@ -171,7 +171,7 @@ def test_tenant_isolation(client):
 
 
 def test_chat_survives_restart(tmp_path, monkeypatch):
-    """プロセスを作り直しても、同じ ADK セッションと対話の履歴で続けられる。"""
+    """プロセスを作り直しても、同じ対話セッション（ADK セッション）と履歴で続けられる。"""
     import asyncio
     monkeypatch.setenv("PF_LLM", "stub")
     url = f"sqlite:///{tmp_path}/r.db"
@@ -181,16 +181,41 @@ def test_chat_survives_restart(tmp_path, monkeypatch):
     async def go():
         e1 = Engine(url)
         p = e1.create_product("t", "u", "x", "y")
-        await e1.chat(p, "s01", "u", "下書きを作って")
-        sid = repo.get_run(p.id, "s01").session_id
+        cid = await e1.chat(p, "s01", "u", "下書きを作って")
+        adk = repo.get_session(p.id, "s01", cid).adk_session_id
         e2 = Engine(url)  # 再起動を模す
-        await e2.chat(e2.product(p.id), "s01", "u", "課題をもっと具体的に")
-        assert repo.get_run(p.id, "s01").session_id == sid
-        roles = [m["role"] for m in repo.chat(p.id, "s01")]
+        assert await e2.chat(e2.product(p.id), "s01", "u", "課題をもっと具体的に") == cid
+        assert repo.get_session(p.id, "s01", cid).adk_session_id == adk
+        roles = [m["role"] for m in repo.chat(p.id, "s01", cid)]
         assert roles == ["user", "assistant", "user", "assistant"]
-        ev = await e2.sessions.get_session(app_name="product-factory", user_id=p.id, session_id=sid)
+        ev = await e2.sessions.get_session(app_name="product-factory", user_id=p.id, session_id=adk)
         assert len(ev.events) >= 2
     asyncio.run(go())
+
+
+def test_chat_sessions_and_report(client):
+    c = client
+    pid = new_product(c)
+    assert c.post(f"/products/{pid}/stages/s01/report", headers=H).status_code == 409   # 対話がまだない
+    st = accept_all(c, pid, "s01")
+    first = st["session_id"]
+    assert [x["title"] for x in st["sessions"]] == ["セッション1"] and st["sessions"][0]["messages"] == 2
+    st = c.post(f"/products/{pid}/stages/s01/sessions", headers=H, json={"title": "価格の論点"}).json()
+    second = st["session_id"]
+    assert second != first and st["chat"] == [] and st["sessions"][0]["title"] == "価格の論点"
+    st = c.post(f"/products/{pid}/stages/s01/chat", headers=H,
+                json={"message": "課題を直したい", "session_id": second}).json()
+    assert st["session_id"] == second and [m["role"] for m in st["chat"]] == ["user", "assistant"]
+    # 前のセッションに戻ると、前の対話が見える
+    st = c.get(f"/products/{pid}/stages/s01?session={first}", headers=H).json()
+    assert st["session_id"] == first and len(st["chat"]) == 2
+    c.put(f"/products/{pid}/stages/s01/sessions/{first}", headers=H, json={"title": "最初の下書き"})
+    st = c.post(f"/products/{pid}/stages/s01/report", headers=H).json()
+    rep = st["report"]
+    assert rep["newer_messages"] == 0 and "## 決まったこと（採用した案）" in rep["content"]
+    assert "課題：" in rep["content"] and "## 未決事項・次に詰めること" in rep["content"]
+    c.post(f"/products/{pid}/stages/s01/chat", headers=H, json={"message": "もう一度", "session_id": second})
+    assert c.get(f"/products/{pid}/stages/s01", headers=H).json()["report"]["newer_messages"] == 2
 
 
 def test_product_canvas_images(client):
@@ -257,3 +282,17 @@ def test_business_references_in_design_stage(client):
     c.put(f"/products/{pid}/settings", headers=H, json={"stages": {"s02": {"enabled": False}}})
     ids = [r["id"] for r in c.get(f"/products/{pid}/stages/s01", headers=H).json()["references"]]
     assert ids == ["s03", "s04", "s05"]
+
+
+def test_old_messages_move_to_first_session(client):
+    """セッションを持つ前の発言は、最初のセッション「これまでの対話」にまとめる。"""
+    from pf_agent import db
+    c = client
+    pid = new_product(c)
+    with db.session() as s:
+        s.add(db.ChatMessage(product_id=pid, stage_id="s02", role="user", actor="u", text="昔の発言"))
+        s.commit()
+    st = c.get(f"/products/{pid}/stages/s02", headers=H).json()
+    assert [x["title"] for x in st["sessions"]] == ["これまでの対話"] and st["chat"][0]["text"] == "昔の発言"
+    st = c.post(f"/products/{pid}/stages/s02/chat", headers=H, json={"message": "続き"}).json()
+    assert [m["text"] for m in st["chat"]][:2] == ["昔の発言", "続き"]

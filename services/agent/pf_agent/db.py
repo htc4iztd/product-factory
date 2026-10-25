@@ -110,12 +110,38 @@ class ProductImage(Base):
     created_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), default=_now)
 
 
+class ChatSession(Base):
+    """ステージの対話のまとまり。論点ごとに分けて始め直せる。ADK のセッションと1対1。"""
+    __tablename__ = "chat_sessions"
+    id: Mapped[str] = mapped_column(String(32), primary_key=True, default=_id)
+    product_id: Mapped[str] = mapped_column(ForeignKey("products.id"), index=True)
+    stage_id: Mapped[str] = mapped_column(String(8))
+    title: Mapped[str] = mapped_column(String(200))
+    adk_session_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    created_by: Mapped[str] = mapped_column(String(200))
+    created_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), default=_now)
+
+
+class StageReport(Base):
+    """ステージの対話をまとめたレポート。作るたびに1行増やし、最新を表示する。"""
+    __tablename__ = "stage_reports"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    product_id: Mapped[str] = mapped_column(ForeignKey("products.id"), index=True)
+    stage_id: Mapped[str] = mapped_column(String(8))
+    content: Mapped[str] = mapped_column(Text)
+    last_message_id: Mapped[int] = mapped_column(Integer, default=0)   # どの発言までを要約したか
+    model: Mapped[str] = mapped_column(String(80))
+    created_by: Mapped[str] = mapped_column(String(200))
+    created_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), default=_now)
+
+
 class ChatMessage(Base):
     """ステージごとのAIとの対話。assistant の発言には項目の書き換え案（proposals）が付く。"""
     __tablename__ = "chat_messages"
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     product_id: Mapped[str] = mapped_column(ForeignKey("products.id"), index=True)
     stage_id: Mapped[str] = mapped_column(String(8))
+    session_id: Mapped[str | None] = mapped_column(String(32), nullable=True, index=True)
     role: Mapped[str] = mapped_column(String(12))       # user | assistant | feedback
     actor: Mapped[str] = mapped_column(String(200))
     text: Mapped[str] = mapped_column(Text, default="")
@@ -194,6 +220,7 @@ _ADDED_COLUMNS = {
                    "approval_required": "BOOLEAN DEFAULT {false}"},
     "artifacts": {"data": "JSON"},
     "products": {"cover_image_id": "VARCHAR(32)"},
+    "chat_messages": {"session_id": "VARCHAR(32)"},
 }
 
 

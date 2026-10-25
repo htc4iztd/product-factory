@@ -15,7 +15,7 @@ from google.genai import types
 from sqlalchemy import select
 
 from . import frameworks as fx
-from . import images, repo
+from . import images, llm, repo
 from .db import (
     PhaseReview,
     Product,
@@ -102,24 +102,67 @@ class Engine:
             raise FactoryError(409, "このステージは閉じています（設定で開けます）")
         return stage
 
-    async def chat(self, product: Product, stage_id: str, user: str, message: str) -> None:
+    async def chat(self, product: Product, stage_id: str, user: str, message: str,
+                   session_id: str | None = None) -> str:
+        """発言を送り、AIの返答と案を待つ。返り値は使った対話セッションの id。"""
         self._stage(product, stage_id)
         if not message.strip():
             raise FactoryError(422, "発言が空です")
-        run = repo.get_run(product.id, stage_id)
-        session_id = run.session_id
-        if not session_id or await self.sessions.get_session(
-                app_name=APP, user_id=product.id, session_id=session_id) is None:
-            # セッションの持ち主はプロダクト（ビルダーが替わっても同じ対話を続ける）
+        if session_id and repo.get_session(product.id, stage_id, session_id) is None:
+            raise FactoryError(404, "対話セッションが見つかりません")
+        session_id = session_id or repo.current_session(product.id, stage_id, user)
+        cs = repo.get_session(product.id, stage_id, session_id)
+        adk_id = cs.adk_session_id
+        adk = await self.sessions.get_session(app_name=APP, user_id=product.id, session_id=adk_id) if adk_id else None
+        # セッションを持つ前の ADK セッションは、どの対話セッションのものか分からないので作り直す
+        if adk is None or adk.state.get("pf_chat_session_id") != session_id:
+            # ADK のセッションの持ち主はプロダクト（ビルダーが替わっても同じ対話を続ける）
             sess = await self.sessions.create_session(
                 app_name=APP, user_id=product.id,
-                state={"pf_product_id": product.id, "pf_stage_id": stage_id})
-            session_id = sess.id
-            repo.set_session(product.id, stage_id, session_id)
-        repo.add_chat(product.id, stage_id, "user", user, message.strip())
+                state={"pf_product_id": product.id, "pf_stage_id": stage_id, "pf_chat_session_id": session_id})
+            adk_id = sess.id
+            repo.set_adk_session(session_id, adk_id)
+        repo.add_chat(product.id, stage_id, "user", user, message.strip(), session_id=session_id)
         msg = types.Content(role="user", parts=[types.Part(text=message.strip())])
-        async for _ in self._runner().run_async(user_id=product.id, session_id=session_id, new_message=msg):
+        async for _ in self._runner().run_async(user_id=product.id, session_id=adk_id, new_message=msg):
             pass
+        return session_id
+
+    def new_session(self, product: Product, stage_id: str, user: str, title: str | None) -> str:
+        self._stage(product, stage_id)
+        return repo.create_session(product.id, stage_id, user, title)
+
+    def rename_session(self, product: Product, stage_id: str, user: str, session_id: str, title: str) -> None:
+        self._stage(product, stage_id)
+        if not title.strip():
+            raise FactoryError(422, "名前が空です")
+        try:
+            repo.rename_session(product.id, stage_id, session_id, title, user)
+        except KeyError:
+            raise FactoryError(404, "対話セッションが見つかりません") from None
+
+    def make_report(self, product: Product, stage_id: str, user: str) -> None:
+        """ステージの全セッションの対話をレポートにまとめる。"""
+        stage = self._stage(product, stage_id, writable=False)
+        fw = fx.FRAMEWORK_BY_STAGE[stage_id]
+        titles = {x["id"]: x["title"] for x in repo.sessions(product.id, stage_id)}
+        messages = [dict(m, session=titles.get(m["session_id"], "")) for m in repo.chat(product.id, stage_id)]
+        if not messages:
+            raise FactoryError(409, "まだ対話がありません")
+        label = {f.key: f.label for f in fw.fields}
+        def brief(p: dict) -> str:  # noqa: E306
+            v = p["value"]
+            text = "／".join(map(str, v)) if isinstance(v, list) and v and not isinstance(v[0], dict) else (
+                f"{len(v)}行の表" if isinstance(v, list) else str(v))
+            return f"{label.get(p['field'], p['field'])}：{text[:120]}"
+        props = [p for m in messages for p in m["proposals"]]
+        accepted = [brief(p) for p in props if p["status"] == "accepted"]
+        rejected = [brief(p) for p in props if p["status"] == "rejected"]
+        try:
+            content = llm.summarize(stage, fw, messages, accepted, rejected)
+        except Exception as e:  # noqa: BLE001  失敗はそのまま画面に返す
+            raise FactoryError(502, f"レポートを作れませんでした：{e}") from None
+        repo.save_report(product.id, stage_id, content, messages[-1]["id"], llm.model_name(), user)
 
     def set_field(self, product: Product, stage_id: str, user: str, key: str, value) -> None:
         self._stage(product, stage_id)
@@ -303,13 +346,16 @@ class Engine:
                            "current_version": r.current_version, "approved_version": r.approved_version})
         return {"product": product_dict(product), "phases": repo.phase_states(product.id), "stages": stages}
 
-    def stage_detail(self, product: Product, stage_id: str) -> dict:
+    def stage_detail(self, product: Product, stage_id: str, session_id: str | None = None) -> dict:
         st = self._stage(product, stage_id, writable=False)
         fw = fx.FRAMEWORK_BY_STAGE[stage_id]
         r = repo.get_run(product.id, stage_id)
         d = repo.draft(product.id, stage_id)
         art = repo.current_artifact(product.id, stage_id)
         rs = repo.runs(product.id)
+        sessions = repo.sessions(product.id, stage_id)
+        ids = [x["id"] for x in sessions]
+        current = session_id if session_id in ids else (ids[0] if ids else None)
         return {
             "id": st.id, "no": st.no, "name": st.name, "phase": st.phase,
             "framework": {"view": fw.view, "title": fw.title, "summary": fw.summary,
@@ -318,7 +364,8 @@ class Engine:
             "pending": r.pending, "audit_findings": r.audit_findings, "missing": fx.check(fw, d),
             "current_version": r.current_version, "approved_version": r.approved_version,
             "dirty": art is None or art.data != d,
-            "draft": d, "chat": repo.chat(product.id, stage_id), "versions": repo.versions(product.id, stage_id),
+            "draft": d, "sessions": sessions, "session_id": current, "chat": repo.chat(product.id, stage_id, current),
+            "report": repo.latest_report(product.id, stage_id), "versions": repo.versions(product.id, stage_id),
             "markdown": fx.to_markdown(st, fw, d),
             "inputs": [{"id": i, "no": STAGE_BY_ID[i].no, "name": STAGE_BY_ID[i].name,
                         "status": rs[i].status, "enabled": rs[i].enabled} for i in st.inputs],

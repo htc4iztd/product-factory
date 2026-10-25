@@ -4,11 +4,11 @@ from __future__ import annotations
 import copy
 import hashlib
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 
 from . import audit as audit_mod
 from . import frameworks as fx
-from .db import Artifact, AuditLog, ChatMessage, PhaseReview, Product, StageRun, session
+from .db import Artifact, AuditLog, ChatMessage, ChatSession, PhaseReview, Product, StageReport, StageRun, session
 from .stages import (
     AWAITING_APPROVAL,
     COMPLETED,
@@ -179,38 +179,133 @@ def set_fields(product_id: str, stage_id: str, values: dict, actor: str, source:
 
 
 # ---------------- 対話 ----------------
-def add_chat(product_id: str, stage_id: str, role: str, actor: str, text: str,
-             proposals: list | None = None) -> int:
+def sessions(product_id: str, stage_id: str) -> list[dict]:
+    """ステージの対話セッション（新しい順）。セッションを持たない古い発言は最初のセッションにまとめる。"""
     with session() as s:
-        m = ChatMessage(product_id=product_id, stage_id=stage_id, role=role, actor=actor, text=text,
-                        proposals=proposals or None)
+        orphans = s.execute(select(ChatMessage).where(ChatMessage.product_id == product_id,
+                                                      ChatMessage.stage_id == stage_id,
+                                                      ChatMessage.session_id.is_(None))).scalars().all()
+        if orphans:
+            r = _run(s, product_id, stage_id)
+            cs = ChatSession(product_id=product_id, stage_id=stage_id, title="これまでの対話",
+                             adk_session_id=r.session_id, created_by="system",
+                             created_at=orphans[0].created_at)
+            s.add(cs)
+            s.flush()
+            for m in orphans:
+                m.session_id = cs.id
+            s.commit()
+        rows = s.execute(select(ChatSession).where(ChatSession.product_id == product_id,
+                                                   ChatSession.stage_id == stage_id)
+                         .order_by(ChatSession.created_at.desc(), ChatSession.id)).scalars().all()
+        counts = dict(s.execute(select(ChatMessage.session_id, func.count()).where(
+            ChatMessage.product_id == product_id, ChatMessage.stage_id == stage_id)
+            .group_by(ChatMessage.session_id)).all())
+        return [{"id": c.id, "title": c.title, "adk_session_id": c.adk_session_id, "created_by": c.created_by,
+                 "created_at": c.created_at.isoformat(), "messages": counts.get(c.id, 0)} for c in rows]
+
+
+def create_session(product_id: str, stage_id: str, actor: str, title: str | None = None) -> str:
+    n = len(sessions(product_id, stage_id)) + 1
+    with session() as s:
+        cs = ChatSession(product_id=product_id, stage_id=stage_id, title=(title or "").strip() or f"セッション{n}",
+                         created_by=actor)
+        s.add(cs)
+        s.commit()
+        sid = cs.id
+    log(product_id, stage_id, "human", actor, "chat.session", body={"session_id": sid, "title": cs.title})
+    return sid
+
+
+def get_session(product_id: str, stage_id: str, session_id: str) -> ChatSession | None:
+    with session() as s:
+        cs = s.get(ChatSession, session_id)
+    return cs if cs is not None and cs.product_id == product_id and cs.stage_id == stage_id else None
+
+
+def current_session(product_id: str, stage_id: str, actor: str) -> str:
+    """直近のセッション。なければ作る。"""
+    ss = sessions(product_id, stage_id)
+    return ss[0]["id"] if ss else create_session(product_id, stage_id, actor)
+
+
+def rename_session(product_id: str, stage_id: str, session_id: str, title: str, actor: str) -> None:
+    with session() as s:
+        cs = s.get(ChatSession, session_id)
+        if cs is None or cs.product_id != product_id or cs.stage_id != stage_id:
+            raise KeyError("session")
+        cs.title = title.strip()[:200]
+        s.commit()
+    log(product_id, stage_id, "human", actor, "chat.rename", body={"session_id": session_id, "title": title})
+
+
+def set_adk_session(session_id: str, adk_session_id: str) -> None:
+    with session() as s:
+        s.get(ChatSession, session_id).adk_session_id = adk_session_id
+        s.commit()
+
+
+def add_chat(product_id: str, stage_id: str, role: str, actor: str, text: str,
+             proposals: list | None = None, session_id: str | None = None) -> int:
+    session_id = session_id or current_session(product_id, stage_id, actor)
+    with session() as s:
+        m = ChatMessage(product_id=product_id, stage_id=stage_id, session_id=session_id, role=role, actor=actor,
+                        text=text, proposals=proposals or None)
         s.add(m)
         s.commit()
         mid = m.id
     log(product_id, stage_id, "agent" if role == "assistant" else "human", actor, f"chat.{role}",
-        body={"text": text, "proposals": [{"field": p["field"], "value": p["value"]} for p in proposals or []]})
+        body={"session_id": session_id, "text": text,
+              "proposals": [{"field": p["field"], "value": p["value"]} for p in proposals or []]})
     return mid
 
 
-def chat(product_id: str, stage_id: str) -> list[dict]:
+def chat(product_id: str, stage_id: str, session_id: str | None = None) -> list[dict]:
+    """発言の一覧。session_id を渡すとそのセッションだけ。"""
     with session() as s:
-        rows = s.execute(select(ChatMessage).where(ChatMessage.product_id == product_id,
-                                                   ChatMessage.stage_id == stage_id)
-                         .order_by(ChatMessage.id)).scalars()
-        return [{"id": m.id, "role": m.role, "actor": m.actor, "text": m.text,
+        q = select(ChatMessage).where(ChatMessage.product_id == product_id, ChatMessage.stage_id == stage_id)
+        if session_id:
+            q = q.where(ChatMessage.session_id == session_id)
+        rows = s.execute(q.order_by(ChatMessage.id)).scalars()
+        return [{"id": m.id, "session_id": m.session_id, "role": m.role, "actor": m.actor, "text": m.text,
                  "proposals": m.proposals or [], "at": m.created_at.isoformat()} for m in rows]
 
 
-def chat_context(product_id: str, stage_id: str) -> dict:
+def chat_context(product_id: str, stage_id: str, session_id: str) -> dict:
     stage = STAGE_BY_ID[stage_id]
     with session() as s:
         idea = s.get(Product, product_id).idea
-    history = chat(product_id, stage_id)
+    history = chat(product_id, stage_id, session_id)
     last_user = next((m["text"] for m in reversed(history) if m["role"] in ("user", "feedback")), "")
     return {"idea": idea, "draft": draft(product_id, stage_id),
             "upstream": confirmed_artifacts(product_id, stage.inputs),
             "history": [{"role": m["role"], "text": m["text"]} for m in history[:-1]],
             "message": last_user}
+
+
+# ---------------- 対話のレポート ----------------
+def latest_report(product_id: str, stage_id: str) -> dict | None:
+    with session() as s:
+        r = s.execute(select(StageReport).where(StageReport.product_id == product_id,
+                                                StageReport.stage_id == stage_id)
+                      .order_by(StageReport.id.desc()).limit(1)).scalar_one_or_none()
+        last = s.execute(select(func.max(ChatMessage.id)).where(
+            ChatMessage.product_id == product_id, ChatMessage.stage_id == stage_id)).scalar() or 0
+        if r is None:
+            return None
+        newer = s.execute(select(func.count()).where(
+            ChatMessage.product_id == product_id, ChatMessage.stage_id == stage_id,
+            ChatMessage.id > r.last_message_id)).scalar()
+    return {"content": r.content, "model": r.model, "created_by": r.created_by, "created_at": r.created_at.isoformat(),
+            "covers_until": r.last_message_id, "newer_messages": newer, "latest_message": last}
+
+
+def save_report(product_id: str, stage_id: str, content: str, last_message_id: int, model: str, actor: str) -> None:
+    with session() as s:
+        s.add(StageReport(product_id=product_id, stage_id=stage_id, content=content,
+                          last_message_id=last_message_id, model=model, created_by=actor))
+        s.commit()
+    log(product_id, stage_id, "agent", f"report-agent ({model})", "report", body={"until": last_message_id})
 
 
 def decide_proposal(product_id: str, stage_id: str, message_id: int, proposal_id: str,

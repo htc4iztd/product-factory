@@ -3,7 +3,7 @@ import { useEffect, useState } from "react";
 import Markdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { BookOpen, PanelRightClose, Sparkles } from "lucide-react";
-import type { ChatMsg, FieldSpec, StageDetail } from "@/lib/agent";
+import type { ChatMsg, ChatSession, FieldSpec, StageDetail, StageReport } from "@/lib/agent";
 import { ChatPanel } from "./ChatPanel";
 
 type Tab = "ai" | "ref";
@@ -50,6 +50,7 @@ function References({ refs, onClose }: { refs: StageDetail["references"]; onClos
 export function AiDrawer(props: {
   initial: "closed" | Tab; pid: string; sid: string; chat: ChatMsg[]; fields: FieldSpec[]; prompts: string[];
   disabled?: string | null; references: StageDetail["references"];
+  sessions: ChatSession[]; sessionId: string | null; report: StageReport | null;
 }) {
   const { initial, references, ...panel } = props;
   const [state, setState] = useState<"closed" | Tab>(initial);

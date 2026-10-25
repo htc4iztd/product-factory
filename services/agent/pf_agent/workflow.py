@@ -23,11 +23,15 @@ def _ids(ctx: Context) -> tuple[str, str]:
     return ctx.state["pf_product_id"], ctx.state["pf_stage_id"]
 
 
+def _chat_session(ctx: Context) -> str | None:
+    return ctx.state.get("pf_chat_session_id")
+
+
 def converse(ctx: Context, node_input: Any):
     product_id, stage_id = _ids(ctx)
     stage = STAGE_BY_ID[stage_id]
     fw = fx.FRAMEWORK_BY_STAGE[stage_id]
-    c = repo.chat_context(product_id, stage_id)
+    c = repo.chat_context(product_id, stage_id, _chat_session(ctx))
     try:
         turn = llm.converse(stage, fw, c["idea"], c["draft"], c["upstream"], c["history"], c["message"])
     except Exception as e:  # LLM の失敗は対話の中で伝え、下書きには触れない
@@ -56,7 +60,7 @@ def screen(ctx: Context, node_input: Any):
     if dropped:
         reply += "\n\n（形式が合わず外した案：" + "、".join(dropped) + "）"
     msg_id = repo.add_chat(product_id, stage_id, "assistant", f"stage-agent:{stage_id} ({llm.model_name()})",
-                           reply, accepted)
+                           reply, accepted, session_id=_chat_session(ctx))
     return {"message_id": msg_id, "proposals": len(accepted), "dropped": dropped}
 
 

@@ -91,7 +91,9 @@ export type Row = Record<string, string | number>;
 export type FieldValue = string | string[] | Row[];
 export type Draft = Record<string, FieldValue>;
 export type Proposal = { id: string; field: string; value: FieldValue; reason: string; status: "pending" | "accepted" | "rejected" };
-export type ChatMsg = { id: number; role: "user" | "assistant" | "feedback"; actor: string; text: string; proposals: Proposal[]; at: string };
+export type ChatMsg = { id: number; session_id: string | null; role: "user" | "assistant" | "feedback"; actor: string; text: string; proposals: Proposal[]; at: string };
+export type ChatSession = { id: string; title: string; created_by: string; created_at: string; messages: number };
+export type StageReport = { content: string; model: string; created_by: string; created_at: string; newer_messages: number };
 export type StageRef = { id: string; no: string; name: string; status?: string; enabled?: boolean };
 export type StageDetail = {
   id: string; no: string; name: string; phase: string;
@@ -100,6 +102,7 @@ export type StageDetail = {
   pending: { kind: string; version: number } | null; audit_findings: string[] | null; missing: string[];
   current_version: number; approved_version: number; dirty: boolean;
   draft: Draft; chat: ChatMsg[]; markdown: string;
+  sessions: ChatSession[]; session_id: string | null; report: StageReport | null;
   versions: { version: number; confirmed: boolean; sha256: string; created_at: string }[];
   inputs: StageRef[]; downstream: StageRef[];
   references: { id: string; no: string; name: string; framework: string; status: string; source: string; markdown: string }[];

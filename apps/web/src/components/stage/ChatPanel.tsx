@@ -1,11 +1,17 @@
 "use client";
 import { useEffect, useRef, useState, useTransition } from "react";
-import { ArrowUp, Check, CheckCheck, MessageSquareWarning, PanelRightClose, Sparkles, X } from "lucide-react";
-import type { ChatMsg, FieldSpec, Proposal } from "@/lib/agent";
-import { acceptAll, decideProposal, sendChat } from "@/app/(app)/p/[id]/s/[stage]/actions";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
+import Markdown from "react-markdown";
+import remarkGfm from "remark-gfm";
+import { ArrowUp, Check, CheckCheck, FileText, MessageSquareWarning, PanelRightClose, Pencil, Plus, Sparkles, X } from "lucide-react";
+import type { ChatMsg, ChatSession, FieldSpec, Proposal, StageReport } from "@/lib/agent";
+import { acceptAll, decideProposal, makeReport, newSession, renameSession, sendChat } from "@/app/(app)/p/[id]/s/[stage]/actions";
 import { FieldView } from "./FieldEditor";
 
-type Props = { pid: string; sid: string; chat: ChatMsg[]; fields: FieldSpec[]; prompts: string[]; disabled?: string | null; onClose?: () => void };
+type Props = {
+  pid: string; sid: string; chat: ChatMsg[]; fields: FieldSpec[]; prompts: string[]; disabled?: string | null; onClose?: () => void;
+  sessions: ChatSession[]; sessionId: string | null; report: StageReport | null;
+};
 
 function ProposalCard({ p, field, onDecide, busy }: { p: Proposal; field?: FieldSpec; onDecide: (accept: boolean) => void; busy: boolean }) {
   const done = p.status !== "pending";
@@ -28,7 +34,44 @@ function ProposalCard({ p, field, onDecide, busy }: { p: Proposal; field?: Field
   );
 }
 
-export function ChatPanel({ pid, sid, chat, fields, prompts, disabled, onClose }: Props) {
+function ReportView({ pid, sid, report, hasChat }: { pid: string; sid: string; report: StageReport | null; hasChat: boolean }) {
+  const [error, setError] = useState<string | null>(null);
+  const [pending, start] = useTransition();
+  const make = () => { setError(null); start(async () => { const r = await makeReport(pid, sid); if (r.error) setError(r.error); }); };
+  return (
+    <div className="flex-1 overflow-y-auto px-4 py-4">
+      <div className="mb-3 flex items-center gap-2">
+        <div className="text-[11px] leading-4 text-zinc-500">
+          {report ? <>このステージの全セッションを要約（{new Date(report.created_at).toLocaleString("ja-JP")}・{report.model}）</> : "このステージの全セッションの対話を要約します"}
+          {report && report.newer_messages > 0 && <div className="text-amber-700">その後に {report.newer_messages} 件の発言があります</div>}
+        </div>
+        <button disabled={pending || !hasChat} onClick={make} className="btn-secondary btn-sm ml-auto shrink-0">
+          <FileText size={12} />{pending ? "作成中…" : report ? "レポートを更新" : "レポートを作成"}
+        </button>
+      </div>
+      {error && <p className="mb-2 rounded-md bg-rose-50 px-2 py-1 text-xs text-rose-700">{error}</p>}
+      {report ? (
+        <div className="card prose-md p-4 text-[12px]"><Markdown remarkPlugins={[remarkGfm]}>{report.content}</Markdown></div>
+      ) : (
+        <p className="rounded-xl border border-dashed border-zinc-300 p-4 text-[13px] text-zinc-500">
+          {hasChat ? "要約・決まったこと・却下した案・未決事項をまとめたレポートを作れます。" : "対話を始めると、レポートを作れます。"}
+        </p>
+      )}
+    </div>
+  );
+}
+
+export function ChatPanel({ pid, sid, chat, fields, prompts, disabled, onClose, sessions, sessionId, report }: Props) {
+  const [view, setView] = useState<"chat" | "report">("chat");
+  const router = useRouter();
+  const path = usePathname();
+  const params = useSearchParams();
+  const go = (id: string) => {
+    const q = new URLSearchParams(params.toString());
+    q.set("session", id);
+    router.replace(`${path}?${q.toString()}`, { scroll: false });
+  };
+  const current = sessions.find((x) => x.id === sessionId) ?? null;
   const [text, setText] = useState("");
   const [sent, setSent] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -44,7 +87,7 @@ export function ChatPanel({ pid, sid, chat, fields, prompts, disabled, onClose }
     setSent(message);
     setText("");
     start(async () => {
-      const r = await sendChat(pid, sid, message);
+      const r = await sendChat(pid, sid, message, sessionId);
       if (r.error) { setError(r.error); setText(message); }
       setSent(null);
     });
@@ -66,6 +109,27 @@ export function ChatPanel({ pid, sid, chat, fields, prompts, disabled, onClose }
           <button onClick={onClose} className="btn-ghost btn-sm h-7 w-7 p-0" title="AIタブを閉じる（]）" aria-label="AIタブを閉じる"><PanelRightClose size={15} /></button>
         )}
       </div>
+      <div className="flex items-center gap-1.5 border-b border-zinc-200 px-3 py-2">
+        <select value={sessionId ?? ""} onChange={(e) => go(e.target.value)} aria-label="対話セッション" disabled={sessions.length === 0}
+          className="input h-7 min-w-0 flex-1 py-0 text-[12px]">
+          {sessions.length === 0 && <option value="">セッション1（未開始）</option>}
+          {sessions.map((x) => <option key={x.id} value={x.id}>{x.title}（{x.messages}件）</option>)}
+        </select>
+        {current && !disabled && (
+          <button onClick={() => { const t = prompt("セッションの名前", current.title); if (t && t.trim()) run(() => renameSession(pid, sid, current.id, t)); }}
+            className="btn-ghost btn-sm h-7 w-7 p-0" title="名前を変える" aria-label="セッションの名前を変える"><Pencil size={12} /></button>
+        )}
+        {!disabled && (
+          <button disabled={pending} onClick={() => start(async () => { const r = await newSession(pid, sid, ""); if (r.error) setError(r.error); else if (r.sessionId) { setView("chat"); go(r.sessionId); } })}
+            className="btn-secondary btn-sm h-7 w-7 shrink-0 p-0" title="新しいセッションを始める" aria-label="新しいセッション"><Plus size={13} /></button>
+        )}
+        <div className="ml-1 flex shrink-0 rounded-md bg-zinc-100 p-0.5">
+          {([["chat", "対話"], ["report", "レポート"]] as const).map(([k, l]) => (
+            <button key={k} onClick={() => setView(k)} className={`rounded px-2 py-0.5 text-[11px] font-medium ${view === k ? "bg-white text-zinc-900 shadow-card" : "text-zinc-500"}`}>{l}</button>
+          ))}
+        </div>
+      </div>
+      {view === "report" ? <ReportView pid={pid} sid={sid} report={report} hasChat={sessions.some((x) => x.messages > 0)} /> : <>
 
       <div className="flex-1 space-y-4 overflow-y-auto px-4 py-4">
         {chat.length === 0 && !sent && (
@@ -156,6 +220,7 @@ export function ChatPanel({ pid, sid, chat, fields, prompts, disabled, onClose }
           </>
         )}
       </div>
+      </>}
     </div>
   );
 }

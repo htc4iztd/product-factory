@@ -15,8 +15,27 @@ async function call(pid: string, path: string, method: string, body?: unknown): 
   return {};
 }
 
-export async function sendChat(pid: string, sid: string, message: string) {
-  return call(pid, `/stages/${sid}/chat`, "POST", { message });
+export async function sendChat(pid: string, sid: string, message: string, sessionId: string | null) {
+  return call(pid, `/stages/${sid}/chat`, "POST", { message, session_id: sessionId });
+}
+
+export async function newSession(pid: string, sid: string, title: string): Promise<Result & { sessionId?: string }> {
+  try {
+    const st = await agent<StageDetail>(`/products/${pid}/stages/${sid}/sessions`, { method: "POST", body: { title } });
+    revalidatePath(`/p/${pid}`, "layout");
+    return { sessionId: st.session_id ?? undefined };
+  } catch (e) {
+    if (e instanceof AgentError) return { error: e.message };
+    throw e;
+  }
+}
+
+export async function renameSession(pid: string, sid: string, sessionId: string, title: string) {
+  return call(pid, `/stages/${sid}/sessions/${sessionId}`, "PUT", { title });
+}
+
+export async function makeReport(pid: string, sid: string) {
+  return call(pid, `/stages/${sid}/report`, "POST");
 }
 
 export async function decideProposal(pid: string, sid: string, messageId: number, proposalId: string, accept: boolean) {

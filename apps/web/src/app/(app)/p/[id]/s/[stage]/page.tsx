@@ -8,14 +8,15 @@ import { AiDrawer } from "@/components/stage/AiDrawer";
 import { DocEditor } from "@/components/stage/DocEditor";
 import { ApprovalPanel, ClosedBanner, CommitButton, RecheckBanner } from "@/components/stage/StageActions";
 
-type Props = { params: Promise<{ id: string; stage: string }>; searchParams: Promise<{ tab?: string }> };
+type Props = { params: Promise<{ id: string; stage: string }>; searchParams: Promise<{ tab?: string; session?: string }> };
 
 const PHASE_NAME: Record<string, string> = { P1: "探索", P2: "事業定義", P3: "要求・設計", P4: "構築", P5: "リリース" };
 
 export default async function StagePage({ params, searchParams }: Props) {
   const { id, stage } = await params;
-  const tab = (await searchParams).tab ?? "canvas";
-  const st = await agent<StageDetail>(`/products/${id}/stages/${stage}`);
+  const sp = await searchParams;
+  const tab = sp.tab ?? "canvas";
+  const st = await agent<StageDetail>(`/products/${id}/stages/${stage}${sp.session ? `?session=${encodeURIComponent(sp.session)}` : ""}`);
   const panel = (await cookies()).get("pf_ai")?.value;
   const drawer = panel === "closed" || panel === "ref" ? panel : "ai";
   const here = `/p/${id}/s/${stage}`;
@@ -52,7 +53,7 @@ export default async function StagePage({ params, searchParams }: Props) {
         <div className="mt-3 flex flex-wrap items-center gap-x-5 gap-y-2">
           <nav className="flex gap-4 text-[13px]">
             {tabs.map(([k, l]) => (
-              <Link key={k} href={`${here}?tab=${k}`} className={`-mb-px border-b-2 pb-2.5 ${tab === k ? "border-zinc-900 font-medium text-zinc-900" : "border-transparent text-zinc-500 hover:text-zinc-800"}`}>{l}</Link>
+              <Link key={k} href={`${here}?tab=${k}${sp.session ? `&session=${encodeURIComponent(sp.session)}` : ""}`} className={`-mb-px border-b-2 pb-2.5 ${tab === k ? "border-zinc-900 font-medium text-zinc-900" : "border-transparent text-zinc-500 hover:text-zinc-800"}`}>{l}</Link>
             ))}
           </nav>
           <div className="ml-auto flex flex-wrap items-center gap-1.5 pb-2 text-[11px] text-zinc-400">
@@ -89,7 +90,7 @@ export default async function StagePage({ params, searchParams }: Props) {
             )}
           </div>
         </section>
-        <AiDrawer initial={drawer} references={st.references} pid={id} sid={stage} chat={st.chat} fields={st.framework.fields} prompts={st.framework.prompts}
+        <AiDrawer initial={drawer} references={st.references} sessions={st.sessions} sessionId={st.session_id} report={st.report} pid={id} sid={stage} chat={st.chat} fields={st.framework.fields} prompts={st.framework.prompts}
           disabled={!st.enabled ? "ステージを開くと対話できます" : null} />
       </div>
     </div>

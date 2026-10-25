@@ -105,3 +105,31 @@ def converse(stage: Stage, fw: Framework, idea: str, draft: dict, upstream: dict
     if isinstance(resp.parsed, Turn):
         return resp.parsed
     return Turn.model_validate_json(resp.text or '{"reply": "", "proposals": []}')
+
+
+def summarize(stage: Stage, fw: Framework, messages: list[dict], accepted: list[str], rejected: list[str]) -> str:
+    """ステージの対話を、要約・決まったこと・却下したこと・未決事項の Markdown にまとめる。"""
+    head = f"# {stage.no} {stage.name}：対話のレポート\n\n"
+    decided = "\n".join(f"- {a}" for a in accepted) or "- （なし）"
+    dropped = "\n".join(f"- {r}" for r in rejected) or "- （なし）"
+    if provider() == "stub":
+        said = [m["text"] for m in messages if m["role"] in ("user", "feedback")]
+        gist = "\n".join(f"- {t[:80]}" for t in said[-8:]) or "- （発言なし）"
+        open_q = "\n".join(f"- {q}" for q in fw.prompts[:3]) or "- （なし）"
+        return (f"{head}## 要約\n{len(messages)}件の発言を要約しました（スタブ）。ビルダーの主な発言：\n{gist}\n\n"
+                f"## 決まったこと（採用した案）\n{decided}\n\n## 却下した案\n{dropped}\n\n"
+                f"## 未決事項・次に詰めること\n{open_q}\n")
+    from google import genai
+    log = "\n".join(f"[{m['session']}] {m['role']}: {m['text']}" for m in messages[-200:])
+    prompt = (
+        f"次は「{stage.no} {stage.name}」（{fw.title}）について、ビルダーとAIが交わした対話の記録です。"
+        "これを読んだ人が経緯を追わなくても判断できるように、日本語でレポートにまとめてください。\n"
+        "見出しは次の4つだけを、この順で使う：「## 要約」「## 決まったこと（採用した案）」「## 却下した案」"
+        "「## 未決事項・次に詰めること」。\n"
+        "決まったこと・却下した案は、下に渡す一覧を元に、なぜそうしたかを対話から補って書く。"
+        "対話にない推測は書かない。未決事項は、対話で出たが結論が出ていない問いと、抜けている観点を挙げる。\n\n"
+        f"## 採用した案\n{decided}\n\n## 却下した案\n{dropped}\n\n## 対話\n{log}\n"
+    )
+    client = genai.Client(api_key=os.environ.get("GOOGLE_API_KEY") or os.environ.get("GEMINI_API_KEY"))
+    resp = client.models.generate_content(model=model_name(), contents=prompt)
+    return head + (resp.text or "").strip() + "\n"
