@@ -4,14 +4,14 @@
 なければ下書き）。プロンプトは場面を文章で描写し、画像の中に文字を描かせない
 （日本語の文字は崩れやすく、誤読の元になるため）。
 
-APIキーがない環境ではスタブ（SVG）を返す。
+画像を描けるのは Gemini（API / Vertex AI）の接続だけ。それ以外の接続やキーがない環境ではスタブ（SVG）を返す。
 """
 from __future__ import annotations
 
-import os
 from xml.sax.saxutils import escape
 
 from . import llm, repo
+from .llmconf import IMAGE_PROVIDERS, Conn
 from .stages import STAGE_BY_ID
 
 KINDS = {
@@ -32,10 +32,10 @@ SOURCES = (
 )
 
 
-def model_name() -> str:
-    if llm.provider() == "stub":
+def model_name(conn: Conn) -> str:
+    if conn.provider not in IMAGE_PROVIDERS or not conn.image_model:
         return "stub"
-    return os.environ.get("PF_IMAGE_MODEL", "gemini-3.1-flash-image")
+    return conn.image_model
 
 
 def _text(v) -> str:
@@ -112,14 +112,12 @@ def _stub_svg(name: str, kind: str, facts: list[dict]) -> bytes:
 </svg>""".encode()
 
 
-def generate(kind: str, prompt: str, name: str, facts: list[dict]) -> tuple[bytes, str]:
-    if model_name() == "stub":
+def generate(conn: Conn, kind: str, prompt: str, name: str, facts: list[dict]) -> tuple[bytes, str]:
+    if model_name(conn) == "stub":
         return _stub_svg(name, kind, facts), "image/svg+xml"
-    from google import genai
     from google.genai import types
-    client = genai.Client(api_key=os.environ.get("GOOGLE_API_KEY") or os.environ.get("GEMINI_API_KEY"))
-    resp = client.models.generate_content(
-        model=model_name(), contents=prompt,
+    resp = llm._genai(conn).models.generate_content(
+        model=model_name(conn), contents=prompt,
         config=types.GenerateContentConfig(response_modalities=["IMAGE"],
                                            image_config=types.ImageConfig(aspect_ratio="16:9")),
     )

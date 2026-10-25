@@ -11,6 +11,8 @@ dependencies = [
   "aiosqlite>=0.20",
   "greenlet>=3",
   "psycopg[binary]>=3.2",
+  "anthropic[vertex]>=2.3",
+  "cryptography>=43",
 ]
 
 [project.optional-dependencies]

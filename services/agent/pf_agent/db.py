@@ -152,6 +152,25 @@ class ChatMessage(Base):
     created_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), default=_now)
 
 
+class LlmSetting(Base):
+    """LLM の接続設定。scope は "app"（運用者が決めるアプリ全体の既定）か "t:<テナントID>"（テナントの上書き）。"""
+    __tablename__ = "llm_settings"
+    scope: Mapped[str] = mapped_column(String(80), primary_key=True)
+    provider: Mapped[str] = mapped_column(String(16))          # stub | gemini | vertex | anthropic | openai
+    chat_model: Mapped[str] = mapped_column(String(120), default="")
+    summary_model: Mapped[str] = mapped_column(String(120), default="")
+    image_model: Mapped[str] = mapped_column(String(120), default="")
+    base_url: Mapped[str | None] = mapped_column(String(500), nullable=True)   # OpenAI 互換（ローカルLLM など）
+    project: Mapped[str | None] = mapped_column(String(100), nullable=True)    # Vertex AI
+    location: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    key_enc: Mapped[str | None] = mapped_column(Text, nullable=True)           # 暗号化した API キー
+    key_hint: Mapped[str | None] = mapped_column(String(8), nullable=True)     # 画面に出す末尾4文字
+    # app のみ：テナントにキー不要の Vertex を許す
+    allow_tenant_vertex: Mapped[bool] = mapped_column(Boolean, default=False)
+    updated_by: Mapped[str] = mapped_column(String(200), default="")
+    updated_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), default=_now, onupdate=_now)
+
+
 class AuditLog(Base):
     """追記のみ（設計書 6.3）。更新・削除するAPIは用意しない。"""
     __tablename__ = "audit_log"

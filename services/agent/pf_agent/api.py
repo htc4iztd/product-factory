@@ -8,7 +8,7 @@ from fastapi.responses import JSONResponse, Response
 from pydantic import BaseModel, Field
 from sqlalchemy import select
 
-from . import llm
+from . import llm, llmconf
 from .authz import GATE_GROUP, STAGE_GROUP, Caller, caller, require
 from .db import AuditLog, session
 from .engine import Engine, FactoryError, product_dict
@@ -95,6 +95,23 @@ class RepoBody(BaseModel):
     branch: str | None = Field(default=None, max_length=100)
 
 
+class LlmBody(BaseModel):
+    provider: str = Field(max_length=16)
+    chat_model: str = Field(default="", max_length=120)
+    summary_model: str = Field(default="", max_length=120)
+    image_model: str = Field(default="", max_length=120)
+    base_url: str | None = Field(default=None, max_length=500)
+    project: str | None = Field(default=None, max_length=100)
+    location: str | None = Field(default=None, max_length=50)
+    api_key: str | None = Field(default=None, max_length=500)
+    clear_key: bool = False
+    allow_tenant_vertex: bool = False
+
+
+class LlmTest(BaseModel):
+    scope: str = Field(default="tenant", pattern="^(tenant|app)$")
+
+
 class Review(BaseModel):
     decision: str = Field(pattern="^(proceed|back|stop)$")
     reason: str = ""
@@ -109,7 +126,66 @@ def _product(c: Caller, product_id: str, group: str, op: str):
 
 @app.get("/healthz")
 def healthz():
-    return {"ok": True, "llm": llm.provider(), "model": llm.model_name()}
+    c = llmconf.app_conn()
+    return {"ok": True, "llm": c.provider, "model": c.chat_model}
+
+
+# ---------------- LLM の接続設定 ----------------
+def _llm_error(e: llmconf.ConfigError):
+    raise HTTPException(e.status, e.message)
+
+
+@app.get("/settings/llm")
+def get_llm(c: Caller = Depends(caller)):
+    admin = llmconf.is_admin(c.user)
+    return {
+        "can_edit": c.base_role == "OWNER", "is_admin": admin,
+        "allow_tenant_vertex": llmconf.allow_tenant_vertex(),
+        "tenant": llmconf.view(f"t:{c.tenant}"),
+        "app": llmconf.view("app") if admin else None,
+        "effective": llmconf.describe(llmconf.resolve(c.tenant)),
+        "app_effective": llmconf.describe(llmconf.app_conn()),
+        "options": llmconf.options(),
+    }
+
+
+@app.put("/settings/llm/tenant")
+def put_llm_tenant(body: LlmBody, c: Caller = Depends(caller)):
+    if c.base_role != "OWNER":
+        raise HTTPException(403, "LLM の接続はテナントの OWNER だけが変えられます")
+    try:
+        llmconf.save(f"t:{c.tenant}", c.tenant, c.user, body.model_dump())
+    except llmconf.ConfigError as e:
+        _llm_error(e)
+    return {"ok": True}
+
+
+@app.put("/settings/llm/app")
+def put_llm_app(body: LlmBody, c: Caller = Depends(caller)):
+    if not llmconf.is_admin(c.user):
+        raise HTTPException(403, "アプリ全体の既定は運用者だけが変えられます")
+    try:
+        llmconf.save("app", c.tenant, c.user, body.model_dump())
+    except llmconf.ConfigError as e:
+        _llm_error(e)
+    return {"ok": True}
+
+
+@app.post("/settings/llm/test")
+def test_llm(body: LlmTest, c: Caller = Depends(caller)):
+    if body.scope == "app":
+        if not llmconf.is_admin(c.user):
+            raise HTTPException(403, "アプリ全体の既定は運用者だけが試せます")
+        conn = llmconf.app_conn()
+    else:
+        if c.base_role != "OWNER":
+            raise HTTPException(403, "接続テストはテナントの OWNER だけができます")
+        conn = llmconf.resolve(c.tenant)
+    try:
+        return llm.ping(conn)
+    except Exception as e:  # noqa: BLE001  失敗の中身をそのまま画面に返す
+        msg = str(e) if isinstance(e, llm.LLMError) else f"{type(e).__name__}: {str(e)[:300]}"
+        return {"ok": False, "model": conn.chat_model, "error": msg}
 
 
 @app.get("/products")

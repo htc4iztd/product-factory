@@ -1,4 +1,5 @@
-import { LogOut } from "lucide-react";
+import Link from "next/link";
+import { LogOut, Settings } from "lucide-react";
 import { auth } from "@/lib/auth";
 import { logout } from "@/app/(app)/actions";
 
@@ -17,6 +18,7 @@ export async function UserMenu({ compact = false }: { compact?: boolean }) {
           <div className="text-[11px] text-zinc-400">{session?.user?.role ?? "-"}・{mode}モード</div>
         </div>
       )}
+      <Link href="/settings" className="btn-ghost btn-sm" title="設定" aria-label="設定"><Settings size={14} /></Link>
       <form action={logout}>
         <button className="btn-ghost btn-sm" title="ログアウト"><LogOut size={14} /></button>
       </form>

@@ -274,10 +274,11 @@ def chat(product_id: str, stage_id: str, session_id: str | None = None) -> list[
 def chat_context(product_id: str, stage_id: str, session_id: str) -> dict:
     stage = STAGE_BY_ID[stage_id]
     with session() as s:
-        idea = s.get(Product, product_id).idea
+        product = s.get(Product, product_id)
+        idea, tenant_id = product.idea, product.tenant_id
     history = chat(product_id, stage_id, session_id)
     last_user = next((m["text"] for m in reversed(history) if m["role"] in ("user", "feedback")), "")
-    return {"idea": idea, "draft": draft(product_id, stage_id),
+    return {"idea": idea, "tenant_id": tenant_id, "draft": draft(product_id, stage_id),
             "upstream": confirmed_artifacts(product_id, stage.inputs),
             "history": [{"role": m["role"], "text": m["text"]} for m in history[:-1]],
             "message": last_user}

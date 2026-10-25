@@ -127,3 +127,26 @@ export const STATUS_LABEL: Record<string, string> = {
   not_started: "未着手", in_progress: "作業中", awaiting_approval: "承認待ち", revising: "修正中",
   completed: "更新済み", skipped: "スキップ", needs_recheck: "要再確認",
 };
+
+export type LlmProvider = "stub" | "gemini" | "vertex" | "anthropic" | "openai";
+export type LlmView = {
+  provider: LlmProvider; chat_model: string; summary_model: string; image_model: string;
+  base_url: string | null; project: string | null; location: string | null;
+  key_hint: string | null; has_key: boolean; allow_tenant_vertex: boolean; updated_by: string; updated_at: string | null;
+};
+export type LlmEffective = {
+  provider: LlmProvider; provider_label: string; source: "tenant" | "app" | "env";
+  chat_model: string; summary_model: string; image_model: string; base_url: string | null; location: string | null;
+};
+export type LlmSettings = {
+  can_edit: boolean; is_admin: boolean; allow_tenant_vertex: boolean;
+  tenant: LlmView | null; app: LlmView | null; effective: LlmEffective; app_effective: LlmEffective;
+  options: {
+    providers: Record<LlmProvider, string>;
+    defaults: Record<LlmProvider, { chat: string; summary: string; image: string }>;
+    suggested: Partial<Record<LlmProvider, string[]>>;
+    needs_key: LlmProvider[]; image_providers: LlmProvider[];
+    vertex_project: string | null; vertex_location: string;
+  };
+};
+export type LlmTestResult = { ok: boolean; model: string; reply?: string; ms?: number; error?: string };

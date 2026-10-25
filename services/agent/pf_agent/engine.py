@@ -14,7 +14,7 @@ from google.adk.sessions import DatabaseSessionService
 from google.genai import types
 from sqlalchemy import select
 
-from . import code, images, llm, repo
+from . import code, images, llm, llmconf, repo
 from . import frameworks as fx
 from .db import (
     PhaseReview,
@@ -158,11 +158,12 @@ class Engine:
         props = [p for m in messages for p in m["proposals"]]
         accepted = [brief(p) for p in props if p["status"] == "accepted"]
         rejected = [brief(p) for p in props if p["status"] == "rejected"]
+        conn = llmconf.resolve(product.tenant_id)
         try:
-            content = llm.summarize(stage, fw, messages, accepted, rejected)
+            content = llm.summarize(conn, stage, fw, messages, accepted, rejected)
         except Exception as e:  # noqa: BLE001  失敗はそのまま画面に返す
             raise FactoryError(502, f"レポートを作れませんでした：{e}") from None
-        repo.save_report(product.id, stage_id, content, messages[-1]["id"], llm.model_name(), user)
+        repo.save_report(product.id, stage_id, content, messages[-1]["id"], conn.summary_model, user)
 
     def set_field(self, product: Product, stage_id: str, user: str, key: str, value) -> None:
         self._stage(product, stage_id)
@@ -243,7 +244,8 @@ class Engine:
                                     ProductImage.model, ProductImage.created_by, ProductImage.created_at)
                              .where(ProductImage.product_id == product.id)
                              .order_by(ProductImage.created_at.desc())).all()
-        return {"product": product_dict(product), "kinds": images.KINDS, "model": images.model_name(),
+        return {"product": product_dict(product), "kinds": images.KINDS,
+                "model": images.model_name(llmconf.resolve(product.tenant_id)),
                 "facts": images.summary(product.id),
                 "images": [{"id": r.id, "kind": r.kind, "note": r.note, "prompt": r.prompt, "model": r.model,
                             "created_by": r.created_by, "created_at": r.created_at.isoformat()} for r in rows]}
@@ -255,13 +257,14 @@ class Engine:
             raise FactoryError(422, f"kind は {list(images.KINDS)} のどれか")
         facts = images.summary(product.id)
         prompt = images.build_prompt(kind, product.name, product.idea, facts, note)
+        conn = llmconf.resolve(product.tenant_id)
         try:
-            data, mime = images.generate(kind, prompt, product.name, facts)
+            data, mime = images.generate(conn, kind, prompt, product.name, facts)
         except Exception as e:  # 生成の失敗はそのまま画面に返す
             raise FactoryError(502, f"画像を生成できませんでした：{e}") from None
         with session() as s:
             img = ProductImage(product_id=product.id, kind=kind, note=note, prompt=prompt,
-                               model=images.model_name(), mime=mime, data=data, created_by=user)
+                               model=images.model_name(conn), mime=mime, data=data, created_by=user)
             s.add(img)
             s.flush()
             p = s.get(Product, product.id)
@@ -269,7 +272,7 @@ class Engine:
                 p.cover_image_id = img.id   # 最初の1枚は自動で表紙にする
             s.commit()
             image_id = img.id
-        repo.log(product.id, None, "agent", f"image-agent ({images.model_name()})", "image.generate",
+        repo.log(product.id, None, "agent", f"image-agent ({images.model_name(conn)})", "image.generate",
                  body={"image_id": image_id, "kind": kind, "note": note, "prompt": prompt})
         return image_id
 

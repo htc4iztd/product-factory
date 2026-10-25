@@ -29,6 +29,7 @@ ide               Code-OSS の Web 版（ソースからビルド）と、リポ
 - 参照タブでは、事業フェーズ（①〜⑤）の成果物（最新版、なければ下書き）をその場で読める。
 - 文書タブは編集できる。「## 項目名」の見出しごとにキャンバスの項目へ反映する（フローなど文書から読めない項目は変えない）。
 - 「確定」ではなく「更新」と呼ぶ。下書きを更新すると版が1つ増え、その版が最新版になる。
+- 右上の歯車（設定）で、テナントが使う LLM の接続を決める。接続方式は Gemini API・Vertex AI（キー不要。Gemini と Claude）・Anthropic API・OpenAI 互換 API（ローカルLLM など）・スタブ。対話・レポート・画像でモデルを分けられる（画像は Gemini 系だけ）。アプリ全体の既定は運用者（`PF_ADMIN_EMAILS`）が決め、各テナントの OWNER が自分のキーで上書きできる。API キーは `PF_SECRET_KEY` から作る鍵で暗号化して DB に置き、画面には末尾4文字だけを出す。テナントが Vertex AI を選べるのは運用者が許したときだけ。テナントの OpenAI 互換 URL は https の公開アドレスだけを受け付ける（内部ネットワークへの到達を防ぐ）。
 - 「コード（IDE）」では、プロダクトに GitHub リポジトリ（owner/name とブランチ）をつなぎ、Code-OSS の Web 版で読む（読み取り専用、ターミナルなし）。Code-OSS は `ide/VSCODE_VERSION` のタグからソースでビルドし（`ide/build.sh`）、Microsoft のマーケットプレイスや製品版の資産は使わない。IDE 内の拡張機能（`ide/extension`）が `pfrepo://<プロダクトID>/` のファイルシステムとして web の `/api/p/{id}/code/*` を読み、agent-api が GitHub の REST API から木と中身を取る。非公開リポジトリは `GITHUB_TOKEN`（読み取りだけの fine-grained token）が要る。
 - ループ L1〜L5、トレーサビリティ画面、worker / scheduler は R2。
 - `GOOGLE_API_KEY` が無ければ LLM はスタブ（必須見出しを埋めたダミー成果物）になり、全工程をそのまま通せる。
@@ -83,6 +84,7 @@ web と agent-api（と IDE）を Cloud Run に置き、DB は Supabase を使�
 3. **GitHub**：Environment `production` を作る（必要なら Required reviewers を付ける）。Variables に `terraform output` の `GCP_PROJECT_ID`、`GCP_REGION`、`GCP_WIF_PROVIDER`、`GCP_DEPLOY_SA` を入れる。任意で次も入れる。
    - `PF_GEMINI=true`：Gemini を使う（無ければスタブ）。`PF_MODEL` で対話のモデル、`PF_IMAGE_MODEL` で画像のモデルを変えられる。
    - `PF_ALLOW_SIGNUP=false`：自分の登録が済んだら入れて、新規登録を締め切る。
+   - `PF_ADMIN_EMAILS`：設定画面でアプリ全体の LLM の既定を変えられる人のメールアドレス（複数は `;` 区切り）。
 4. Actions → `deploy` → Run workflow。以後は main への push で `ci` 成功後に自動で更新される。web の URL はジョブのサマリーに出る。
 
 5. **IDE（任意）**：Actions → `ide` → Run workflow（Code-OSS のビルドに30〜60分）。終わると web に IDE の URL（`IDE_ORIGIN`）が入る。非公開リポジトリを読むときは、読み取りだけの fine-grained token を `gcloud secrets versions add GITHUB_TOKEN` で入れ、Variables に `PF_GITHUB_TOKEN=true` を入れてから `deploy` を実行する。

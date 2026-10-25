@@ -210,5 +210,20 @@ const recheck = await page.getByText("上流が更新されました").count();
 const confirmed = await page.locator("main").getByText("更新済み", { exact: true }).count();
 await page.goto(`${BASE}/p/${pid}/audit`);
 await shot("14-audit");
+
+// 設定：このテナントの LLM 接続を決め、接続テストする（キーの要る方式はキーが無いと保存できない）
+await page.getByRole("link", { name: "設定", exact: true }).first().click();
+await page.waitForURL(`${BASE}/settings`);
+const provider = page.getByLabel("接続方式");
+await provider.selectOption("anthropic");
+await btn("保存", true).click();
+await page.getByText("API キーが要ります").waitFor();
+await provider.selectOption("stub");
+await btn("保存", true).click();
+await page.getByText("保存しました").waitFor();
+await btn("接続テスト").click();
+await page.getByRole("status").getByText(/つながりました/).waitFor();
+await page.getByText("このテナントの設定").waitFor();
+await shot("15-settings", true);
 console.log(JSON.stringify({ pid, confirmed, recheck }));
 await browser.close();

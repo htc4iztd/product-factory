@@ -5,25 +5,26 @@ APIキーがない環境（CI・ローカル）では決定的なスタブで動
 """
 from __future__ import annotations
 
+import ipaddress
 import json
-import os
+import socket
+import time
+import urllib.error
+import urllib.request
+from urllib.parse import urlparse
 
 from pydantic import BaseModel
 
 from .frameworks import Framework, empty_draft, is_filled, spec
+from .llmconf import Conn
 from .stages import Stage
 
-
-def provider() -> str:
-    if os.environ.get("PF_LLM", "").lower() == "stub":
-        return "stub"
-    if os.environ.get("GOOGLE_API_KEY") or os.environ.get("GEMINI_API_KEY"):
-        return "gemini"
-    return "stub"
+# Claude API で、拒否されたときに別モデルで答え直す（server-side fallback）を使うモデル
+_FALLBACK_MODELS = {"claude-opus-5-5", "claude-opus-5", "claude-sonnet-5-5", "claude-fable-5-1"}
 
 
-def model_name() -> str:
-    return os.environ.get("PF_MODEL", "stub" if provider() == "stub" else "gemini-2.5-flash")
+class LLMError(Exception):
+    pass
 
 
 class Proposal(BaseModel):
@@ -113,36 +114,26 @@ def _stub(fw: Framework, idea: str, draft: dict, message: str) -> Turn:
     return Turn(reply=f"すべての項目が埋まっています。次に詰める点として：{q}", proposals=[])
 
 
-def converse(stage: Stage, fw: Framework, idea: str, draft: dict, upstream: dict[str, str],
+def converse(conn: Conn, stage: Stage, fw: Framework, idea: str, draft: dict, upstream: dict[str, str],
              history: list[dict], message: str) -> Turn:
-    if provider() == "stub":
+    if conn.provider == "stub":
         return _stub(fw, idea, draft, message)
-    from google import genai  # google-adk の依存に含まれる
-    from google.genai import types
-    client = genai.Client(api_key=os.environ.get("GOOGLE_API_KEY") or os.environ.get("GEMINI_API_KEY"))
-    resp = client.models.generate_content(
-        model=model_name(),
-        contents=_prompt(stage, fw, idea, draft, upstream, history, message),
-        config=types.GenerateContentConfig(response_mime_type="application/json", response_schema=Turn),
-    )
-    if isinstance(resp.parsed, Turn):
-        return resp.parsed
-    return Turn.model_validate_json(resp.text or '{"reply": "", "proposals": []}')
+    return _json(conn, conn.chat_model, _prompt(stage, fw, idea, draft, upstream, history, message), Turn)
 
 
-def summarize(stage: Stage, fw: Framework, messages: list[dict], accepted: list[str], rejected: list[str]) -> str:
+def summarize(conn: Conn, stage: Stage, fw: Framework, messages: list[dict],
+              accepted: list[str], rejected: list[str]) -> str:
     """ステージの対話を、要約・決まったこと・却下したこと・未決事項の Markdown にまとめる。"""
     head = f"# {stage.no} {stage.name}：対話のレポート\n\n"
     decided = "\n".join(f"- {a}" for a in accepted) or "- （なし）"
     dropped = "\n".join(f"- {r}" for r in rejected) or "- （なし）"
-    if provider() == "stub":
+    if conn.provider == "stub":
         said = [m["text"] for m in messages if m["role"] in ("user", "feedback")]
         gist = "\n".join(f"- {t[:80]}" for t in said[-8:]) or "- （発言なし）"
         open_q = "\n".join(f"- {q}" for q in fw.prompts[:3]) or "- （なし）"
         return (f"{head}## 要約\n{len(messages)}件の発言を要約しました（スタブ）。ビルダーの主な発言：\n{gist}\n\n"
                 f"## 決まったこと（採用した案）\n{decided}\n\n## 却下した案\n{dropped}\n\n"
                 f"## 未決事項・次に詰めること\n{open_q}\n")
-    from google import genai
     log = "\n".join(f"[{m['session']}] {m['role']}: {m['text']}" for m in messages[-200:])
     prompt = (
         f"次は「{stage.no} {stage.name}」（{fw.title}）について、ビルダーとAIが交わした対話の記録です。"
@@ -153,6 +144,158 @@ def summarize(stage: Stage, fw: Framework, messages: list[dict], accepted: list[
         "対話にない推測は書かない。未決事項は、対話で出たが結論が出ていない問いと、抜けている観点を挙げる。\n\n"
         f"## 採用した案\n{decided}\n\n## 却下した案\n{dropped}\n\n## 対話\n{log}\n"
     )
-    client = genai.Client(api_key=os.environ.get("GOOGLE_API_KEY") or os.environ.get("GEMINI_API_KEY"))
-    resp = client.models.generate_content(model=model_name(), contents=prompt)
-    return head + (resp.text or "").strip() + "\n"
+    return head + _text(conn, conn.summary_model, prompt).strip() + "\n"
+
+
+def ping(conn: Conn) -> dict:
+    """接続テスト。短い文を1つ返してもらい、かかった時間を測る。"""
+    if conn.provider == "stub":
+        return {"ok": True, "model": "stub", "reply": "スタブ（AIを呼ばない）", "ms": 0}
+    t = time.monotonic()
+    reply = _text(conn, conn.chat_model, "接続テストです。「OK」とだけ返してください。")
+    ms = int((time.monotonic() - t) * 1000)
+    return {"ok": True, "model": conn.chat_model, "reply": reply.strip()[:200], "ms": ms}
+
+
+# ---------------- 接続ごとの呼び出し ----------------
+def _is_claude(conn: Conn, model: str) -> bool:
+    return conn.provider == "anthropic" or (conn.provider == "vertex" and model.startswith("claude"))
+
+
+def _genai(conn: Conn):
+    from google import genai  # google-adk の依存に含まれる
+    if conn.provider == "vertex":
+        if not conn.project:
+            raise LLMError("Vertex AI のプロジェクトが決まっていません")
+        return genai.Client(vertexai=True, project=conn.project, location=conn.location or "global")
+    if not conn.api_key:
+        raise LLMError("Gemini API のキーがありません")
+    return genai.Client(api_key=conn.api_key)
+
+
+def _anthropic(conn: Conn):
+    import anthropic
+    if conn.provider == "vertex":
+        if not conn.project:
+            raise LLMError("Vertex AI のプロジェクトが決まっていません")
+        return anthropic.AnthropicVertex(project_id=conn.project, region=conn.location or "global")
+    if not conn.api_key:
+        raise LLMError("Anthropic API のキーがありません")
+    return anthropic.Anthropic(api_key=conn.api_key)
+
+
+def _claude_kwargs(prompt: str, model: str) -> dict:
+    return {"model": model, "max_tokens": 16000, "messages": [{"role": "user", "content": prompt}]}
+
+
+def _claude_check(resp) -> None:
+    if resp.stop_reason == "refusal":
+        raise LLMError("AIがこの依頼への応答を断りました。言い方を変えて送ってください")
+
+
+def _json(conn: Conn, model: str, prompt: str, schema: type[BaseModel]):
+    if _is_claude(conn, model):
+        client = _anthropic(conn)
+        if conn.provider == "anthropic" and model in _FALLBACK_MODELS:
+            resp = client.beta.messages.parse(**_claude_kwargs(prompt, model), output_format=schema,
+                                              betas=["server-side-fallback-2026-07-01"], fallbacks="default")
+        else:
+            resp = client.messages.parse(**_claude_kwargs(prompt, model), output_format=schema)
+        _claude_check(resp)
+        return resp.parsed_output
+    if conn.provider in ("gemini", "vertex"):
+        from google.genai import types
+        resp = _genai(conn).models.generate_content(
+            model=model, contents=prompt,
+            config=types.GenerateContentConfig(response_mime_type="application/json", response_schema=schema))
+        if isinstance(resp.parsed, schema):
+            return resp.parsed
+        return schema.model_validate_json(resp.text or "{}")
+    if conn.provider == "openai":
+        return schema.model_validate_json(_strip_fence(_openai(conn, model, prompt, schema)))
+    raise LLMError(f"未対応の接続方式：{conn.provider}")
+
+
+def _text(conn: Conn, model: str, prompt: str) -> str:
+    if _is_claude(conn, model):
+        client = _anthropic(conn)
+        if conn.provider == "anthropic" and model in _FALLBACK_MODELS:
+            resp = client.beta.messages.create(**_claude_kwargs(prompt, model),
+                                               betas=["server-side-fallback-2026-07-01"], fallbacks="default")
+        else:
+            resp = client.messages.create(**_claude_kwargs(prompt, model))
+        _claude_check(resp)
+        return "".join(b.text for b in resp.content if b.type == "text")
+    if conn.provider in ("gemini", "vertex"):
+        return _genai(conn).models.generate_content(model=model, contents=prompt).text or ""
+    if conn.provider == "openai":
+        return _openai(conn, model, prompt, None)
+    raise LLMError(f"未対応の接続方式：{conn.provider}")
+
+
+def _strip_fence(text: str) -> str:
+    t = text.strip()
+    if t.startswith("```"):
+        t = t.split("\n", 1)[1] if "\n" in t else ""
+        t = t.rsplit("```", 1)[0]
+    return t.strip()
+
+
+def _guard_host(conn: Conn) -> None:
+    # 保存したあとで名前の向き先が変わる場合に備え、呼ぶたびに内部アドレスでないかを見る
+    if conn.allow_private:
+        return
+    host = urlparse(conn.base_url or "").hostname or ""
+    for info in socket.getaddrinfo(host, 443):
+        if not ipaddress.ip_address(info[4][0]).is_global:
+            raise LLMError("内部ネットワークのアドレスには接続できません")
+
+
+def _openai(conn: Conn, model: str, prompt: str, schema: type[BaseModel] | None) -> str:
+    """OpenAI 互換の /chat/completions（Ollama・LM Studio・vLLM など）。
+
+    JSON スキーマ指定に対応しない実装には、json_object とプロンプト中のスキーマで頼み直す。
+    """
+    if not conn.base_url:
+        raise LLMError("OpenAI 互換 API の URL がありません")
+    _guard_host(conn)
+    url = conn.base_url.rstrip("/") + "/chat/completions"
+    headers = {"content-type": "application/json"}
+    if conn.api_key:
+        headers["authorization"] = f"Bearer {conn.api_key}"
+
+    def call(body: dict) -> str:
+        req = urllib.request.Request(url, data=json.dumps(body).encode(), headers=headers, method="POST")
+        with urllib.request.urlopen(req, timeout=180) as r:  # noqa: S310 - URL は保存時と呼び出し時に検査済み
+            data = json.loads(r.read())
+        return data["choices"][0]["message"]["content"] or ""
+
+    messages = [{"role": "user", "content": prompt}]
+    if schema is None:
+        return _wrap(lambda: call({"model": model, "messages": messages}))
+    js = schema.model_json_schema()
+    try:
+        return call({"model": model, "messages": messages, "response_format": {
+            "type": "json_schema", "json_schema": {"name": schema.__name__, "schema": js}}})
+    except urllib.error.HTTPError as e:
+        if e.code not in (400, 422):
+            raise _http_error(e) from None
+    except urllib.error.URLError as e:
+        raise LLMError(f"接続できません：{e.reason}") from None
+    hint = f"\n\n## 出力\n次の JSON スキーマに合う JSON だけを返す。\n{json.dumps(js, ensure_ascii=False)}"
+    return _wrap(lambda: call({"model": model, "messages": [{"role": "user", "content": prompt + hint}],
+                               "response_format": {"type": "json_object"}}))
+
+
+def _wrap(fn):
+    try:
+        return fn()
+    except urllib.error.HTTPError as e:
+        raise _http_error(e) from None
+    except urllib.error.URLError as e:
+        raise LLMError(f"接続できません：{e.reason}") from None
+
+
+def _http_error(e: urllib.error.HTTPError) -> LLMError:
+    detail = e.read().decode("utf-8", "replace")[:300]
+    return LLMError(f"OpenAI 互換 API がエラーを返しました（{e.code}）：{detail}")

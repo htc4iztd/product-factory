@@ -15,7 +15,7 @@ from google.adk.agents.context import Context
 from google.adk.workflow import START, Workflow
 
 from . import frameworks as fx
-from . import llm, repo
+from . import llm, llmconf, repo
 from .stages import STAGE_BY_ID
 
 
@@ -32,12 +32,14 @@ def converse(ctx: Context, node_input: Any):
     stage = STAGE_BY_ID[stage_id]
     fw = fx.FRAMEWORK_BY_STAGE[stage_id]
     c = repo.chat_context(product_id, stage_id, _chat_session(ctx))
+    conn = llmconf.resolve(c["tenant_id"])
     try:
-        turn = llm.converse(stage, fw, c["idea"], c["draft"], c["upstream"], c["history"], c["message"])
+        turn = llm.converse(conn, stage, fw, c["idea"], c["draft"], c["upstream"], c["history"], c["message"])
     except Exception as e:  # LLM の失敗は対話の中で伝え、下書きには触れない
-        return {"reply": f"AIの呼び出しに失敗しました（{type(e).__name__}）。もう一度送ってください。",
-                "proposals": []}
-    return {"reply": turn.reply, "proposals": [p.model_dump() for p in turn.proposals]}
+        why = str(e) if isinstance(e, llm.LLMError) else type(e).__name__
+        return {"reply": f"AIの呼び出しに失敗しました（{why}）。もう一度送るか、設定の接続を確かめてください。",
+                "proposals": [], "model": conn.chat_model}
+    return {"reply": turn.reply, "proposals": [p.model_dump() for p in turn.proposals], "model": conn.chat_model}
 
 
 def screen(ctx: Context, node_input: Any):
@@ -59,7 +61,8 @@ def screen(ctx: Context, node_input: Any):
     reply = (node_input or {}).get("reply", "")
     if dropped:
         reply += "\n\n（形式が合わず外した案：" + "、".join(dropped) + "）"
-    msg_id = repo.add_chat(product_id, stage_id, "assistant", f"stage-agent:{stage_id} ({llm.model_name()})",
+    model = (node_input or {}).get("model", "")
+    msg_id = repo.add_chat(product_id, stage_id, "assistant", f"stage-agent:{stage_id} ({model})",
                            reply, accepted, session_id=_chat_session(ctx))
     return {"message_id": msg_id, "proposals": len(accepted), "dropped": dropped}
 

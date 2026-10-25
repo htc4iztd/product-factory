@@ -3,7 +3,7 @@
 # DB は Supabase（外部）。接続文字列は Secret Manager の DATABASE_URL に手で入れる。
 
 locals {
-  apis = ["run", "artifactregistry", "secretmanager", "iam", "iamcredentials", "sts", "cloudresourcemanager"]
+  apis = ["run", "artifactregistry", "secretmanager", "iam", "iamcredentials", "sts", "cloudresourcemanager", "aiplatform"]
 }
 
 resource "google_project_service" "api" {
@@ -64,7 +64,7 @@ resource "google_project_iam_member" "web_invoker" {
 # AUTH_SECRET と PF_INTERNAL_TOKEN はここで生成する。
 # DATABASE_URL と GOOGLE_API_KEY は値を state に載せないよう、箱だけ作って値は gcloud で入れる。
 resource "google_secret_manager_secret" "env" {
-  for_each  = toset(["DATABASE_URL", "AUTH_SECRET", "PF_INTERNAL_TOKEN", "GOOGLE_API_KEY", "GITHUB_TOKEN"])
+  for_each  = toset(["DATABASE_URL", "AUTH_SECRET", "PF_INTERNAL_TOKEN", "GOOGLE_API_KEY", "GITHUB_TOKEN", "PF_SECRET_KEY"])
   secret_id = each.key
   replication {
     auto {}
@@ -78,6 +78,15 @@ resource "random_password" "auth" {
 resource "random_password" "internal" {
   length  = 40
   special = false
+}
+# 設定画面で入れた API キーを DB で暗号化する鍵
+resource "random_password" "secret_key" {
+  length  = 48
+  special = false
+}
+resource "google_secret_manager_secret_version" "secret_key" {
+  secret      = google_secret_manager_secret.env["PF_SECRET_KEY"].id
+  secret_data = random_password.secret_key.result
 }
 resource "google_secret_manager_secret_version" "auth" {
   secret      = google_secret_manager_secret.env["AUTH_SECRET"].id
@@ -97,6 +106,7 @@ locals {
     agent_int    = { sa = google_service_account.agent.email, secret = "PF_INTERNAL_TOKEN" }
     agent_gemini = { sa = google_service_account.agent.email, secret = "GOOGLE_API_KEY" }
     agent_github = { sa = google_service_account.agent.email, secret = "GITHUB_TOKEN" }
+    agent_secret = { sa = google_service_account.agent.email, secret = "PF_SECRET_KEY" }
   }
 }
 resource "google_secret_manager_secret_iam_member" "access" {
@@ -157,4 +167,12 @@ resource "google_service_account_iam_member" "deployer_wif" {
   service_account_id = google_service_account.deployer.name
   role               = "roles/iam.workloadIdentityUser"
   member             = "principalSet://iam.googleapis.com/${google_iam_workload_identity_pool.github.name}/attribute.repository/${var.github_repo}"
+}
+
+# 設定画面で「Vertex AI（キー不要）」を選んだとき、agent-api が Gemini / Claude を呼べるようにする
+resource "google_project_iam_member" "agent_vertex" {
+  project    = var.project_id
+  role       = "roles/aiplatform.user"
+  member     = "serviceAccount:${google_service_account.agent.email}"
+  depends_on = [google_project_service.api]
 }

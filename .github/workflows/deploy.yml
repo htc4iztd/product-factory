@@ -50,9 +50,10 @@ jobs:
           GH_TOKEN_ON: ${{ vars.PF_GITHUB_TOKEN }}
           PF_MODEL: ${{ vars.PF_MODEL || 'gemini-2.5-flash' }}
           PF_IMAGE_MODEL: ${{ vars.PF_IMAGE_MODEL || 'gemini-3.1-flash-image' }}
+          ADMINS: ${{ vars.PF_ADMIN_EMAILS }}   # 設定画面でアプリ全体の既定を変えられる人（複数は ; 区切り）
         run: |
-          SECRETS=DATABASE_URL=DATABASE_URL:latest,PF_INTERNAL_TOKEN=PF_INTERNAL_TOKEN:latest
-          ENVS=PF_DB_POOL_SIZE=2,PF_MODEL=$PF_MODEL,PF_IMAGE_MODEL=$PF_IMAGE_MODEL
+          SECRETS=DATABASE_URL=DATABASE_URL:latest,PF_INTERNAL_TOKEN=PF_INTERNAL_TOKEN:latest,PF_SECRET_KEY=PF_SECRET_KEY:latest
+          ENVS=PF_DB_POOL_SIZE=2,PF_MODEL=$PF_MODEL,PF_IMAGE_MODEL=$PF_IMAGE_MODEL,GOOGLE_CLOUD_PROJECT=$PROJECT,PF_ADMIN_EMAILS=$ADMINS
           # Gemini を使うのは Variables の PF_GEMINI=true のときだけ。それ以外はスタブ
           if [ "$GEMINI" = "true" ]; then SECRETS=$SECRETS,GOOGLE_API_KEY=GOOGLE_API_KEY:latest; else ENVS=$ENVS,PF_LLM=stub; fi
           # 非公開リポジトリを読むときだけ GITHUB_TOKEN を渡す（Variables の PF_GITHUB_TOKEN=true）
