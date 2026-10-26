@@ -25,7 +25,8 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
     Credentials({
       credentials: { email: { type: "email" }, password: { type: "password" } },
       async authorize(credentials) {
-        const email = credentials?.email as string | undefined;
+        // 登録時と同じく、前後の空白を除いて小文字にしてから探す（大文字や空白が混じるとログインできなかった）
+        const email = (credentials?.email as string | undefined)?.trim().toLowerCase();
         const password = credentials?.password as string | undefined;
         if (!email || !password) return null;
         const user = await findUserByEmail(email);
