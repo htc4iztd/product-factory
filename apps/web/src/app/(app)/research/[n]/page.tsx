@@ -26,6 +26,7 @@ export default async function LibraryPage({ params, searchParams }: { params: Pr
   const canEdit = session?.user?.role !== "VIEWER";
   const job = jobs.runs.find((r) => Number(r.params?.number) === n) ?? null;
   const busy = !!job && (job.status === "queued" || job.status === "running");
+  const running = busy && job ? { id: job.id, scope: String(job.params?.scope ?? "all") } : null;
   // 質問の回答や調査レポートを待っている間も、数秒ごとに取り直す
   const waiting = busy || Object.values(d.questions).flat().some((q) => q.state === "pending" || q.state === "running")
     || d.reports.some((r) => r.status === "queued" || r.status === "running");
@@ -45,7 +46,7 @@ export default async function LibraryPage({ params, searchParams }: { params: Pr
               {d.description && <p className="mt-1 max-w-4xl text-sm leading-relaxed text-zinc-600">{d.description}</p>}
             </div>
             <div className="w-72 space-y-1 text-right">
-              {canEdit && <div className="flex justify-end"><UpdateButton n={n} busy={busy} /></div>}
+              {canEdit && <div className="flex justify-end"><UpdateButton n={n} scope="all" label="すべて更新" primary running={running} title="記事を集めてから、論点・プレーヤー・技術調査・業界調査・公的データまで一度に作り直す" /></div>}
               <p className="text-[11px] text-zinc-500" aria-live="polite">
                 {busy ? "更新しています。終わると自動で反映される。" : `前回の更新 ${when(d.updated_at)}・次は ${d.latest ?? d.since ?? "直近"} より後の記事を集める`}
               </p>
@@ -54,7 +55,7 @@ export default async function LibraryPage({ params, searchParams }: { params: Pr
             </div>
           </div>
         </div>
-        <ResearchApp d={d} canEdit={canEdit} initial={initial}
+        <ResearchApp d={d} canEdit={canEdit} initial={initial} running={running}
           add={(
             <section aria-label="記事を足す" className="card max-w-3xl space-y-3 p-5">
               <p className="text-[12px] text-zinc-500">URL だけなら本文を取りに行く（公開されているページだけ）。ログインが要るページや PDF は本文を貼ってほしい。AI が要約・論点・企業・ファクトを付ける。</p>
@@ -69,7 +70,7 @@ export default async function LibraryPage({ params, searchParams }: { params: Pr
         <footer className="space-y-1 border-t border-zinc-200 pt-4 text-[11px] leading-5 text-zinc-500">
           <p>「論点」のまとめは記事の要約だけを根拠に AI が書いたもので、「更新」で新しい記事が3件以上入った論点は書き直される。「技術調査」「業界調査」「公的データ」は AI が公開資料を読んでまとめたもので、各レポートに出典と確認日を付けている。</p>
           <p>選んだ記事は「PowerPointに出力」で一覧と1記事1枚のスライドにして保存できる（メモとファクトも入り、質問と回答はノートに入る）。メモ・質問・回答はこのライブラリを開ける全員に見える。</p>
-          <p>「更新」を押すと、前回の最新記事より後に出た記事を AI の検索・RSS・指定ページから集め、ファクトも抜き出す。プレーヤーの最新の動きも書き換える。AI の検索は、Claude の接続なら Claude が期間を区切って Web 検索を繰り返し（見つけた記事を伝えて、まだ見つけていない記事を探し直す）、Gemini の接続でも同じく期間を区切って Google 検索で探し直す（論点・企業の切り口でも探す）。本文を開けなかった記事（ボット除け・有料記事など）は検索結果の文章から要約し、「本文未確認」の印を付ける。期間の始まりを決めていれば毎回そこから探し、集めた記事は URL で重ねない。数分〜十数分かかり、終わると自動で反映される。</p>
+          <p>「すべて更新」は、記事を集めてから、論点のまとめ（新しい記事が3件以上入った論点）・プレーヤー・技術調査・業界調査・公的データまでを1つのジョブで作り直す（工程はジョブの画面のグラフで見られる）。各タブの「更新」はそのタブだけを作り直す。記事の更新では、前回の最新記事より後に出た記事を AI の検索・RSS・指定ページから集め、ファクトも抜き出す。プレーヤーの最新の動きも書き換える。AI の検索は、Claude の接続なら Claude が期間を区切って Web 検索を繰り返し（見つけた記事を伝えて、まだ見つけていない記事を探し直す）、Gemini の接続でも同じく期間を区切って Google 検索で探し直す（論点・企業の切り口でも探す）。本文を開けなかった記事（ボット除け・有料記事など）は検索結果の文章から要約し、「本文未確認」の印を付ける。期間の始まりを決めていれば毎回そこから探し、集めた記事は URL で重ねない。数分〜十数分かかり、終わると自動で反映される。</p>
         </footer>
       </main>
     </>

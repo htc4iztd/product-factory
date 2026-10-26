@@ -5,6 +5,7 @@ import type { ResearchData, ResearchQuestion } from "@/lib/agent";
 import type { Art, Model } from "./model";
 import { addFact, askQuestion, deleteQuestion, retryQuestion, saveMemo, type FactInput } from "@/app/(app)/research/actions";
 import { exportDeck } from "./pptx";
+import { UpdateButton } from "@/components/knowledge/ResearchBits";
 
 type F = { q: string; seg: "all" | "jp" | "ov" | "new" | "memo" | "qa" | "sel"; cat: string; mon: string };
 const F0: F = { q: "", seg: "all", cat: "", mon: "" };
@@ -189,6 +190,11 @@ export function NewsTab({ n, d, M, canEdit, sel, setSel, onFacts }: {
 
   return (
     <section className="space-y-4">
+      {canEdit && (
+        <div className="flex justify-end">
+          <UpdateButton n={n} scope="articles" label="記事を更新" title="期間の記事を AI の検索・RSS・指定ページから集め、要約とファクトを付ける" />
+        </div>
+      )}
       <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
         {[[M.arts.length, "記事"], [nJP, "国内"], [M.arts.length - nJP, "海外"], [M.arts.filter((a) => a.added === la).length, `直近の追加（${la ? la.slice(5).replace("-", "/") : "—"}）`]].map(([v, l]) => (
           <div key={String(l)} className="card p-3"><div className="text-xl font-semibold tabular-nums">{v}</div><div className="text-[11px] text-zinc-500">{l}</div></div>

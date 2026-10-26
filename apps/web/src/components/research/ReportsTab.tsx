@@ -3,6 +3,7 @@ import { useState, useTransition } from "react";
 import { Plus, RotateCcw, Trash2 } from "lucide-react";
 import type { ResearchData, ResearchReport } from "@/lib/agent";
 import { createReport, deleteReport, retryReport } from "@/app/(app)/research/actions";
+import { UpdateButton } from "@/components/knowledge/ResearchBits";
 
 type Kind = ResearchReport["kind"];
 const LEAD: Record<Kind, string> = {
@@ -264,7 +265,12 @@ export function ReportsTab({ n, d, kind, label, canEdit }: { n: number; d: Resea
     <section className="space-y-4">
       <div className="flex flex-wrap items-start gap-3">
         <p className="min-w-0 flex-1 text-[13px] text-zinc-500">{LEAD[kind]}</p>
-        {canEdit && <button className="btn-secondary btn-sm" onClick={() => setForm(!form)}><Plus size={13} />{label}のレポートを作る</button>}
+        {canEdit && (
+          <div className="flex flex-wrap items-center gap-2">
+            <UpdateButton n={n} scope={kind} label={`${label}を更新`} title={`いちばん新しい${label}のレポートを作り直す（なければ作る）`} />
+            <button className="btn-secondary btn-sm" onClick={() => setForm(!form)}><Plus size={13} />{label}のレポートを作る</button>
+          </div>
+        )}
       </div>
       {form && (
         <div className="card space-y-2 p-4">

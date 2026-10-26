@@ -202,10 +202,15 @@ def put_library(number: int, body: LibraryBody, c: Caller = Depends(caller)):
     return research.save_library(c.tenant, c.user, body.model_dump(exclude_unset=True), number)
 
 
+class UpdateBody(BaseModel):
+    scope: str = "all"  # all | articles | issues | players | tech | industry | public
+
+
 @router.post("/research/{number}/update")
-def update(number: int, c: Caller = Depends(caller)):
+def update(number: int, body: UpdateBody | None = None, c: Caller = Depends(caller)):
+    """更新：すべて（記事→論点・プレーヤー・調査レポート）か、タブごとの範囲だけ。"""
     _w(c)
-    return research.start_update(c.tenant, c.user, number)
+    return research.start_update(c.tenant, c.user, number, (body or UpdateBody()).scope)
 
 
 @router.post("/research/{number}/articles")

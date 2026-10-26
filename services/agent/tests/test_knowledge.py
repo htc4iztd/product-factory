@@ -152,7 +152,17 @@ def test_research_library_flow(client, monkeypatch):
     assert any("RA-2" in s for s in steps) and not any("old" in s for s in steps)
     assert c.get("/jobs", headers=H).json()["runs"][0]["kind"] == "research"
     ts = {t["id"]: t["status"] for t in j["tasks"]}
-    assert ts == {"search": "done", "feeds": "done", "read": "done", "issues": "done", "players": "done"}
+    assert ts == {
+        "search": "done",
+        "feeds": "done",
+        "read": "done",
+        "issues": "done",
+        "players": "done",
+        "latest": "done",
+        "report-tech": "done",
+        "report-industry": "done",
+        "report-public": "done",
+    }
     d = c.get("/research/1", headers=H).json()
     assert d["articles"] == 2 and d["latest"] == "2026-10-20"
     # 絞り込み・集計・分析・CSV・ステージへの要約
@@ -418,3 +428,36 @@ def test_gemini_search_hunts_by_window_until_no_new(client, monkeypatch):
     second = [p for p in prompts if wins[0][0] in p and "切り口" not in p][1]
     assert "見つけ済み" in second and "記事 " in second  # 2回目は見つけた見出しを伝える
     assert any("論点「締め処理」" in p for p in prompts)  # 論点の切り口でも探す
+
+
+def test_research_update_scopes(client):
+    """タブごとの更新：論点だけ・プレーヤーだけ・調査レポートだけ。「すべて」は記事を集めてから残りを作る。"""
+    c = client
+    c.post(
+        "/research",
+        headers=H,
+        json={"name": "家計管理", "issues": ["締め処理"], "entities": ["調査会社", "家計ボード社"]},
+    )
+    c.post("/research/1/articles", headers=H, json={"url": "https://manual.example/1", "text": ARTICLE})
+    assert c.post("/research/1/update", headers=H, json={"scope": "x"}).status_code == 422
+    # 論点だけ
+    j = wait(c, c.post("/research/1/update", headers=H, json={"scope": "issues"}).json()["id"])
+    assert [t["id"] for t in j["tasks"]] == ["issues"] and j["status"] == "done" and j["params"]["scope"] == "issues"
+    # プレーヤーだけ：記事の企業と、決めておいた企業を足し、最新の動きを付ける
+    j = wait(c, c.post("/research/1/update", headers=H, json={"scope": "players"}).json()["id"])
+    assert [t["id"] for t in j["tasks"]] == ["players", "latest"] and j["status"] == "done", j
+    d = c.get("/research/1/data", headers=H).json()
+    assert {p["name"] for p in d["players"]} == {"調査会社", "家計ボード社"}
+    assert next(p for p in d["players"] if p["name"] == "調査会社")["latest"]["article"] == "RA-1"
+    # 調査レポートだけ（なければ作り、あれば作り直す。番号は変わらない）
+    for _ in range(2):
+        j = wait(c, c.post("/research/1/update", headers=H, json={"scope": "tech"}).json()["id"])
+        assert [t["id"] for t in j["tasks"]] == ["report-tech"] and j["status"] == "done"
+    reps = c.get("/research/1/data", headers=H).json()["reports"]
+    assert [(r["key"], r["kind"], r["status"]) for r in reps] == [("RR-1", "tech", "done")]
+    # 「すべて」の工程の並び：記事を集めてから、論点・プレーヤー・レポート
+    from pf_agent import research
+
+    deps = {t["id"]: t["deps"] for t in research.update_tasks("all")}
+    assert deps["read"] == ["search", "feeds"] and deps["issues"] == ["read"] and deps["report-public"] == ["read"]
+    assert deps["latest"] == ["players"]

@@ -8,6 +8,7 @@ import { ReportsTab } from "./ReportsTab";
 import { PlayersTab } from "./PlayersTab";
 import { FactsTab } from "./FactsTab";
 import { AnalysisTab } from "./AnalysisTab";
+import { RunningCtx, type Running } from "@/components/knowledge/ResearchBits";
 
 export const TABS = {
   news: "ニュース", iss: "論点", tech: "技術調査", ind: "業界調査", pub: "公的データ", map: "プレーヤー", facts: "ファクトDB", ana: "データ分析", add: "記事を足す", settings: "設定",
@@ -15,7 +16,7 @@ export const TABS = {
 export type Tab = keyof typeof TABS;
 
 // リサーチライブラリの画面。絞り込み・集計は画面の側で行い、書き込みはサーバーアクションで行う
-export function ResearchApp({ d, canEdit, initial, add, settings }: { d: ResearchData; canEdit: boolean; initial: Tab; add: React.ReactNode; settings: React.ReactNode }) {
+export function ResearchApp({ d, canEdit, initial, add, settings, running }: { d: ResearchData; canEdit: boolean; initial: Tab; add: React.ReactNode; settings: React.ReactNode; running: Running }) {
   const [tab, setTab] = useState<Tab>(initial);
   const [factArt, setFactArt] = useState("");
   const M = useMemo(() => buildModel(d), [d]);
@@ -40,6 +41,7 @@ export function ResearchApp({ d, canEdit, initial, add, settings }: { d: Researc
     tech: d.reports.filter((r) => r.kind === "tech").length, ind: d.reports.filter((r) => r.kind === "industry").length, pub: d.reports.filter((r) => r.kind === "public").length,
   };
   return (
+    <RunningCtx.Provider value={running}>
     <div className="space-y-5">
       <nav className="flex gap-1 overflow-x-auto border-b border-zinc-200" role="tablist">
         {(Object.keys(TABS) as Tab[]).filter((k) => canEdit || (k !== "add" && k !== "settings")).map((k) => (
@@ -60,5 +62,6 @@ export function ResearchApp({ d, canEdit, initial, add, settings }: { d: Researc
       {tab === "add" && add}
       {tab === "settings" && settings}
     </div>
+    </RunningCtx.Provider>
   );
 }

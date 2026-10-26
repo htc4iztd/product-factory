@@ -45,8 +45,9 @@ export async function updateLibrary(n: number, _: Result | undefined, f: FormDat
   return {};
 }
 
-export async function startUpdate(n: number): Promise<Result> {
-  const r = await run(() => agent<JobRun>(`/research/${n}/update`, { method: "POST" }));
+// scope：all（すべて）| articles | issues | players | tech | industry | public
+export async function startUpdate(n: number, scope = "all"): Promise<Result> {
+  const r = await run(() => agent<JobRun>(`/research/${n}/update`, { method: "POST", body: { scope } }));
   if ("error" in r) return r;
   revalidatePath(`/research/${n}`);
   return {};
@@ -71,13 +72,6 @@ export async function analyze(n: number, question: string, filters: Record<strin
   if ("error" in r) return r;
   revalidatePath(`/research/${n}`);
   return { note: r.ok };
-}
-
-export async function refreshIssues(n: number): Promise<Result> {
-  const r = await run(() => agent(`/research/${n}/issues/refresh`, { method: "POST" }));
-  if ("error" in r) return r;
-  revalidatePath(`/research/${n}`);
-  return {};
 }
 
 // 発言の上限に収まるよう、行の切れ目で切る
@@ -135,12 +129,6 @@ export async function savePlayer(n: number, id: number | null, body: PlayerInput
 }
 export async function deletePlayer(n: number, id: number): Promise<Result> {
   return act(n, () => agent(`/research/${n}/players/${id}`, { method: "DELETE" }));
-}
-export async function suggestPlayers(n: number): Promise<Result & { count?: number }> {
-  const r = await run(() => agent<{ players: unknown[] }>(`/research/${n}/players/suggest`, { method: "POST" }));
-  if ("error" in r) return r;
-  revalidatePath(`/research/${n}`);
-  return { count: r.ok.players.length };
 }
 export async function createReport(n: number, kind: string, title: string, instructions: string): Promise<Result> {
   return act(n, () => agent(`/research/${n}/reports`, { method: "POST", body: { kind, title, instructions } }));

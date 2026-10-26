@@ -1,9 +1,10 @@
 "use client";
 import { useState, useTransition } from "react";
-import { Plus, Sparkles } from "lucide-react";
+import { Plus } from "lucide-react";
 import type { ResearchData, ResearchPlayer } from "@/lib/agent";
 import type { Model } from "./model";
-import { deletePlayer, savePlayer, suggestPlayers, type PlayerInput } from "@/app/(app)/research/actions";
+import { deletePlayer, savePlayer, type PlayerInput } from "@/app/(app)/research/actions";
+import { UpdateButton } from "@/components/knowledge/ResearchBits";
 
 const HOT = "#ef4444", WARM = "#f59e0b", COOL = "#60a5fa", NONE = "#d4d4d8";
 const days = (d: string) => (d ? (Date.now() - Date.parse(`${d}T00:00:00+09:00`)) / 864e5 : Infinity);
@@ -41,7 +42,6 @@ function PlayerForm({ n, d, p, onDone }: { n: number; d: ResearchData; p: Resear
 export function PlayersTab({ n, d, M, canEdit }: { n: number; d: ResearchData; M: Model; canEdit: boolean }) {
   const [sel, setSel] = useState<number | null>(null);
   const [form, setForm] = useState<"new" | number | null>(null);
-  const [msg, setMsg] = useState<string | null>(null);
   const [pending, start] = useTransition();
   const arts = (p: ResearchPlayer) => M.arts.filter((a) => a.ent.includes(p.name));
   const last = (p: ResearchPlayer) => { const m = arts(p)[0]?.published ?? ""; const b = p.latest?.d ?? ""; return m > b ? m : b; };
@@ -59,18 +59,15 @@ export function PlayersTab({ n, d, M, canEdit }: { n: number; d: ResearchData; M
         </div>
         {canEdit && (
           <div className="ml-auto flex gap-2">
-            <button disabled={pending} className="btn-secondary btn-sm" onClick={() => start(async () => { const r = await suggestPlayers(n); setMsg(r.error ?? `${r.count ?? 0}件を足しました`); })}>
-              <Sparkles size={13} />{pending ? "探しています…" : "記事によく出る企業から足す"}
-            </button>
+            <UpdateButton n={n} scope="players" label="プレーヤーを更新" title="テーマの主要なプレーヤーを Web 検索と記事集から調べて足し、空の項目を埋め、最新の動きを書き換える" />
             <button className="btn-secondary btn-sm" onClick={() => setForm("new")}><Plus size={13} />プレーヤーを足す</button>
           </div>
         )}
       </div>
-      {msg && <p className="text-xs text-zinc-600">{msg}</p>}
       {form === "new" && <PlayerForm n={n} d={d} p={null} onDone={() => setForm(null)} />}
       <div className="grid gap-4 lg:grid-cols-[1fr_340px]">
         <div className="space-y-3">
-          {M.players.length === 0 && <p className="text-sm text-zinc-400">プレーヤーがまだ登録されていない。「記事によく出る企業から足す」か「プレーヤーを足す」から。</p>}
+          {M.players.length === 0 && <p className="text-sm text-zinc-400">プレーヤーがまだ登録されていない。「プレーヤーを更新」で AI が調べて足す。手で足すときは「プレーヤーを足す」から。</p>}
           {order.filter((l) => by[l]).map((l) => (
             <div key={l} className="card p-3">
               <h4 className="mb-2 text-[12px] font-semibold text-zinc-600">{l}</h4>

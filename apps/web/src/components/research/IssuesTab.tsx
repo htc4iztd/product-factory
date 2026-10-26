@@ -2,7 +2,7 @@
 import { useState } from "react";
 import type { ResearchData } from "@/lib/agent";
 import { type Model, pct, periods } from "./model";
-import { RefreshIssues } from "@/components/knowledge/ResearchBits";
+import { UpdateButton } from "@/components/knowledge/ResearchBits";
 
 const STANCE: Record<string, string> = { 推進: "bg-emerald-50 text-emerald-700", 慎重: "bg-rose-50 text-rose-700", 中立: "bg-zinc-100 text-zinc-600" };
 
@@ -39,7 +39,7 @@ export function IssuesTab({ n, d, M, canEdit }: { n: number; d: ResearchData; M:
         <nav className="flex flex-wrap gap-1" aria-label="論点へ移動">
           {keys.map((k) => <a key={k} href={`#iss-${encodeURIComponent(k)}`} className="rounded-full border border-zinc-200 bg-white px-2 py-0.5 text-[11px] text-zinc-600 hover:border-brand-200">{k}（{count(k)}）</a>)}
         </nav>
-        {canEdit && <span className="ml-auto"><RefreshIssues n={n} /></span>}
+        {canEdit && <span className="ml-auto"><UpdateButton n={n} scope="issues" label="論点を更新" title="すべての論点のまとめを、いまの記事から書き直す" /></span>}
       </div>
       {keys.map((k) => {
         const note = d.issue_notes[k];
@@ -63,7 +63,7 @@ export function IssuesTab({ n, d, M, canEdit }: { n: number; d: ResearchData; M:
               </div>
             </div>
             {!S ? (
-              <p className="text-[12px] text-zinc-400">{note ? "（以前の形式のまとめ）" : "まだまとめがない。記事が入ると「更新」のときに書く（「まとめを書き直す」でもすぐに書ける）。"}</p>
+              <p className="text-[12px] text-zinc-400">{note ? "（以前の形式のまとめ）" : "まだまとめがない。記事が入ると「すべて更新」のときに書く（「論点を更新」でもすぐに書ける）。"}</p>
             ) : (
               <>
                 <p className="text-[14px] font-medium leading-relaxed">{S.headline}</p>

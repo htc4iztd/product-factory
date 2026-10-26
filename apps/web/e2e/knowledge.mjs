@@ -96,6 +96,7 @@ await btn("メモを追加").click();
 await page.getByLabel("メモ", { exact: true }).fill("②市場分析の根拠に使う");
 await btn("保存", true).click();
 await page.getByText("②市場分析の根拠に使う").waitFor();
+await page.getByLabel("メモ", { exact: true }).waitFor({ state: "detached" });
 await btn("この記事に質問する").click();
 await page.getByLabel("この記事への質問").fill("誰が調べた？");
 await btn("質問を送る").click();
@@ -116,8 +117,8 @@ const [csv] = await Promise.all([page.waitForEvent("download"), btn("CSVで保�
 if (!fs.readFileSync(await csv.path(), "utf8").includes("48%")) throw new Error("CSV にファクトがない");
 await shot("k5-facts", true);
 await tab("プレーヤー").click();
-await btn("記事によく出る企業から足す").click();
-await page.getByText("1件を足しました").waitFor();
+await btn("プレーヤーを更新").click();
+await page.getByRole("button", { name: /調査会社/ }).first().waitFor({ timeout: 40000 });
 await page.getByRole("button", { name: /調査会社/ }).first().click();
 await page.getByText("記事集での登場 1件").waitFor();
 await shot("k5b-players", true);
@@ -152,6 +153,15 @@ await page.getByLabel("問い").fill("利用は広がっているか");
 await btn("分析する").click();
 await page.getByRole("heading", { name: "利用は広がっているか", level: 3 }).waitFor();
 await shot("k6c-ana-ask", true);
+// すべて更新：記事 → 論点・プレーヤー・調査レポートを1つのジョブで（工程はジョブの画面で見られる）
+await btn("すべて更新").click();
+await btn("更新中…").first().waitFor();
+await btn("すべて更新").waitFor({ timeout: 90000 });
+await page.goto(`${BASE}/jobs?kind=research`);
+await page.getByRole("link", { name: "リサーチライブラリの更新", exact: true }).first().click();
+await page.locator(".react-flow__node").filter({ hasText: "公的データのレポート" }).waitFor();
+await shot("k7b-update-all-job");
+await page.goto(`${BASE}/research/${lib}`);
 // 記事を選んで PowerPoint に
 await tab("ニュース").click();
 await page.getByLabel("この記事を選択").first().check();

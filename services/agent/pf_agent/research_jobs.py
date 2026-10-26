@@ -14,8 +14,9 @@ from pydantic import BaseModel
 from sqlalchemy import func, select
 
 from . import jobs, llm, llmconf, repo
-from .db import JobRun, ResearchArticle, ResearchLibrary, ResearchQuestion, ResearchReport, session
+from .db import JobRun, ResearchArticle, ResearchLibrary, ResearchPlayer, ResearchQuestion, ResearchReport, session
 from .research import (
+    DEFAULT_LAYERS,
     ResearchError,
     _digest,
     _lib,
@@ -389,6 +390,39 @@ def delete_report(tenant: str, rid: int) -> None:
         s.commit()
 
 
+def _topic(lib: ResearchLibrary, title: str, instr: str) -> str:
+    return f"テーマ：{lib.name}（{lib.description}）\nレポート：{title}\n" + (f"指示：{instr}\n" if instr else "")
+
+
+def report_research(conn, lib: ResearchLibrary, kind: str, title: str, instr: str) -> tuple[str, list, str]:
+    """調査レポートの下調べ：検索が使える接続なら Web 検索で公開資料を読む。返り値は（メモ, 出典, 根拠の種類）。"""
+    if conn.provider == "stub":
+        return "", [], "stub"
+    if not can_search(conn):
+        return "", [], "knowledge"
+    notes, sources = grounded(
+        conn, f"{_topic(lib, title, instr)}\n{ASK[kind]}\n出典の URL と確認できた日付を本文に残してください。"
+    )
+    return notes, sources[:40], "search"
+
+
+def report_structure(
+    conn, lib: ResearchLibrary, arts: list, kind: str, title: str, instr: str, notes: str, basis: str
+) -> dict:
+    """下調べのメモと記事集を根拠に、種類ごとの形にまとめる。"""
+    if basis == "stub":
+        return _stub_report(kind, title)
+    prompt = (
+        f"{_topic(lib, title, instr)}\n{ASK[kind]}\n下の調査メモと記事集の要約を根拠に、項目を日本語で埋めてください。"
+        "根拠にないことは書かない。数字・日付・URL は根拠から写す。\n\n"
+        f"## 調査メモ\n{notes or '（なし）'}\n\n## 記事集\n{_digest(arts, 80)}"
+    )
+    return llm._json(conn, conn.chat_model, prompt, SCHEMAS[kind]).model_dump()
+
+
+BASIS_NOTE = {"knowledge": "検索が使えない接続のため、記事集と AI の知識から", "stub": "スタブ"}
+
+
 def run_report(job_id: str) -> None:
     with session() as s:
         j = s.get(JobRun, job_id)
@@ -397,43 +431,17 @@ def run_report(job_id: str) -> None:
         r.status = "running"
         s.commit()
         rid, kind, title, instr, tenant = r.id, r.kind, r.title, r.instructions, r.tenant_id
-        lib_name, lib_desc = lib.name, lib.description
         arts = list(s.execute(select(ResearchArticle).where(ResearchArticle.library_id == lib.id)).scalars())
+        s.expunge(lib)
     conn = llmconf.resolve(tenant)
-    topic = f"テーマ：{lib_name}（{lib_desc}）\nレポート：{title}\n" + (f"指示：{instr}\n" if instr else "")
     try:
         with jobs.task(job_id, "research"):
-            notes, sources, basis = "", [], "stub"
-            if conn.provider != "stub" and can_search(conn):
-                notes, sources = grounded(
-                    conn, f"{topic}\n{ASK[kind]}\n出典の URL と確認できた日付を本文に残してください。"
-                )
-                basis = "search"
-            elif conn.provider != "stub":
-                basis = "knowledge"
-            jobs.set_task(
-                job_id,
-                "research",
-                detail=f"出典 {len(sources)}件"
-                if sources
-                else {"knowledge": "検索が使えない接続のため、記事集と AI の知識から", "stub": "スタブ"}[basis],
-            )
+            notes, sources, basis = report_research(conn, lib, kind, title, instr)
+            jobs.set_task(job_id, "research", detail=f"出典 {len(sources)}件" if sources else BASIS_NOTE.get(basis, ""))
         with jobs.task(job_id, "structure"):
-            if basis == "stub":
-                data = _stub_report(kind, title)
-            else:
-                prompt = (
-                    f"{topic}\n{ASK[kind]}\n下の調査メモと記事集の要約を根拠に、項目を日本語で埋めてください。"
-                    "根拠にないことは書かない。数字・日付・URL は根拠から写す。\n\n"
-                    f"## 調査メモ\n{notes or '（なし）'}\n\n## 記事集\n{_digest(arts, 80)}"
-                )
-                data = llm._json(conn, conn.chat_model, prompt, SCHEMAS[kind]).model_dump()
+            data = report_structure(conn, lib, arts, kind, title, instr, notes, basis)
             jobs.set_task(job_id, "structure", detail=data.get("summary", "")[:120])
-        with session() as s:
-            r = s.get(ResearchReport, rid)
-            r.status, r.data, r.sources, r.basis = "done", data, sources[:40], basis
-            r.checked = dt.date.today().isoformat()
-            s.commit()
+        _save_report(rid, data, sources, basis)
         repo.log(
             None,
             None,
@@ -449,6 +457,160 @@ def run_report(job_id: str) -> None:
     except Exception as e:
         _r_error(rid, getattr(e, "message", None) or str(e)[:300] or type(e).__name__)
         raise
+
+
+def _save_report(rid: int, data: dict, sources: list, basis: str) -> None:
+    with session() as s:
+        r = s.get(ResearchReport, rid)
+        r.status, r.data, r.sources, r.basis, r.error = "done", data, sources, basis, ""
+        r.checked = dt.date.today().isoformat()
+        s.commit()
+
+
+def refresh_report(conn, tenant: str, user: str, lib_id: int, kind: str) -> dict:
+    """ライブラリの更新から：その種類のいちばん新しいレポートを作り直す（なければ作る）。"""
+    with session() as s:
+        lib = s.get(ResearchLibrary, lib_id)
+        r = (
+            s.execute(
+                select(ResearchReport)
+                .where(ResearchReport.library_id == lib_id, ResearchReport.kind == kind)
+                .order_by(ResearchReport.number.desc())
+            )
+            .scalars()
+            .first()
+        )
+        if r is None:
+            n = (
+                s.execute(select(func.max(ResearchReport.number)).where(ResearchReport.tenant_id == tenant)).scalar()
+                or 0
+            ) + 1
+            r = ResearchReport(
+                tenant_id=tenant, library_id=lib_id, number=n, kind=kind, title=KINDS[kind], created_by=user
+            )
+            s.add(r)
+        r.status, r.error = "running", ""
+        s.commit()
+        rid, title, instr = r.id, r.title, r.instructions
+        arts = list(s.execute(select(ResearchArticle).where(ResearchArticle.library_id == lib_id)).scalars())
+        s.expunge(lib)
+    try:
+        notes, sources, basis = report_research(conn, lib, kind, title, instr)
+        data = report_structure(conn, lib, arts, kind, title, instr, notes, basis)
+    except Exception as e:
+        _r_error(rid, getattr(e, "message", None) or str(e)[:300] or type(e).__name__)
+        raise
+    _save_report(rid, data, sources, basis)
+    with session() as s:
+        return report_dict(s.get(ResearchReport, rid))
+
+
+# ---------------- プレーヤーを調べる ----------------
+class ExPlayer(BaseModel):
+    name: str
+    aliases: list[str]  # 記事の中での呼び方（略称・英語名など）
+    layer: str  # ライブラリの層から1つ
+    region: str  # ISO 2文字
+    role: str  # 役割（1行）
+    detail: str  # このテーマでの取り組み（2〜3文）
+    stance: str  # 推進・様子見・慎重・拒否 など
+    tags: list[str]  # 対応する規格・製品
+
+
+class ExPlayers(BaseModel):
+    players: list[ExPlayer]
+
+
+def research_players(conn, tenant: str, user: str, number: int) -> tuple[int, int]:
+    """テーマの主要なプレーヤーを、層・役割・姿勢・対応規格つきで調べて足す（既にあれば空の項目を埋める）。
+    検索が使える接続なら Web 検索、そうでなければ記事集から。"""
+    with session() as s:
+        lib = _lib(s, tenant, number)
+        layers = lib.layers or DEFAULT_LAYERS
+        have = {
+            p.name: p.id for p in s.execute(select(ResearchPlayer).where(ResearchPlayer.library_id == lib.id)).scalars()
+        }
+        arts = list(s.execute(select(ResearchArticle).where(ResearchArticle.library_id == lib.id)).scalars())
+        lib_id, name, desc, entities = lib.id, lib.name, lib.description, list(lib.entities or [])
+    if conn.provider == "stub":
+        from collections import Counter
+
+        cnt = Counter(e for a in arts for e in (a.entities or []))
+        found = [
+            ExPlayer(name=e, aliases=[], layer=layers[0], region="", role="", detail="", stance="", tags=[])
+            for e, _ in cnt.most_common(20)
+        ]
+        found += [
+            ExPlayer(name=e, aliases=[], layer=layers[0], region="", role="", detail="", stance="", tags=[])
+            for e in entities
+            if e not in cnt
+        ]
+    else:
+        notes = ""
+        ask = (
+            f"テーマ「{name}」（{desc}）の主要なプレーヤー（企業・団体・規格団体・当局・調査会社など）を、"
+            f"次の層ごとに挙げてください：{'、'.join(layers)}。それぞれ、役割、このテーマでの取り組み、"
+            "姿勢（推進・様子見・慎重・拒否など）、対応する規格や製品、本拠の国を書いてください。最大40社。"
+            + (f"必ず含める企業・団体：{'、'.join(entities)}。" if entities else "")
+        )
+        if can_search(conn):
+            notes, _ = grounded(conn, ask)
+        prompt = (
+            ask + "\n下の調査メモと記事集を根拠に、項目を日本語で埋めてください。layer は上の層のどれか。"
+            "根拠にないことは書かない（分からない項目は空）。\n\n"
+            f"## 調査メモ\n{notes or '（なし）'}\n\n## 記事集\n{_digest(arts, 120)}\n\n"
+            f"## 登録済みのプレーヤー\n{'、'.join(have) or '（なし）'}"
+        )
+        found = llm._json(conn, conn.summary_model, prompt, ExPlayers).players
+    added = filled = 0
+    with session() as s:
+        cur = {
+            p.name: p for p in s.execute(select(ResearchPlayer).where(ResearchPlayer.library_id == lib_id)).scalars()
+        }
+        alias = {a: p for p in cur.values() for a in (p.aliases or [])}
+        for x in found[:60]:
+            nm = x.name.strip()
+            if not nm:
+                continue
+            p = cur.get(nm) or alias.get(nm)
+            layer = x.layer if x.layer in layers else layers[-1]
+            if p is None:
+                p = ResearchPlayer(
+                    tenant_id=tenant,
+                    library_id=lib_id,
+                    name=nm[:200],
+                    aliases=x.aliases[:20],
+                    layer=layer,
+                    region=x.region[:8],
+                    role=x.role[:300],
+                    detail=x.detail[:5000],
+                    stance=x.stance[:100],
+                    tags=x.tags[:20],
+                    updated_by=f"ai ({user})",
+                )
+                s.add(p)
+                cur[nm] = p
+                added += 1
+                continue
+            changed = False
+            for k, v, n in (
+                ("layer", layer, 100),
+                ("region", x.region, 8),
+                ("role", x.role, 300),
+                ("detail", x.detail, 5000),
+                ("stance", x.stance, 100),
+            ):
+                if v and not getattr(p, k):
+                    setattr(p, k, v[:n])
+                    changed = True
+            for k, v in (("aliases", x.aliases), ("tags", x.tags)):
+                more = [t for t in v if t not in (getattr(p, k) or [])]
+                if more:
+                    setattr(p, k, [*(getattr(p, k) or []), *more][:20])
+                    changed = True
+            filled += 1 if changed else 0
+        s.commit()
+    return added, filled
 
 
 def _r_error(rid: int, msg: str) -> None:

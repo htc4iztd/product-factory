@@ -5,6 +5,7 @@ import type { ResearchData } from "@/lib/agent";
 import { type Model, csvDownload } from "./model";
 import { Seg } from "./NewsTab";
 import { deleteFact } from "@/app/(app)/research/actions";
+import { UpdateButton } from "@/components/knowledge/ResearchBits";
 
 // ファクトDB：記事に書かれた数字を1件ずつの行にした一覧。絞り込んだまま CSV にできる
 export function FactsTab({ n, d, M, canEdit, art, setArt }: { n: number; d: ResearchData; M: Model; canEdit: boolean; art: string; setArt: (k: string) => void }) {
@@ -31,7 +32,8 @@ export function FactsTab({ n, d, M, canEdit, art, setArt }: { n: number; d: Rese
   const a0 = art ? M.byKey[art] : null;
   return (
     <section className="space-y-3">
-      <p className="text-[13px] text-zinc-500">記事に書かれた調査結果・市場規模・利用実績などの数字を、1件ずつの行にした一覧。「原文確認」は、引用が記事の本文にそのまま見つかったもの。数字を使う前にリンク先で確かめてほしい。</p>
+      <p className="text-[13px] text-zinc-500">記事に書かれた調査結果・市場規模・利用実績などの数字を、1件ずつの行にした一覧。「原文確認」は、引用が記事の本文にそのまま見つかったもの。数字を使う前にリンク先で確かめてほしい。ファクトは記事の更新のときに増える。</p>
+      {canEdit && <div className="flex justify-end"><UpdateButton n={n} scope="articles" label="記事を更新" /></div>}
       <div className="flex flex-wrap items-center gap-2" role="search">
         <input type="search" value={q} onChange={(e) => setQ(e.target.value)} placeholder="キーワード（何の数字か・出典・企業名）" aria-label="ファクトのキーワード検索" className="input h-8 w-64 text-[12px]" />
         <Seg value={reg} items={[["all", "すべて"], ["jp", "国内"], ["ov", "海外"]]} onChange={setReg} />

@@ -900,7 +900,46 @@ def add_article(
 
 
 # ---------------- 更新（ジョブ） ----------------
-def start_update(tenant: str, user: str, number: int) -> dict:
+# 更新の範囲：すべて・記事（とファクト）・論点・プレーヤー・調査レポート（技術・業界・公的データ）
+SCOPES = {
+    "all": "すべて",
+    "articles": "記事とファクト",
+    "issues": "論点",
+    "players": "プレーヤー",
+    "tech": "技術調査",
+    "industry": "業界調査",
+    "public": "公的データ",
+}
+REPORT_SCOPES = ("tech", "industry", "public")
+
+
+def update_tasks(scope: str) -> list[dict]:
+    """更新の工程（依存関係つき）。「すべて」は記事を集めてから、論点・プレーヤー・調査レポートを作る。"""
+    every = scope == "all"
+    after = ["read"] if every else []
+    out: list[dict] = []
+    if every or scope == "articles":
+        out += [
+            {"id": "search", "name": "AI の検索", "deps": []},
+            {"id": "feeds", "name": "RSS・ページ", "deps": []},
+            {"id": "read", "name": "記事を読む・ファクトを抜き出す", "deps": ["search", "feeds"]},
+        ]
+    if every or scope == "issues":
+        out.append({"id": "issues", "name": "論点のまとめ", "deps": after})
+    if every or scope == "players":
+        out.append({"id": "players", "name": "プレーヤーを調べる", "deps": after})
+    if every or scope in ("articles", "players"):
+        deps = ["players"] if (every or scope == "players") else ["read"]
+        out.append({"id": "latest", "name": "プレーヤーの最新の動き", "deps": deps})
+    for k in REPORT_SCOPES:
+        if every or scope == k:
+            out.append({"id": f"report-{k}", "name": f"{SCOPES[k]}のレポート", "deps": after})
+    return out
+
+
+def start_update(tenant: str, user: str, number: int, scope: str = "all") -> dict:
+    if scope not in SCOPES:
+        raise ResearchError(422, f"更新の範囲は {list(SCOPES)} のどれか")
     with session() as s:
         lib = _lib(s, tenant, number)
         busy = (
@@ -913,35 +952,73 @@ def start_update(tenant: str, user: str, number: int) -> dict:
             .all()
         )
         if any(j.params.get("library") == lib.id for j in busy):
-            raise ResearchError(409, "このライブラリは更新中です")
+            raise ResearchError(409, "このライブラリは更新中です。終わってから次を始めてください")
         lib_id, name = lib.id, lib.name
     conn = llmconf.resolve(tenant)
+    tasks = update_tasks(scope)
     job_id = jobs.create(
         "research",
         tenant,
         None,
         user,
-        {"library": lib_id, "number": number, "name": name},
-        total=3 + MAX_NEW,
+        {"library": lib_id, "number": number, "name": name, "scope": scope},
+        total=len(tasks) + (MAX_NEW if any(t["id"] == "read" for t in tasks) else 0),
         model=conn.summary_model,
-        tasks=[
-            {"id": "search", "name": "AI の検索", "deps": []},
-            {"id": "feeds", "name": "RSS・ページ", "deps": []},
-            {"id": "read", "name": "記事を読む・ファクトを抜き出す", "deps": ["search", "feeds"]},
-            {"id": "issues", "name": "論点のまとめ", "deps": ["read"]},
-            {"id": "players", "name": "プレーヤーの最新の動き", "deps": ["read"]},
-        ],
+        tasks=tasks,
     )
     jobs.dispatch(job_id)
     return jobs.run_dict(job_id)
 
 
 def run_update(job_id: str) -> None:
+    """更新ジョブ：範囲（scope）に入っている工程だけを、依存の順に動かす。"""
     with session() as s:
         j = s.get(JobRun, job_id)
         lib = s.get(ResearchLibrary, j.params["library"])
-        user = j.created_by
+        user, number = j.created_by, int(j.params["number"])
+        scope = j.params.get("scope", "all")
+        ids = {t["id"] for t in j.tasks or []}
     conn = llmconf.resolve(lib.tenant_id)
+    if "read" in ids:
+        _collect_articles(job_id, lib, conn, user)
+    if "issues" in ids:
+        with jobs.task(job_id, "issues"):
+            # 論点だけの更新はすべて書き直す。「すべて」のときは新しい記事が3件以上入った論点と、古い形式のまとめだけ
+            rewritten = refresh_issue_notes(lib.tenant_id, lib.id, user, force=scope == "issues")
+            jobs.set_task(job_id, "issues", detail="、".join(rewritten) or "書き直しなし")
+        jobs.step(job_id, f"論点のまとめを書き直しました：{'、'.join(rewritten) or 'なし'}")
+    from . import research_jobs  # 調査レポート・プレーヤーの調査（research_jobs は research を使うので、ここで読む）
+
+    if "players" in ids:
+        with jobs.task(job_id, "players"):
+            added, filled = research_jobs.research_players(conn, lib.tenant_id, user, number)
+            jobs.set_task(job_id, "players", detail=f"新しく {added}件・情報を足した {filled}件")
+        jobs.step(job_id, f"プレーヤー：新しく {added}件・情報を足した {filled}件")
+    if "latest" in ids:
+        with jobs.task(job_id, "latest"):
+            moved = _refresh_latest(lib.tenant_id, number)
+            jobs.set_task(job_id, "latest", detail=f"{moved}件")
+    failed = []
+    for k in REPORT_SCOPES:
+        if f"report-{k}" not in ids:
+            continue
+        try:
+            with jobs.task(job_id, f"report-{k}"):
+                r = research_jobs.refresh_report(conn, lib.tenant_id, user, lib.id, k)
+                jobs.set_task(job_id, f"report-{k}", detail=f"{r['key']}：{(r['data'] or {}).get('summary', '')[:100]}")
+            jobs.step(job_id, f"{SCOPES[k]}のレポートを更新しました")
+        except jobs.Cancelled:
+            raise
+        except Exception as e:  # noqa: BLE001  1つのレポートの失敗で、ほかのレポートを止めない（工程は失敗として残る）
+            failed.append(SCOPES[k])
+            jobs.step(job_id, f"{SCOPES[k]}のレポートを作れません：{str(e)[:200]}")
+    if failed and ids == {f"report-{k}" for k in REPORT_SCOPES if SCOPES[k] in failed}:
+        # レポートだけの更新で、すべて作れなかったときはジョブを失敗にする
+        raise ResearchError(502, f"レポートを作れませんでした（{'、'.join(failed)}）")
+
+
+def _collect_articles(job_id: str, lib: ResearchLibrary, conn: Conn, user: str) -> None:
+    """記事を集めて読む（AI の検索・RSS・指定ページ → 記事とファクト）。"""
     # 期間の始まりを決めていればそこから（集めた記事は URL で重ねない）、なければ最新の記事の日付から
     since = lib.since or lib.latest
     with session() as s:
@@ -1079,18 +1156,6 @@ def run_update(job_id: str) -> None:
             f"・期間より前 {old}件・読めない {failed}件",
         )
     jobs.step(job_id, f"新しい記事 {added}件")
-    with jobs.task(job_id, "issues"):
-        rewritten = refresh_issue_notes(lib.tenant_id, lib.id, user, force=False)
-        jobs.set_task(job_id, "issues", detail="、".join(rewritten) or "書き直しなし")
-    jobs.step(job_id, f"論点のまとめを書き直しました：{'、'.join(rewritten) or 'なし'}")
-    with jobs.task(job_id, "players"):
-        moved = _refresh_latest(lib.tenant_id, j_number(job_id))
-        jobs.set_task(job_id, "players", detail=f"{moved}件")
-
-
-def j_number(job_id: str) -> int:
-    with session() as s:
-        return int(s.get(JobRun, job_id).params["number"])
 
 
 def refresh_issue_notes(tenant: str, lib_id: int, user: str, force: bool) -> list[str]:
@@ -1104,7 +1169,8 @@ def refresh_issue_notes(tenant: str, lib_id: int, user: str, force: bool) -> lis
             .where(ResearchNote.library_id == lib_id, ResearchNote.kind == "issue")
             .order_by(ResearchNote.id)
         ).scalars():
-            notes[n.title] = n.articles
+            # 以前の形式（構造のない）まとめは、次の機会に書き直す
+            notes[n.title] = n.articles if n.data else -REWRITE_AFTER
     conn = llmconf.resolve(tenant)
     done = []
     for issue in lib.issues or []:
