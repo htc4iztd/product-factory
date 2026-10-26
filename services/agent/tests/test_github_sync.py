@@ -1,4 +1,5 @@
 """チケットと GitHub Issues の同期（GitHub は呼ばず、手元の偽物で確かめる）。"""
+import datetime as dt
 import importlib
 import itertools
 import re
@@ -18,12 +19,15 @@ class FakeGitHub:
         self.issues: dict[int, dict] = {}
         self.comments: dict[int, list[dict]] = {}
         self.clock = itertools.count(1)
+        self.start = dt.datetime.now(dt.UTC) + dt.timedelta(minutes=1)
         self.ids = itertools.count(1000)
         self.calls: list[tuple[str, str]] = []
         self.tokens: list[str | None] = []
 
     def ts(self):
-        return f"2026-10-26T00:00:{next(self.clock):02d}Z"
+        # 実際の時刻より後に進める（固定の日付だと、その日を過ぎると「前回より新しい」にならない）
+        t = self.start + dt.timedelta(seconds=next(self.clock))
+        return t.strftime("%Y-%m-%dT%H:%M:%SZ")
 
     def issue(self, n, **kw):
         i = self.issues[n]
