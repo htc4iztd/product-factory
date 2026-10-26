@@ -1,11 +1,14 @@
 """プロダクト・キャンバス：プロダクトの全体像を1枚の絵にする。
 
 絵の元にするのは、①リーンキャンバスと④バリュープロポジションの値（最新版があれば最新版、
-なければ下書き）。プロンプトは場面を文章で描写し、画像の中に文字を描かせない
-（日本語の文字は崩れやすく、誤読の元になるため）。
+なければ下書き）。プロンプトは場面を文章で描写する。写真風・画面・コンセプトの絵には文字を描かせない
+（見出しのない絵に崩れた文字が入ると誤読の元になるため）。グラレコは、顧客・課題・価値提案・ソリューションを
+日本語の見出しと短い言葉で描かせる（今の画像モデルは日本語を描ける）。
+作る人の追加の指示は、決めてある画風や条件より優先する。
 
 画像を描けるのは Gemini（API / Vertex AI）の接続だけ。それ以外の接続やキーがない環境ではスタブ（SVG）を返す。
 """
+
 from __future__ import annotations
 
 from xml.sax.saxutils import escape
@@ -18,6 +21,7 @@ KINDS = {
     "scene": "利用シーン",
     "ui": "画面イメージ",
     "concept": "コンセプト",
+    "graphic": "グラレコ",
 }
 
 # 絵に使う項目（ステージ, 項目, 表示名）
@@ -52,17 +56,51 @@ def summary(product_id: str) -> list[dict]:
         if not run.enabled:
             continue
         art = repo.confirmed_artifact(product_id, sid)
-        data, source = (art.data, f"v{art.version}") if art is not None and art.data else (
-            repo.draft(product_id, sid), "下書き")
+        data, source = (
+            (art.data, f"v{art.version}") if art is not None and art.data else (repo.draft(product_id, sid), "下書き")
+        )
         value = _text((data or {}).get(key))
         if value:
-            out.append({"stage": f"{STAGE_BY_ID[sid].no}{STAGE_BY_ID[sid].name}", "label": label,
-                        "value": value, "source": source})
+            out.append(
+                {
+                    "stage": f"{STAGE_BY_ID[sid].no}{STAGE_BY_ID[sid].name}",
+                    "label": label,
+                    "value": value,
+                    "source": source,
+                }
+            )
     return out
 
 
+def _graphic_prompt(name: str, idea: str, facts: list[dict], note: str) -> str:
+    """グラレコ（グラフィックレコーディング）：見出しと短い言葉を日本語で描かせる。画像モデルに日本語で頼む。"""
+    by = {f["label"]: f["value"] for f in facts}
+    parts = [
+        ("顧客", by.get("顧客") or by.get("狙う顧客")),
+        ("課題", by.get("課題")),
+        ("独自の価値提案", by.get("独自の価値提案")),
+        ("ソリューション", by.get("ソリューション")),
+    ]
+    body = "\n".join(f"- {h}：{v}" for h, v in parts if v) or f"- 意図：{idea}"
+    extra = f"\n作る人からの追加の指示（決めてある画風や条件より優先する）：{note}" if note.strip() else ""
+    return (
+        f"「{name}」を説明する、グラフィックレコーディング（グラレコ）風の1枚の絵を描いてください。\n"
+        "画風：白っぽい紙に、太さの違うマーカーで手描きしたイラスト。やわらかい色（青・緑・オレンジ）で塗り、"
+        "人物は簡単な線画、アイコン・矢印・吹き出し・見出しの帯で流れを示す。\n"
+        "構成：いちばん上に大きな題（プロダクト名）。左上に「顧客」（困っている人物と吹き出し）、右上に「課題」、"
+        "中央に「独自の価値提案」（橋や道など、課題から解決へ渡るたとえ）、下に「ソリューション」（しくみの図と、"
+        "解決後の笑顔の人物）。各まとまりを矢印でつなぐ。\n"
+        "文字：日本語で、見出しと短い言葉（1つ20字くらいまで）だけを書く。下の内容を短く言い換えて使い、"
+        "それ以外の文や数字を作らない。文字は正確に、読みやすく。\n"
+        f"内容：\n{body}{extra}\n"
+        "条件：実在の企業名・ロゴ・実在の人物は描かない。透かしを入れない。横長 16:9。"
+    )
+
+
 def build_prompt(kind: str, name: str, idea: str, facts: list[dict], note: str) -> str:
-    """場面を文章で描く。事実は日本語のまま渡し、絵の中には文字を描かせない。"""
+    """場面を文章で描く。事実は日本語のまま渡す。グラレコ以外は、絵の中に文字を描かせない。"""
+    if kind == "graphic":
+        return _graphic_prompt(name, idea, facts, note)
     context = "\n".join(f"- {f['label']}: {f['value']}" for f in facts) or f"- 意図: {idea}"
     scene = {
         "scene": (
@@ -86,10 +124,15 @@ def build_prompt(kind: str, name: str, idea: str, facts: list[dict], note: str) 
             "with an indigo accent, gentle global illumination, generous negative space, centered composition."
         ),
     }[kind]
-    extra = f"\nAdditional direction from the builder (Japanese): {note}" if note.strip() else ""
+    extra = (
+        f"\nAdditional direction from the builder (Japanese). It takes priority over the style and constraints "
+        f"above and below when they conflict: {note}"
+        if note.strip()
+        else ""
+    )
     return (
         f"{scene}\n\n"
-        f"Product: \"{name}\". Product context (Japanese, for understanding only — do not write it in the image):\n"
+        f'Product: "{name}". Product context (Japanese, for understanding only — do not write it in the image):\n'
         f"{context}{extra}\n\n"
         "Constraints: no text, letters or numbers anywhere in the image; no watermark; no logos or real brand "
         "names; no recognizable real people. Aspect ratio 16:9."
@@ -98,7 +141,7 @@ def build_prompt(kind: str, name: str, idea: str, facts: list[dict], note: str) 
 
 def _stub_svg(name: str, kind: str, facts: list[dict]) -> bytes:
     uvp = next((f["value"] for f in facts if f["label"] == "独自の価値提案"), "") or "プロダクトの全体像"
-    lines = [uvp[i:i + 26] for i in range(0, min(len(uvp), 78), 26)]
+    lines = [uvp[i : i + 26] for i in range(0, min(len(uvp), 78), 26)]
     tspans = "".join(f'<tspan x="80" dy="{0 if i == 0 else 44}">{escape(t)}</tspan>' for i, t in enumerate(lines))
     return f"""<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="900" viewBox="0 0 1600 900">
 <defs><linearGradient id="g" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#eef0fe"/>
@@ -116,11 +159,14 @@ def generate(conn: Conn, kind: str, prompt: str, name: str, facts: list[dict]) -
     if model_name(conn) == "stub":
         return _stub_svg(name, kind, facts), "image/svg+xml"
     from google.genai import types
+
     client = llm._genai(conn)  # 変数に持っておく（回収されると接続が閉じる）
     resp = client.models.generate_content(
-        model=model_name(conn), contents=prompt,
-        config=types.GenerateContentConfig(response_modalities=["IMAGE"],
-                                           image_config=types.ImageConfig(aspect_ratio="16:9")),
+        model=model_name(conn),
+        contents=prompt,
+        config=types.GenerateContentConfig(
+            response_modalities=["IMAGE"], image_config=types.ImageConfig(aspect_ratio="16:9")
+        ),
     )
     llm._record_gemini(model_name(conn), resp)
     for cand in resp.candidates or []:

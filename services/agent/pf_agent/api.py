@@ -132,7 +132,7 @@ class Settings(BaseModel):
 
 
 class ImageRequest(BaseModel):
-    kind: str = Field(pattern="^(scene|ui|concept)$")
+    kind: str = Field(pattern="^(scene|ui|concept|graphic)$")
     note: str = Field(default="", max_length=2000)
 
 

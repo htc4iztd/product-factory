@@ -241,6 +241,13 @@ def test_product_canvas_images(client):
     other = dict(H, **{"x-pf-tenant": "tenant-b"})
     assert c.get(f"/products/{pid}/images/{first}", headers=other).status_code == 404
     assert c.post(f"/products/{pid}/images", headers=H, json={"kind": "nope"}).status_code == 422
+    # 追加の指示は決めてある画風より優先する。グラレコは日本語の見出しと、キャンバスの中身を描かせる
+    assert "takes priority" in r.json()["images"][0]["prompt"]
+    g = c.post(f"/products/{pid}/images", headers=H, json={"kind": "graphic", "note": "水彩画風で"}).json()
+    gp = next(i for i in g["images"] if i["id"] == g["image_id"])["prompt"]
+    assert "グラレコ" in gp and "「課題」" in gp and "no text" not in gp and "水彩画風で" in gp and "優先" in gp
+    facts = {f["label"]: f["value"] for f in cv["facts"]} if cv.get("facts") else {}
+    assert all(v[:10] in gp for k, v in facts.items() if k in ("課題", "独自の価値提案"))
 
 
 def test_markdown_round_trip_and_edit(client):
