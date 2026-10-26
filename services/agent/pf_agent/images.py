@@ -17,11 +17,13 @@ from . import llm, repo
 from .llmconf import IMAGE_PROVIDERS, Conn
 from .stages import STAGE_BY_ID
 
+# free は作る人の指示をそのまま渡す（画風や条件を足さない）。ほかは指示がなくても描ける「型」
 KINDS = {
+    "free": "自由に描く",
+    "graphic": "グラレコ",
+    "concept": "コンセプト",
     "scene": "利用シーン",
     "ui": "画面イメージ",
-    "concept": "コンセプト",
-    "graphic": "グラレコ",
 }
 
 # 絵に使う項目（ステージ, 項目, 表示名）
@@ -97,8 +99,24 @@ def _graphic_prompt(name: str, idea: str, facts: list[dict], note: str) -> str:
     )
 
 
-def build_prompt(kind: str, name: str, idea: str, facts: list[dict], note: str) -> str:
-    """場面を文章で描く。事実は日本語のまま渡す。グラレコ以外は、絵の中に文字を描かせない。"""
+def _context(name: str, idea: str, facts: list[dict]) -> str:
+    body = "\n".join(f"- {f['label']}：{f['value']}" for f in facts) or f"- 意図：{idea}"
+    return f"（参考）プロダクト「{name}」の内容：\n{body}"
+
+
+def edit_prompt(note: str) -> str:
+    """前に描いた絵を元に直す。言われていないところは変えさせない。"""
+    return (
+        f"この画像を、次の指示のとおりに直してください。\n{note}\n"
+        "指示にないところは、できるだけそのまま残してください。"
+    )
+
+
+def build_prompt(kind: str, name: str, idea: str, facts: list[dict], note: str, use_context: bool = True) -> str:
+    """自由に描く：作る人の指示をそのまま渡し、プロダクトの内容は参考として添えるだけ（添えないこともできる）。
+    型（グラレコ・コンセプト・利用シーン・画面）：場面を文章で描く。グラレコ以外は、絵の中に文字を描かせない。"""
+    if kind == "free":
+        return note.strip() + (f"\n\n{_context(name, idea, facts)}" if use_context else "")
     if kind == "graphic":
         return _graphic_prompt(name, idea, facts, note)
     context = "\n".join(f"- {f['label']}: {f['value']}" for f in facts) or f"- 意図: {idea}"
@@ -149,13 +167,17 @@ def _stub_svg(name: str, kind: str, facts: list[dict]) -> bytes:
 <rect width="1600" height="900" fill="url(#g)"/>
 <circle cx="1260" cy="420" r="230" fill="#6366f1" opacity=".12"/>
 <circle cx="1330" cy="520" r="140" fill="#8b5cf6" opacity=".18"/>
-<text x="80" y="120" font-family="sans-serif" font-size="26" fill="#6366f1">{escape(KINDS[kind])}（スタブ）</text>
+<text x="80" y="120" font-family="sans-serif" font-size="26" fill="#6366f1">{escape(KINDS.get(kind, kind))}\
+（スタブ）</text>
 <text x="80" y="220" font-family="sans-serif" font-size="64" font-weight="700" fill="#18181b">{escape(name)}</text>
 <text x="80" y="330" font-family="sans-serif" font-size="34" fill="#3f3f46">{tspans}</text>
 </svg>""".encode()
 
 
-def generate(conn: Conn, kind: str, prompt: str, name: str, facts: list[dict]) -> tuple[bytes, str]:
+def generate(
+    conn: Conn, kind: str, prompt: str, name: str, facts: list[dict], base: tuple[bytes, str] | None = None
+) -> tuple[bytes, str]:
+    """画像を描く。base（前に描いた画像）を渡すと、その絵を元に直させる。"""
     if model_name(conn) == "stub":
         return _stub_svg(name, kind, facts), "image/svg+xml"
     from google.genai import types
@@ -163,7 +185,7 @@ def generate(conn: Conn, kind: str, prompt: str, name: str, facts: list[dict]) -
     client = llm._genai(conn)  # 変数に持っておく（回収されると接続が閉じる）
     resp = client.models.generate_content(
         model=model_name(conn),
-        contents=prompt,
+        contents=[types.Part.from_bytes(data=base[0], mime_type=base[1]), prompt] if base else prompt,
         config=types.GenerateContentConfig(
             response_modalities=["IMAGE"], image_config=types.ImageConfig(aspect_ratio="16:9")
         ),

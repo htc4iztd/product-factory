@@ -82,8 +82,9 @@ export default async function CanvasPage({ params }: { params: Promise<{ id: str
                   <img src={src(img.id)} alt={`${cv.kinds[img.kind]}の画像`} loading="lazy" className="aspect-video w-full bg-zinc-100 object-cover" />
                   <div className="space-y-2 p-3">
                     <div className="flex items-center gap-2 text-xs">
-                      <span className="chip">{cv.kinds[img.kind]}</span>
-                      <span className="truncate text-zinc-500">{img.note}</span>
+                      <span className="chip shrink-0 whitespace-nowrap">{cv.kinds[img.kind]}</span>
+                      {img.base_id && <span className="chip shrink-0" title="前の絵を元に直したもの">直した絵</span>}
+                      <span className="truncate text-zinc-500" title={img.note}>{img.note}</span>
                       <span className="ml-auto shrink-0 text-[11px] text-zinc-400">{new Date(img.created_at).toLocaleDateString("ja-JP")}</span>
                     </div>
                     <ImageActions pid={id} id={img.id} isCover={img.id === cv.product.cover_image_id} />

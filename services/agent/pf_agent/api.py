@@ -132,8 +132,10 @@ class Settings(BaseModel):
 
 
 class ImageRequest(BaseModel):
-    kind: str = Field(pattern="^(scene|ui|concept|graphic)$")
-    note: str = Field(default="", max_length=2000)
+    kind: str = Field(default="free", pattern="^(free|graphic|concept|scene|ui)$")
+    note: str = Field(default="", max_length=4000)
+    use_context: bool = True          # プロダクトの内容を参考として添えるか（自由に描くとき）
+    base_image_id: str | None = None  # この絵を元に直す
 
 
 class Cover(BaseModel):
@@ -399,7 +401,7 @@ def canvas(product_id: str, c: Caller = Depends(caller)):
 @app.post("/products/{product_id}/images")
 def generate_image(product_id: str, body: ImageRequest, c: Caller = Depends(caller)):
     p = _product(c, product_id, "business", "create")
-    image_id = engine.generate_image(p, c.user, body.kind, body.note)
+    image_id = engine.generate_image(p, c.user, body.kind, body.note, body.use_context, body.base_image_id)
     return {"image_id": image_id, **engine.canvas(engine.product(product_id))}
 
 

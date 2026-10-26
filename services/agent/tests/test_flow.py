@@ -248,6 +248,23 @@ def test_product_canvas_images(client):
     assert "グラレコ" in gp and "「課題」" in gp and "no text" not in gp and "水彩画風で" in gp and "優先" in gp
     facts = {f["label"]: f["value"] for f in cv["facts"]} if cv.get("facts") else {}
     assert all(v[:10] in gp for k, v in facts.items() if k in ("課題", "独自の価値提案"))
+    # 自由に描く：指示をそのまま渡す（決めた画風や「文字なし」の条件を足さない）。内容は参考として添えるかを選べる
+    assert c.post(f"/products/{pid}/images", headers=H, json={"kind": "free", "note": " "}).status_code == 422
+    order = "グラレコ風に、小売事業者向けのデータ連合の全体像を描いて"
+    f1 = c.post(f"/products/{pid}/images", headers=H, json={"kind": "free", "note": order}).json()
+    p1 = next(i for i in f1["images"] if i["id"] == f1["image_id"])["prompt"]
+    assert p1.startswith(order) and "（参考）プロダクト" in p1 and "no text" not in p1 and "isometric" not in p1
+    f2 = c.post(f"/products/{pid}/images", headers=H,
+                json={"kind": "free", "note": order, "use_context": False}).json()
+    assert next(i for i in f2["images"] if i["id"] == f2["image_id"])["prompt"] == order
+    # この絵を直す：元の絵と指示から新しい1枚を作り、元をたどれる
+    assert c.post(f"/products/{pid}/images", headers=H, json={"base_image_id": f1["image_id"]}).status_code == 422
+    e = c.post(f"/products/{pid}/images", headers=H,
+               json={"base_image_id": f1["image_id"], "note": "文字を大きく"}).json()
+    ei = next(i for i in e["images"] if i["id"] == e["image_id"])
+    assert ei["base_id"] == f1["image_id"] and ei["kind"] == "free" and "文字を大きく" in ei["prompt"]
+    bad = {"base_image_id": "nope", "note": "x"}
+    assert c.post(f"/products/{pid}/images", headers=H, json=bad).status_code == 404
 
 
 def test_markdown_round_trip_and_edit(client):

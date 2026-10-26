@@ -255,6 +255,7 @@ class Engine:
     def canvas(self, product: Product) -> dict:
         with session() as s:
             rows = s.execute(select(ProductImage.id, ProductImage.kind, ProductImage.note, ProductImage.prompt,
+                                    ProductImage.base_id,
                                     ProductImage.model, ProductImage.created_by, ProductImage.created_at)
                              .where(ProductImage.product_id == product.id)
                              .order_by(ProductImage.created_at.desc())).all()
@@ -262,23 +263,37 @@ class Engine:
                 "model": images.model_name(llmconf.resolve(product.tenant_id)),
                 "facts": images.summary(product.id),
                 "images": [{"id": r.id, "kind": r.kind, "note": r.note, "prompt": r.prompt, "model": r.model,
+                            "base_id": r.base_id,
                             "created_by": r.created_by, "created_at": r.created_at.isoformat()} for r in rows]}
 
     @staticmethod
-    def generate_image(product: Product, user: str, kind: str, note: str) -> str:
+    def generate_image(product: Product, user: str, kind: str, note: str, use_context: bool = True,
+                       base_image_id: str | None = None) -> str:
+        """絵を描く。base_image_id を渡すと、その絵を元に note のとおり直す（新しい1枚として残す）。"""
         if product.status != "active":
             raise FactoryError(409, "このプロダクトは中止されています")
+        base = None
+        if base_image_id:
+            src = Engine.image(product, base_image_id)
+            if not note.strip():
+                raise FactoryError(422, "どう直すかを書いてください")
+            kind = src.kind
+            if not src.mime.startswith("image/svg"):  # 仮の画像（SVG）は元にできないので、描き直す
+                base = (src.data, src.mime)
         if kind not in images.KINDS:
             raise FactoryError(422, f"kind は {list(images.KINDS)} のどれか")
+        if kind == "free" and not note.strip():
+            raise FactoryError(422, "描きたい絵を書いてください")
         facts = images.summary(product.id)
-        prompt = images.build_prompt(kind, product.name, product.idea, facts, note)
+        prompt = (images.edit_prompt(note) if base_image_id
+                  else images.build_prompt(kind, product.name, product.idea, facts, note, use_context))
         conn = llmconf.resolve(product.tenant_id)
         try:
-            data, mime = images.generate(conn, kind, prompt, product.name, facts)
+            data, mime = images.generate(conn, kind, prompt, product.name, facts, base)
         except Exception as e:  # 生成の失敗はそのまま画面に返す
             raise FactoryError(502, f"画像を生成できませんでした：{e}") from None
         with session() as s:
-            img = ProductImage(product_id=product.id, kind=kind, note=note, prompt=prompt,
+            img = ProductImage(product_id=product.id, kind=kind, note=note, prompt=prompt, base_id=base_image_id,
                                model=images.model_name(conn), mime=mime, data=data, created_by=user)
             s.add(img)
             s.flush()

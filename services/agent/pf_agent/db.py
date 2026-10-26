@@ -106,7 +106,8 @@ class ProductImage(Base):
     __tablename__ = "product_images"
     id: Mapped[str] = mapped_column(String(32), primary_key=True, default=_id)
     product_id: Mapped[str] = mapped_column(ForeignKey("products.id"), index=True)
-    kind: Mapped[str] = mapped_column(String(16))           # scene | ui | concept
+    kind: Mapped[str] = mapped_column(String(16))           # free | graphic | concept | scene | ui
+    base_id: Mapped[str | None] = mapped_column(String(32), nullable=True)  # 直した元の画像
     note: Mapped[str] = mapped_column(Text, default="")
     prompt: Mapped[str] = mapped_column(Text)
     model: Mapped[str] = mapped_column(String(80))
@@ -596,6 +597,7 @@ _ADDED_COLUMNS = {
     "chat_messages": {"session_id": "VARCHAR(32)"},
     "llm_settings": {"platform_granted": "BOOLEAN DEFAULT {false}"},
     "job_runs": {"tasks": "JSON"},
+    "product_images": {"base_id": "VARCHAR(32)"},
     "research_libraries": {"issue_defs": "JSON", "layers": "JSON", "topics": "JSON"},
     "research_articles": {"title_ja": "VARCHAR(500) DEFAULT ''", "country": "VARCHAR(8) DEFAULT ''"},
     "research_notes": {"data": "JSON"},

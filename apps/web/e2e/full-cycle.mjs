@@ -102,8 +102,15 @@ for (let i = 0; i < 30 && !(await page.getByText("これまでの絵（1）").is
   await page.reload();
 }
 await page.getByAltText(/プロダクトイメージ/).waitFor();
+// 自由に描く：書いた指示のとおりに描く → できた絵を「直す」
+await page.getByLabel("描きたい絵").fill("グラレコ風に、共働き世帯の家計の締めが楽になる様子を描いて。見出しは日本語で");
 await btn("生成する").click();
 await page.getByText("これまでの絵（2）").waitFor();
+await btn("直す").first().click();
+await page.getByLabel("どう直すか").fill("文字を大きく");
+await btn("この絵を元に直す").click();
+await page.getByText("これまでの絵（3）").waitFor();
+await page.getByText("直した絵").first().waitFor();
 await shot("06b-product-canvas", true);
 await page.goto(`${BASE}/p/${pid}/s/s05?tab=doc`);
 await shot("07-doc", true);

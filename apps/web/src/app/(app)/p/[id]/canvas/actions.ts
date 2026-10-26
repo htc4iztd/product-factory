@@ -13,8 +13,9 @@ async function run(pid: string, path: string, method: string, body?: unknown): P
   return {};
 }
 
-export async function generateImage(pid: string, kind: string, note: string) {
-  return run(pid, "/images", "POST", { kind, note });
+// kind=free は note をそのまま画像モデルに渡す。baseImageId を渡すと、その絵を note のとおりに直す
+export async function generateImage(pid: string, kind: string, note: string, opts: { useContext?: boolean; baseImageId?: string } = {}) {
+  return run(pid, "/images", "POST", { kind, note, use_context: opts.useContext ?? true, base_image_id: opts.baseImageId ?? null });
 }
 
 export async function setCover(pid: string, imageId: string | null) {
