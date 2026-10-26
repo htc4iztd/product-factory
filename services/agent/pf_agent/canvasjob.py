@@ -10,7 +10,14 @@ from .engine import Engine
 def start(product: Product, user: str, kind: str = "concept", note: str = "") -> dict:
     conn = llmconf.resolve(product.tenant_id)
     job_id = jobs.create(
-        "canvas", product.tenant_id, product.id, user, {"kind": kind, "note": note}, total=1, model=conn.image_model
+        "canvas",
+        product.tenant_id,
+        product.id,
+        user,
+        {"kind": kind, "note": note},
+        total=1,
+        model=conn.image_model,
+        tasks=[{"id": "image", "name": "絵を描く", "deps": []}],
     )
     jobs.dispatch(job_id)
     return jobs.run_dict(job_id)
@@ -22,7 +29,9 @@ def run(job_id: str) -> None:
         product = s.get(Product, j.product_id)
         kind, note, user = j.params.get("kind", "concept"), j.params.get("note", ""), j.created_by
     jobs.step(job_id, "絵を描いています", advance=False)
-    image_id = Engine.generate_image(product, user, kind, note)
+    with jobs.task(job_id, "image"):
+        image_id = Engine.generate_image(product, user, kind, note)
+        jobs.set_task(job_id, "image", detail=image_id)
     jobs.step(job_id, f"できました（{image_id}）")
 
 

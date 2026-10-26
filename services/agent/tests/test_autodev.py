@@ -47,6 +47,13 @@ def test_autodev_creates_pre_products_and_adopt(client):
     assert j["progress"]["done"] == j["progress"]["total"] == 1 + 2 * 6
     assert j["usage"]["calls"] == 10 and j["usage"]["by_model"]["stub"]["calls"] == 10  # 2案 × 5ステージ
     assert [x["step"] for x in j["log"]][-1] == "完了"
+    # 工程（タスク）：パターンを決める → 案ごとに⑦〜⑪ → 試作。状態・時刻・工程ごとのトークン
+    ts = {t["id"]: t for t in j["tasks"]}
+    assert len(ts) == 1 + 2 * 6 and all(t["status"] == "done" for t in ts.values())
+    assert ts["A:s07"]["deps"] == ["plan"] and ts["A:prototype"]["deps"] == ["A:s11"]
+    assert ts["B:s09"]["group"] == "案B：体験重視"
+    assert ts["plan"]["detail"] and ts["A:s08"]["started_at"] <= ts["A:s08"]["finished_at"]
+    assert ts["A:s07"]["usage"]["calls"] == 1 and ts["plan"]["usage"]["calls"] == 0
     ov = c.get(base + "/preproducts", headers=H).json()
     pps = ov["runs"][0]["pre_products"]
     assert [p["key"] for p in pps] == ["PP-2", "PP-1"] and {p["title"] for p in pps} == {"案A：最小限", "案B：体験重視"}
@@ -57,6 +64,18 @@ def test_autodev_creates_pre_products_and_adopt(client):
     assert r.status_code == 200 and "試作：案A：最小限" in r.text
     assert "sandbox allow-scripts" in r.headers["content-security-policy"]
     assert c.get(base + "/preproducts/1", headers=OTHER).status_code == 404
+    # ステージの画面で案ごとに見る：⑨は2案ともあり、⑥（自動開発の起点）にはない
+    st9 = c.get(base + "/stages/s09", headers=H).json()
+    assert [v["key"] for v in st9["variants"]] == ["PP-2", "PP-1"]
+    assert c.get(base + "/stages/s06", headers=H).json()["variants"] == []
+    v2 = c.get(base + "/preproducts/2/stages/s09", headers=H).json()
+    assert v2["title"] == "案B：体験重視"
+    assert v2["markdown"] == c.get(base + "/preproducts/2", headers=H).json()["markdown"]["s09"]
+    assert c.get(base + "/preproducts/2/stages/s02", headers=H).status_code == 404
+    assert c.get(base + "/preproducts/2/stages/s09", headers=OTHER).status_code == 404
+    # 工程ごとに案を選び分けられる：⑨だけ案B を本線に入れる
+    c.post(base + "/preproducts/2/stages/s09/adopt", headers=H)
+    assert c.get(base + "/stages/s09", headers=H).json()["markdown"] == v2["markdown"]
     # 採用すると本線の下書きに入る
     a = c.post(base + "/preproducts/1/adopt", headers=H).json()
     assert a["status"] == "adopted" and a["adopted_by"] == "owner@example.com"
@@ -93,7 +112,11 @@ def test_cancel_and_upstream_change(client, monkeypatch):
     assert c.post(base + "/stages/s09/autodev", headers=H, json={}).status_code == 409  # 実行中は重ねない
     assert c.post(f"/jobs/{j['id']}/cancel", headers=H).json()["cancel_requested"] is True
     gate["go"] = True
-    assert wait(c, j["id"])["status"] == "cancelled"
+    j = wait(c, j["id"])
+    assert j["status"] == "cancelled"
+    # 終わっていた工程はそのまま、まだの工程は取り消し
+    assert {t["id"]: t["status"] for t in j["tasks"]}["plan"] == "done"
+    assert {t["status"] for t in j["tasks"] if t["id"] != "plan"} == {"cancelled"}
     # 上流が変わったら、作ったときの版と違うことが分かる
     monkeypatch.setattr(autodev, "plan", real)
     j = c.post(base + "/stages/s09/autodev", headers=H, json={"count": 1}).json()

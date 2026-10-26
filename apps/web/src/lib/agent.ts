@@ -129,6 +129,12 @@ export type StageDetail = {
   trace: Trace | null;
   decisions: Decision[];
   autodev_targets: string[];
+  variants: { number: number; key: string; title: string; status: PreProduct["status"] }[];
+};
+// プリプロダクト（案）の、あるステージの下書き
+export type VariantStage = {
+  number: number; key: string; title: string; concept: string; assumptions: string[]; status: PreProduct["status"];
+  draft: Draft; markdown: string;
 };
 export type Trace =
   | { kind: "stories_without_ac"; total: number; items: { id: string; text: string; release: string }[] }
@@ -211,7 +217,13 @@ export type JobRun = {
   status: "queued" | "running" | "done" | "failed" | "cancelled"; progress: { done: number; total: number; step: string } | null;
   usage: JobUsage | null; runner: "cloud-run-job" | "thread"; execution: string | null; error: string | null; model: string;
   retry_of: string | null; cancel_requested: boolean; created_by: string; created_at: string; started_at: string | null;
-  finished_at: string | null; seconds: number | null; log?: { at: string; step: string }[];
+  finished_at: string | null; seconds: number | null; log?: { at: string; step: string }[]; tasks: JobTask[];
+};
+export type JobTaskStatus = "pending" | "running" | "done" | "failed" | "skipped" | "cancelled";
+export type JobTask = {
+  id: string; name: string; group: string; deps: string[]; status: JobTaskStatus;
+  started_at: string | null; finished_at: string | null; error: string | null; detail: string;
+  usage: { calls: number; input_tokens: number; output_tokens: number } | null;
 };
 export type JobDef = {
   kind: string; name: string; description: string; trigger: string; timeout_min: number; status: "available" | "planned";

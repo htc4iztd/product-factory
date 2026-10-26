@@ -151,6 +151,8 @@ def test_research_library_flow(client, monkeypatch):
     steps = [x["step"] for x in j["log"]]
     assert any("RA-2" in s for s in steps) and not any("old" in s for s in steps)
     assert c.get("/jobs", headers=H).json()["runs"][0]["kind"] == "research"
+    ts = {t["id"]: t["status"] for t in j["tasks"]}
+    assert ts == {"search": "done", "feeds": "done", "read": "done", "issues": "done"}
     d = c.get("/research/1", headers=H).json()
     assert d["articles"] == 2 and d["latest"] == "2026-10-20"
     # 絞り込み・集計・分析・CSV・ステージへの要約

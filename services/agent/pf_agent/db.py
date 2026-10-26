@@ -285,6 +285,8 @@ class JobRun(Base):
     usage: Mapped[dict | None] = mapped_column(JSON, nullable=True)     # {calls, input_tokens, output_tokens, by_model}
     runner: Mapped[str] = mapped_column(String(20), default="thread")   # cloud-run-job | thread
     execution: Mapped[str | None] = mapped_column(String(300), nullable=True)  # Cloud Run Jobs の実行名
+    # 工程（タスク）の依存関係と状態：[{id, name, group, deps, status, started_at, finished_at, error, detail, usage}]
+    tasks: Mapped[list | None] = mapped_column(JSON, nullable=True)
     error: Mapped[str | None] = mapped_column(Text, nullable=True)
     model: Mapped[str] = mapped_column(String(120), default="")
     retry_of: Mapped[str | None] = mapped_column(String(32), nullable=True)
@@ -527,6 +529,7 @@ _ADDED_COLUMNS = {
                  "gh_synced_at": "VARCHAR(30)"},
     "chat_messages": {"session_id": "VARCHAR(32)"},
     "llm_settings": {"platform_granted": "BOOLEAN DEFAULT {false}"},
+    "job_runs": {"tasks": "JSON"},
 }
 
 

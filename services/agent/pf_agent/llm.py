@@ -35,6 +35,8 @@ class LLMError(Exception):
 # ジョブの中で呼んだ LLM のトークン量を、ジョブごとに数える。track() の中の呼び出しだけを数える
 _meter: contextvars.ContextVar[dict | None] = contextvars.ContextVar("pf_llm_meter", default=None)
 _meter_lock = threading.Lock()
+# ジョブの工程（タスク）ごとの使用量。ジョブ全体の _meter と並べて数える
+task_meter: contextvars.ContextVar[dict | None] = contextvars.ContextVar("pf_llm_task_meter", default=None)
 
 
 def new_meter() -> dict:
@@ -51,18 +53,18 @@ def track(meter: dict):
 
 
 def _record(model: str, input_tokens: int | None, output_tokens: int | None) -> None:
-    m = _meter.get()
-    if m is None:
-        return
     i, o = int(input_tokens or 0), int(output_tokens or 0)
-    with _meter_lock:
-        m["calls"] += 1
-        m["input_tokens"] += i
-        m["output_tokens"] += o
-        b = m["by_model"].setdefault(model, {"calls": 0, "input_tokens": 0, "output_tokens": 0})
-        b["calls"] += 1
-        b["input_tokens"] += i
-        b["output_tokens"] += o
+    for m in (_meter.get(), task_meter.get()):
+        if m is None:
+            continue
+        with _meter_lock:
+            m["calls"] += 1
+            m["input_tokens"] += i
+            m["output_tokens"] += o
+            b = m["by_model"].setdefault(model, {"calls": 0, "input_tokens": 0, "output_tokens": 0})
+            b["calls"] += 1
+            b["input_tokens"] += i
+            b["output_tokens"] += o
 
 
 def _record_claude(model: str, resp) -> None:

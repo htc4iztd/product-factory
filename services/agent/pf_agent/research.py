@@ -600,6 +600,12 @@ def start_update(tenant: str, user: str, number: int) -> dict:
         {"library": lib_id, "number": number, "name": name},
         total=3 + MAX_NEW,
         model=conn.summary_model,
+        tasks=[
+            {"id": "search", "name": "AI の検索", "deps": []},
+            {"id": "feeds", "name": "RSS・ページ", "deps": []},
+            {"id": "read", "name": "記事を読む・ファクトを抜き出す", "deps": ["search", "feeds"]},
+            {"id": "issues", "name": "論点のまとめ", "deps": ["read"]},
+        ],
     )
     jobs.dispatch(job_id)
     return jobs.run_dict(job_id)
@@ -625,80 +631,95 @@ def run_update(job_id: str) -> None:
     cands: list[dict] = []
     if lib.use_search:
         jobs.step(job_id, "AI の検索で記事を探しています", advance=False)
-        try:
-            found = search(conn, lib, since)
-            cands += [{**x, "origin": "search"} for x in found]
-            jobs.step(
-                job_id,
-                f"検索：{len(found)}件"
-                if found or conn.provider in ("gemini", "vertex")
-                else "検索：この接続（Gemini 以外）では使えないため飛ばしました",
-            )
-        except Exception as e:  # noqa: BLE001  検索の失敗で全体を止めない
-            jobs.step(job_id, f"検索に失敗：{str(e)[:200]}")
+        if conn.provider not in ("gemini", "vertex", "stub"):
+            jobs.skip_task(job_id, "search", "この接続（Gemini / Vertex AI 以外）では使えません")
+            jobs.step(job_id, "検索：この接続（Gemini 以外）では使えないため飛ばしました")
+        else:
+            try:
+                with jobs.task(job_id, "search"):
+                    found = search(conn, lib, since)
+                    cands += [{**x, "origin": "search"} for x in found]
+                    jobs.set_task(job_id, "search", detail=f"{len(found)}件")
+                jobs.step(job_id, f"検索：{len(found)}件")
+            except jobs.Cancelled:
+                raise
+            except Exception as e:  # noqa: BLE001  検索の失敗で全体を止めない（工程は失敗として残る）
+                jobs.step(job_id, f"検索に失敗：{str(e)[:200]}")
     else:
+        jobs.skip_task(job_id, "search", "使わない設定")
         jobs.step(job_id, "検索：使わない設定")
-    for f in lib.feeds or []:
-        try:
-            items = read_feed(f, since)
-            cands += [{**x, "origin": "rss"} for x in items]
-            jobs.step(job_id, f"RSS {f}：{len(items)}件", advance=False)
-        except Exception as e:  # noqa: BLE001
-            jobs.step(job_id, f"RSS {f} を読めません：{str(e)[:120]}", advance=False)
-    for u in lib.sites or []:
-        cands.append({"url": u, "title": "", "origin": "site"})
+    if not (lib.feeds or lib.sites):
+        jobs.skip_task(job_id, "feeds", "RSS・ページの指定なし")
+    else:
+        with jobs.task(job_id, "feeds"):
+            got = 0
+            for f in lib.feeds or []:
+                try:
+                    items = read_feed(f, since)
+                    cands += [{**x, "origin": "rss"} for x in items]
+                    got += len(items)
+                    jobs.step(job_id, f"RSS {f}：{len(items)}件", advance=False)
+                except Exception as e:  # noqa: BLE001
+                    jobs.step(job_id, f"RSS {f} を読めません：{str(e)[:120]}", advance=False)
+            for u in lib.sites or []:
+                cands.append({"url": u, "title": "", "origin": "site"})
+            jobs.set_task(job_id, "feeds", detail=f"RSS {got}件・ページ {len(lib.sites or [])}件")
     jobs.step(job_id, f"候補 {len(cands)}件を読みます")
-    added, issues_touched = 0, Counter()
-    seen = set()
-    for c in cands:
-        if added >= MAX_NEW:
-            break
-        if c["url"] in seen or (c["origin"] != "site" and c["url"] in known):
-            continue
-        seen.add(c["url"])
-        try:
-            final, ctype, page = fetch(c["url"])
-            if c["origin"] != "site" and final in known:
+    with jobs.task(job_id, "read"):
+        added, issues_touched = 0, Counter()
+        seen = set()
+        for c in cands:
+            if added >= MAX_NEW:
+                break
+            if c["url"] in seen or (c["origin"] != "site" and c["url"] in known):
                 continue
-            title, text = html_text(page) if "html" in ctype or "<html" in page[:500].lower() else ("", page)
-            if len(text) < 200:
-                jobs.step(job_id, f"本文が短いので飛ばしました：{final}", advance=False)
-                continue
-            digest = hashlib.sha256(text.encode()).hexdigest()
-            if c["origin"] == "site" and hashes.get(c["url"]) == digest:
-                continue
-            if c["origin"] == "site" and c["url"] in hashes:  # ページが変わった：前の記事は残し、新しい版を足す
-                final = c["url"]
-            with session() as s:
-                a = add_article(
-                    s,
-                    conn,
-                    s.get(ResearchLibrary, lib.id),
-                    user,
-                    final,
-                    c.get("title") or title,
-                    text,
-                    c["origin"],
-                    hint_date=c.get("date"),
-                )
-                s.commit()
-                issues_touched.update(a.issues or [])
-                known.add(final)
-                added += 1
-                jobs.step(job_id, f"RA-{a.number} {a.title[:60]}")
-        except jobs.Cancelled:
-            raise
-        except Exception as e:  # noqa: BLE001  1件の失敗で止めない
-            jobs.step(job_id, f"読めません：{c['url'][:120]}（{str(e)[:120]}）", advance=False)
-    with session() as s:
-        lib2 = s.get(ResearchLibrary, lib.id)
-        latest = s.execute(
-            select(func.max(ResearchArticle.published)).where(ResearchArticle.library_id == lib.id)
-        ).scalar()
-        lib2.latest, lib2.updated_at = latest or lib2.latest, dt.datetime.now(dt.UTC)
-        s.commit()
+            seen.add(c["url"])
+            try:
+                final, ctype, page = fetch(c["url"])
+                if c["origin"] != "site" and final in known:
+                    continue
+                title, text = html_text(page) if "html" in ctype or "<html" in page[:500].lower() else ("", page)
+                if len(text) < 200:
+                    jobs.step(job_id, f"本文が短いので飛ばしました：{final}", advance=False)
+                    continue
+                digest = hashlib.sha256(text.encode()).hexdigest()
+                if c["origin"] == "site" and hashes.get(c["url"]) == digest:
+                    continue
+                if c["origin"] == "site" and c["url"] in hashes:  # ページが変わった：前の記事は残し、新しい版を足す
+                    final = c["url"]
+                with session() as s:
+                    a = add_article(
+                        s,
+                        conn,
+                        s.get(ResearchLibrary, lib.id),
+                        user,
+                        final,
+                        c.get("title") or title,
+                        text,
+                        c["origin"],
+                        hint_date=c.get("date"),
+                    )
+                    s.commit()
+                    issues_touched.update(a.issues or [])
+                    known.add(final)
+                    added += 1
+                    jobs.step(job_id, f"RA-{a.number} {a.title[:60]}")
+            except jobs.Cancelled:
+                raise
+            except Exception as e:  # noqa: BLE001  1件の失敗で止めない
+                jobs.step(job_id, f"読めません：{c['url'][:120]}（{str(e)[:120]}）", advance=False)
+        with session() as s:
+            lib2 = s.get(ResearchLibrary, lib.id)
+            latest = s.execute(
+                select(func.max(ResearchArticle.published)).where(ResearchArticle.library_id == lib.id)
+            ).scalar()
+            lib2.latest, lib2.updated_at = latest or lib2.latest, dt.datetime.now(dt.UTC)
+            s.commit()
+        jobs.set_task(job_id, "read", detail=f"候補 {len(cands)}件・新しい記事 {added}件")
     jobs.step(job_id, f"新しい記事 {added}件")
-    rewritten = refresh_issue_notes(lib.tenant_id, lib.id, user, force=False)
+    with jobs.task(job_id, "issues"):
+        rewritten = refresh_issue_notes(lib.tenant_id, lib.id, user, force=False)
+        jobs.set_task(job_id, "issues", detail="、".join(rewritten) or "書き直しなし")
     jobs.step(job_id, f"論点のまとめを書き直しました：{'、'.join(rewritten) or 'なし'}")
 
 

@@ -428,6 +428,7 @@ class Engine:
             "references": self._references(product, stage_id, rs),
             "trace": self._trace(product, stage_id, d),
             "autodev_targets": [STAGE_BY_ID[t].no + STAGE_BY_ID[t].name for t in autodev.targets(product.id, stage_id)],
+            "variants": autodev.stage_variants(product.id, stage_id),
             "decisions": collab.stage_decisions(product.id, stage_id, fx.ids_in(json.dumps(d, ensure_ascii=False))),
         }
 

@@ -1,6 +1,8 @@
 import Link from "next/link";
 import { ArrowRight, Lock } from "lucide-react";
-import { agent, type StageDetail } from "@/lib/agent";
+import { agent, AgentError, type StageDetail, type VariantStage } from "@/lib/agent";
+import { auth } from "@/lib/auth";
+import { PatternStageBar } from "@/components/autodev/PatternStageBar";
 import { StatusBadge, StatusDot } from "@/components/StatusBadge";
 import { Canvas } from "@/components/stage/Canvas";
 import { cookies } from "next/headers";
@@ -9,7 +11,7 @@ import { DocEditor } from "@/components/stage/DocEditor";
 import { ApprovalPanel, ClosedBanner, CommitButton, RecheckBanner } from "@/components/stage/StageActions";
 import { AutodevButton } from "@/components/autodev/AutodevButton";
 
-type Props = { params: Promise<{ id: string; stage: string }>; searchParams: Promise<{ tab?: string; session?: string }> };
+type Props = { params: Promise<{ id: string; stage: string }>; searchParams: Promise<{ tab?: string; session?: string; pp?: string }> };
 
 const PHASE_NAME: Record<string, string> = { P1: "探索", P2: "事業定義", P3: "要求・設計", P4: "構築", P5: "リリース" };
 
@@ -17,15 +19,27 @@ export default async function StagePage({ params, searchParams }: Props) {
   const { id, stage } = await params;
   const sp = await searchParams;
   const tab = sp.tab ?? "canvas";
-  const st = await agent<StageDetail>(`/products/${id}/stages/${stage}${sp.session ? `?session=${encodeURIComponent(sp.session)}` : ""}`);
+  const main = await agent<StageDetail>(`/products/${id}/stages/${stage}${sp.session ? `?session=${encodeURIComponent(sp.session)}` : ""}`);
+  // 案（プリプロダクト）のタブ：その案の、このステージの下書きを本線と同じ画面で見る
+  const pp = sp.pp && main.variants.some((v) => String(v.number) === sp.pp)
+    ? await agent<VariantStage>(`/products/${id}/preproducts/${sp.pp}/stages/${stage}`).catch((e) => { if (e instanceof AgentError) return null; throw e; })
+    : null;
+  const st: StageDetail = pp ? { ...main, draft: pp.draft, markdown: pp.markdown, chat: [] } : main;
+  const canEdit = (await auth())?.user?.role !== "VIEWER";
   const panel = (await cookies()).get("pf_ai")?.value;
   const drawer = panel === "closed" || panel === "ref" ? panel : "ai";
   const here = `/p/${id}/s/${stage}`;
   const awaiting = st.status === "awaiting_approval";
-  const readOnly = !st.enabled;
+  const readOnly = !st.enabled || !!pp;
   const required = st.framework.fields.filter((f) => f.required).length;
   const filled = required - st.missing.length;
-  const tabs = [["canvas", "キャンバス"], ["doc", "文書"], ["history", `版の履歴（${st.versions.length}）`]];
+  const tabs = [["canvas", "キャンバス"], ["doc", "文書"], ...(pp ? [] : [["history", `版の履歴（${st.versions.length}）`]])];
+  const keep = (extra: Record<string, string | undefined>) => {
+    const q = new URLSearchParams();
+    for (const [k, v] of Object.entries({ tab: sp.tab, session: sp.session, pp: sp.pp, ...extra })) if (v) q.set(k, v);
+    const s = q.toString();
+    return s ? `${here}?${s}` : here;
+  };
 
   return (
     <div className="flex h-screen flex-col">
@@ -47,15 +61,28 @@ export default async function StagePage({ params, searchParams }: Props) {
             </div>
             {st.approval_required && <span className="chip"><Lock size={11} />承認あり</span>}
             {!readOnly && <AutodevButton pid={id} sid={stage} targets={st.autodev_targets} />}
-            {st.enabled && !awaiting && (
+            {st.enabled && !awaiting && !pp && (
               <CommitButton pid={id} sid={stage} missing={st.missing} dirty={st.dirty} approval={st.approval_required} hasVersion={st.current_version > 0} />
             )}
           </div>
         </div>
+        {main.variants.length > 0 && (
+          <nav aria-label="案ごとの表示" className="mt-3 flex flex-wrap items-center gap-1.5">
+            <span className="mr-1 text-[11px] text-zinc-400">表示</span>
+            <Link href={keep({ pp: "", tab: sp.tab === "history" ? "history" : sp.tab })}
+              className={`rounded-full border px-3 py-1 text-[12px] ${!pp ? "border-zinc-900 bg-zinc-900 text-white" : "border-zinc-200 text-zinc-600 hover:border-zinc-300"}`}>本線</Link>
+            {main.variants.map((v) => (
+              <Link key={v.number} href={keep({ pp: String(v.number), tab: sp.tab === "history" ? "canvas" : sp.tab })}
+                className={`rounded-full border px-3 py-1 text-[12px] ${pp?.number === v.number ? "border-violet-600 bg-violet-600 text-white" : "border-violet-200 text-violet-800 hover:border-violet-300"}`}>
+                <span className="font-mono">{v.key}</span> {v.title}{v.status === "adopted" ? "（採用済み）" : v.status === "generating" ? "（作成中）" : ""}
+              </Link>
+            ))}
+          </nav>
+        )}
         <div className="mt-3 flex flex-wrap items-center gap-x-5 gap-y-2">
           <nav className="flex gap-4 text-[13px]">
             {tabs.map(([k, l]) => (
-              <Link key={k} href={`${here}?tab=${k}${sp.session ? `&session=${encodeURIComponent(sp.session)}` : ""}`} className={`-mb-px border-b-2 pb-2.5 ${tab === k ? "border-zinc-900 font-medium text-zinc-900" : "border-transparent text-zinc-500 hover:text-zinc-800"}`}>{l}</Link>
+              <Link key={k} href={keep({ tab: k })} className={`-mb-px border-b-2 pb-2.5 ${tab === k ? "border-zinc-900 font-medium text-zinc-900" : "border-transparent text-zinc-500 hover:text-zinc-800"}`}>{l}</Link>
             ))}
           </nav>
           <div className="ml-auto flex flex-wrap items-center gap-1.5 pb-2 text-[11px] text-zinc-400">
@@ -71,9 +98,10 @@ export default async function StagePage({ params, searchParams }: Props) {
       <div className="flex min-h-0 flex-1">
         <section className="min-w-0 flex-1 overflow-y-auto">
           <div className="space-y-4 p-6">
+            {pp && <PatternStageBar pid={id} sid={stage} v={pp} stageName={`${st.no}${st.name}`} canEdit={canEdit} />}
             {!st.enabled && <ClosedBanner pid={id} sid={stage} />}
-            {st.status === "needs_recheck" && <RecheckBanner pid={id} sid={stage} inputs={st.inputs.map((s) => s.no + s.name).join("・")} />}
-            {awaiting && st.pending && <ApprovalPanel pid={id} sid={stage} version={st.pending.version} findings={st.audit_findings ?? []} />}
+            {!pp && st.status === "needs_recheck" && <RecheckBanner pid={id} sid={stage} inputs={st.inputs.map((s) => s.no + s.name).join("・")} />}
+            {!pp && awaiting && st.pending && <ApprovalPanel pid={id} sid={stage} version={st.pending.version} findings={st.audit_findings ?? []} />}
             {tab === "canvas" && <Canvas pid={id} st={st} readOnly={readOnly} />}
             {tab === "doc" && <DocEditor pid={id} sid={stage} markdown={st.markdown} fields={st.framework.fields} readOnly={readOnly} />}
             {tab === "history" && (
@@ -93,7 +121,7 @@ export default async function StagePage({ params, searchParams }: Props) {
           </div>
         </section>
         <AiDrawer initial={drawer} references={st.references} decisions={st.decisions} sessions={st.sessions} sessionId={st.session_id} report={st.report} pid={id} sid={stage} chat={st.chat} fields={st.framework.fields} prompts={st.framework.prompts}
-          disabled={!st.enabled ? "ステージを開くと対話できます" : null} />
+          disabled={pp ? `案（${pp.key}）を表示中です。対話は「本線」で行います` : !st.enabled ? "ステージを開くと対話できます" : null} />
       </div>
     </div>
   );

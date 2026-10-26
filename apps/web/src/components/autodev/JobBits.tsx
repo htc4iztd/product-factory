@@ -46,3 +46,23 @@ export function jobTarget(job: JobRun): { href: string; label: string } | null {
   if (job.kind === "canvas") return { href: `/p/${job.product_id}/canvas`, label: "プロダクト・キャンバス" };
   return { href: `/p/${job.product_id}/preproducts`, label: "プリプロダクト" };
 }
+
+// 工程（タスク）の状態の色。グラフ・グリッド・ガントで同じものを使う
+export const TASK_STATUS: Record<string, { label: string; dot: string; node: string; bar: string }> = {
+  pending: { label: "待ち", dot: "bg-zinc-200", node: "border-zinc-300 bg-white text-zinc-500", bar: "bg-zinc-200" },
+  running: { label: "実行中", dot: "bg-sky-400 animate-pulse", node: "border-sky-400 bg-sky-50 text-sky-900", bar: "bg-sky-400 animate-pulse" },
+  done: { label: "完了", dot: "bg-emerald-500", node: "border-emerald-400 bg-emerald-50 text-emerald-900", bar: "bg-emerald-500" },
+  failed: { label: "失敗", dot: "bg-rose-500", node: "border-rose-400 bg-rose-50 text-rose-900", bar: "bg-rose-500" },
+  skipped: { label: "飛ばした", dot: "bg-zinc-300", node: "border-dashed border-zinc-300 bg-zinc-50 text-zinc-400", bar: "bg-zinc-300" },
+  cancelled: { label: "取り消し", dot: "bg-amber-300", node: "border-amber-300 bg-amber-50 text-amber-900", bar: "bg-amber-300" },
+};
+
+export function TaskLegend() {
+  return (
+    <div className="flex flex-wrap gap-3 text-[11px] text-zinc-500">
+      {Object.entries(TASK_STATUS).map(([k, s]) => (
+        <span key={k} className="flex items-center gap-1"><span className={`h-2.5 w-2.5 rounded-sm ${s.dot}`} />{s.label}</span>
+      ))}
+    </div>
+  );
+}

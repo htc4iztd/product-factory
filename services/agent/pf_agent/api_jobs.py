@@ -8,6 +8,7 @@ from pydantic import BaseModel, Field
 from . import autodev, jobs
 from .api_collab import _p
 from .authz import Caller, caller
+from .stages import STAGE_BY_ID
 
 router = APIRouter()
 P = "/products/{product_id}"
@@ -49,6 +50,23 @@ def adopt(product_id: str, number: int, c: Caller = Depends(caller)):
     return autodev.adopt(_p(c, product_id, True), c.user, number)
 
 
+@router.get(P + "/preproducts/{number}/stages/{stage_id}")
+def preproduct_stage(product_id: str, number: int, stage_id: str, c: Caller = Depends(caller)):
+    _stage(stage_id)
+    return autodev.variant_stage(_p(c, product_id), number, stage_id)
+
+
+@router.post(P + "/preproducts/{number}/stages/{stage_id}/adopt")
+def adopt_preproduct_stage(product_id: str, number: int, stage_id: str, c: Caller = Depends(caller)):
+    _stage(stage_id)
+    return autodev.adopt_stage(_p(c, product_id, True), c.user, number, stage_id)
+
+
+def _stage(stage_id: str) -> None:
+    if stage_id not in STAGE_BY_ID:
+        raise HTTPException(404, "ステージがありません")
+
+
 @router.post(P + "/autodev/{job_id}/retry")
 def retry(product_id: str, job_id: str, c: Caller = Depends(caller)):
     return autodev.retry(_p(c, product_id, True), c.user, job_id)
@@ -56,8 +74,8 @@ def retry(product_id: str, job_id: str, c: Caller = Depends(caller)):
 
 # ---------------- ジョブ ----------------
 @router.get("/jobs")
-def list_jobs(kind: str | None = None, c: Caller = Depends(caller)):
-    return {"definitions": jobs.definitions(c.tenant), "runs": jobs.history(c.tenant, kind)}
+def list_jobs(kind: str | None = None, product: str | None = None, c: Caller = Depends(caller)):
+    return {"definitions": jobs.definitions(c.tenant), "runs": jobs.history(c.tenant, kind, product)}
 
 
 @router.get("/jobs/{job_id}")

@@ -6,15 +6,19 @@ import { UserMenu } from "@/components/UserMenu";
 import { AutoRefresh } from "@/components/autodev/AutoRefresh";
 import { JobProgress, JobStatus, duration, jobTarget } from "@/components/autodev/JobBits";
 import { when } from "@/components/team/RefText";
+import { RunGrid } from "@/components/jobs/RunGrid";
+import { TaskLegend } from "@/components/autodev/JobBits";
 
 const f = (n: number) => n.toLocaleString("ja-JP");
 
-export default async function JobsPage({ searchParams }: { searchParams: Promise<{ kind?: string }> }) {
+export default async function JobsPage({ searchParams }: { searchParams: Promise<{ kind?: string; product?: string }> }) {
   const sp = await searchParams;
+  const q = new URLSearchParams(Object.entries(sp).filter(([, v]) => v) as [string, string][]).toString();
   const [{ definitions, runs }, products] = await Promise.all([
-    agent<{ definitions: JobDef[]; runs: JobRun[] }>(`/jobs${sp.kind ? `?kind=${encodeURIComponent(sp.kind)}` : ""}`),
+    agent<{ definitions: JobDef[]; runs: JobRun[] }>(`/jobs${q ? `?${q}` : ""}`),
     agent<Product[]>("/products"),
   ]);
+  const running = runs.filter((r) => r.status === "queued" || r.status === "running");
   const pname = Object.fromEntries(products.map((p) => [p.id, p.name]));
   const active = runs.some((r) => r.status === "queued" || r.status === "running");
   const sum = runs.reduce((a, r) => ({ i: a.i + (r.usage?.input_tokens ?? 0), o: a.o + (r.usage?.output_tokens ?? 0) }), { i: 0, o: 0 });
@@ -52,10 +56,32 @@ export default async function JobsPage({ searchParams }: { searchParams: Promise
           ))}
         </section>
 
+        {running.length > 0 && (
+          <section aria-label="実行中" className="space-y-2">
+            <h2 className="section-title">実行中（{running.length}）</h2>
+            {running.map((r) => (
+              <Link key={r.id} href={`/jobs/${r.id}`} className="card flex items-center gap-3 p-4 hover:border-brand-200">
+                <JobStatus status={r.status} />
+                <span className="text-[13px] font-medium">{r.name}</span>
+                <span className="text-[12px] text-zinc-500">{r.product_id ? pname[r.product_id] : jobTarget(r)?.label}</span>
+                <div className="ml-auto w-80"><JobProgress job={r} /></div>
+              </Link>
+            ))}
+          </section>
+        )}
+
+        <section aria-label="グリッド" className="space-y-2">
+          <div className="flex items-center gap-2"><h2 className="section-title">グリッド（実行 × 工程）</h2><span className="ml-auto"><TaskLegend /></span></div>
+          {definitions.filter((d) => runs.some((r) => r.kind === d.kind)).map((d) => (
+            <RunGrid key={d.kind} title={d.name} runs={runs.filter((r) => r.kind === d.kind)} />
+          ))}
+          {runs.length === 0 && <p className="text-[13px] text-zinc-400">まだ実行がありません</p>}
+        </section>
+
         <section aria-label="実行履歴" className="space-y-2">
           <div className="flex items-center gap-2">
-            <h2 className="section-title">実行履歴{sp.kind ? `（${sp.kind}）` : ""}</h2>
-            {sp.kind && <Link href="/jobs" className="text-xs text-zinc-500 hover:underline">すべて</Link>}
+            <h2 className="section-title">実行履歴{sp.kind ? `（${sp.kind}）` : ""}{sp.product ? `（${pname[sp.product] ?? sp.product}）` : ""}</h2>
+            {(sp.kind || sp.product) && <Link href="/jobs" className="text-xs text-zinc-500 hover:underline">すべて</Link>}
             <span className="ml-auto text-xs text-zinc-500">表示中の合計：入力 {f(sum.i)}・出力 {f(sum.o)} トークン</span>
           </div>
           <div className="card overflow-x-auto">

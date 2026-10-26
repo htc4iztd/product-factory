@@ -86,7 +86,7 @@ def start(product: Product, user: str, from_stage: str, count: int, hint: str) -
     conn = llmconf.resolve(product.tenant_id)
     params = {"from_stage": from_stage, "stages": stages, "count": count, "hint": hint.strip(), "based_on": based}
     job_id = jobs.create("autodev", product.tenant_id, product.id, user, params,
-                         total=1 + count * (len(stages) + 1), model=conn.chat_model)
+                         total=1 + count * (len(stages) + 1), model=conn.chat_model, tasks=dag(stages, count))
     repo.log(product.id, from_stage, "human", user, "autodev.start", {"job": job_id, **params})
     jobs.dispatch(job_id)
     return jobs.run_dict(job_id)
@@ -98,6 +98,19 @@ def retry(product: Product, user: str, job_id: str) -> dict:
         raise AutodevError(404, "ジョブがありません")
     p = j["params"]
     return start(product, user, p["from_stage"], p["count"], p.get("hint", ""))
+
+
+def dag(stages: list[str], count: int) -> list[dict]:
+    """工程の依存関係：パターンを決める → 案ごとに後工程を順に → 試作。案どうしは並べて動く。"""
+    out = [{"id": "plan", "name": "パターンを決める", "deps": []}]
+    for label in LABELS[:count]:
+        prev = "plan"
+        for sid in stages:
+            st = STAGE_BY_ID[sid]
+            out.append({"id": f"{label}:{sid}", "name": f"{st.no} {st.name}", "group": f"案{label}", "deps": [prev]})
+            prev = f"{label}:{sid}"
+        out.append({"id": f"{label}:prototype", "name": "試作", "group": f"案{label}", "deps": [prev]})
+    return out
 
 
 # ---------------- 実行（ジョブの中） ----------------
@@ -113,8 +126,14 @@ def run(job_id: str) -> None:
     if onto:
         upstream["社内の用語と関係"] = onto
     jobs.step(job_id, "パターンを決めています", advance=False)
-    patterns = plan(conn, product, upstream, stages, count, hint)
+    with jobs.task(job_id, "plan"):
+        patterns = plan(conn, product, upstream, stages, count, hint)
+        jobs.set_task(job_id, "plan", detail="／".join(x.title for x in patterns))
     jobs.step(job_id, "パターンを決めました：" + "／".join(x.title for x in patterns))
+    groups = [pt.title if pt.title.startswith(f"案{LABELS[i]}") else f"案{LABELS[i]}：{pt.title}"
+              for i, pt in enumerate(patterns)]
+    jobs.define_tasks(job_id, [{"id": f"{LABELS[i]}:{t}", "group": g}
+                               for i, g in enumerate(groups) for t in [*stages, "prototype"]])
     with session() as s:
         base = s.execute(select(func.max(Variant.number)).where(Variant.product_id == product.id)).scalar() or 0
         ids = []
@@ -128,8 +147,8 @@ def run(job_id: str) -> None:
     # 案ごとに並べて作る。使用量の記録（contextvars）を引き継ぐため、送り出す側で文脈を複製してから渡す
     ctxs = [contextvars.copy_context() for _ in ids]
     with ThreadPoolExecutor(max_workers=min(len(ids), 3)) as pool:
-        results = list(pool.map(lambda c_v: c_v[0].run(_build_variant, job_id, conn, product, c_v[1], upstream,
-                                                        stages), zip(ctxs, ids, strict=True)))
+        results = list(pool.map(lambda c: c[0].run(_build_variant, job_id, conn, product, c[1], upstream,
+                                                   stages, LABELS[c[2]]), zip(ctxs, ids, range(len(ids)), strict=True)))
     if any(isinstance(r, jobs.Cancelled) for r in results):
         raise jobs.Cancelled()
     failed = sum(1 for r in results if isinstance(r, Exception))
@@ -140,42 +159,44 @@ def run(job_id: str) -> None:
 
 
 def _build_variant(job_id: str, conn: Conn, product: Product, vid: int, upstream: dict[str, str],
-                   stages: list[str]) -> Exception | None:
+                   stages: list[str], label: str) -> Exception | None:
     with session() as s:
         v = s.get(Variant, vid)
         title, concept, assumptions = v.title, v.concept, list(v.assumptions or [])
     drafts: dict[str, dict] = {}
     try:
         for sid in stages:
-            st, fw = STAGE_BY_ID[sid], fx.FRAMEWORK_BY_STAGE[sid]
-            ups = dict(upstream)
-            ups["この案（パターン）"] = f"{title}\n{concept}\n前提：" + "／".join(assumptions)
-            for prev, d in drafts.items():   # この案ですでに作った後工程
-                ups[f"{STAGE_BY_ID[prev].no} {STAGE_BY_ID[prev].name}（この案）"] = fx.to_markdown(
-                    STAGE_BY_ID[prev], fx.FRAMEWORK_BY_STAGE[prev], d)
-            turn = llm.converse(conn, st, fw, product.idea, fx.empty_draft(fw), ups, [],
-                                f"「{title}」の考え方と前提に従い、上流の決定と矛盾しないように、すべての項目の下書きを作ってください。"
-                                "この案らしさ（他の案との違い）が項目に表れるようにしてください。")
-            d = fx.empty_draft(fw)
-            for p in turn.proposals:
-                f = fw.get(p.field)
-                if f is None:
-                    continue
-                try:
-                    d[f.key] = fx.coerce(f, p.value)
-                except (ValueError, TypeError):
-                    continue
-            drafts[sid] = d
-            with session() as s:
-                s.get(Variant, vid).drafts = dict(drafts)
-                s.commit()
+            with jobs.task(job_id, f"{label}:{sid}"):
+                st, fw = STAGE_BY_ID[sid], fx.FRAMEWORK_BY_STAGE[sid]
+                ups = dict(upstream)
+                ups["この案（パターン）"] = f"{title}\n{concept}\n前提：" + "／".join(assumptions)
+                for prev, d in drafts.items():   # この案ですでに作った後工程
+                    ups[f"{STAGE_BY_ID[prev].no} {STAGE_BY_ID[prev].name}（この案）"] = fx.to_markdown(
+                        STAGE_BY_ID[prev], fx.FRAMEWORK_BY_STAGE[prev], d)
+                turn = llm.converse(conn, st, fw, product.idea, fx.empty_draft(fw), ups, [],
+                                    f"「{title}」の考え方と前提に従い、上流の決定と矛盾しないように、すべての項目の下書きを作ってください。"
+                                    "この案らしさ（他の案との違い）が項目に表れるようにしてください。")
+                d = fx.empty_draft(fw)
+                for p in turn.proposals:
+                    f = fw.get(p.field)
+                    if f is None:
+                        continue
+                    try:
+                        d[f.key] = fx.coerce(f, p.value)
+                    except (ValueError, TypeError):
+                        continue
+                drafts[sid] = d
+                with session() as s:
+                    s.get(Variant, vid).drafts = dict(drafts)
+                    s.commit()
             jobs.step(job_id, f"{title}：{st.no} {st.name}")
-        spec = drafts.get("s06") or repo.draft(product.id, "s06")
-        page = prototype(conn, product, title, concept, spec, drafts)
-        with session() as s:
-            v = s.get(Variant, vid)
-            v.prototype, v.status = page, "ready"
-            s.commit()
+        with jobs.task(job_id, f"{label}:prototype"):
+            spec = drafts.get("s06") or repo.draft(product.id, "s06")
+            page = prototype(conn, product, title, concept, spec, drafts)
+            with session() as s:
+                v = s.get(Variant, vid)
+                v.prototype, v.status = page, "ready"
+                s.commit()
         jobs.step(job_id, f"{title}：試作")
         return None
     except Exception as e:  # noqa: BLE001  この案だけ失敗にして、他の案は続ける（取り消しは呼び出し元へ返す）
@@ -338,6 +359,18 @@ def prototype_html(product: Product, number: int) -> str:
         return v.prototype
 
 
+def _copy_to_main(product: Product, sid: str, d: dict, user: str, number: int) -> list:
+    fw = fx.FRAMEWORK_BY_STAGE[sid]
+    values = {}
+    for f in fw.fields:
+        if f.key in d:
+            try:
+                values[f.key] = fx.coerce(f, d[f.key])
+            except (ValueError, TypeError):
+                continue
+    return repo.set_fields(product.id, sid, values, user, f"pre-product PP-{number}")
+
+
 def adopt(product: Product, user: str, number: int) -> dict:
     """この案の下書きを本線の各ステージに入れる。人がそこから直して更新・承認する。"""
     with session() as s:
@@ -345,17 +378,7 @@ def adopt(product: Product, user: str, number: int) -> dict:
         if v.status not in ("ready", "adopted"):
             raise AutodevError(409, "できあがった案だけを採用できます")
         drafts = dict(v.drafts or {})
-    changed = {}
-    for sid, d in drafts.items():
-        fw = fx.FRAMEWORK_BY_STAGE[sid]
-        values = {}
-        for f in fw.fields:
-            if f.key in d:
-                try:
-                    values[f.key] = fx.coerce(f, d[f.key])
-                except (ValueError, TypeError):
-                    continue
-        changed[sid] = repo.set_fields(product.id, sid, values, user, f"pre-product PP-{number}")
+    changed = {sid: _copy_to_main(product, sid, d, user, number) for sid, d in drafts.items()}
     with session() as s:
         v = _variant(s, product, number)
         v.status, v.adopted_by, v.adopted_at = "adopted", user, dt.datetime.now(dt.UTC)
@@ -363,6 +386,36 @@ def adopt(product: Product, user: str, number: int) -> dict:
     repo.log(product.id, None, "human", user, "autodev.adopt",
              {"pre_product": f"PP-{number}", "stages": {k: len(c) for k, c in changed.items()}})
     return variant(product, number)
+
+
+# ---------------- ステージごとに案を見る ----------------
+def stage_variants(product_id: str, sid: str) -> list[dict]:
+    """このステージの下書きを持つ案（新しい順）。ステージの画面で案ごとのタブにする。"""
+    with session() as s:
+        q = select(Variant).where(Variant.product_id == product_id).order_by(Variant.number.desc())
+        vs = s.execute(q).scalars()
+        return [{"number": v.number, "key": f"PP-{v.number}", "title": v.title, "status": v.status}
+                for v in vs if sid in (v.drafts or {}) and v.status != "failed"][:8]
+
+
+def variant_stage(product: Product, number: int, sid: str) -> dict:
+    with session() as s:
+        v = _variant(s, product, number)
+        d = (v.drafts or {}).get(sid)
+        if d is None:
+            st = STAGE_BY_ID[sid]
+            raise AutodevError(404, f"PP-{number} には {st.no}{st.name} の下書きがありません")
+        return {"number": v.number, "key": f"PP-{v.number}", "title": v.title, "concept": v.concept,
+                "assumptions": v.assumptions or [], "status": v.status, "draft": d,
+                "markdown": fx.to_markdown(STAGE_BY_ID[sid], fx.FRAMEWORK_BY_STAGE[sid], d)}
+
+
+def adopt_stage(product: Product, user: str, number: int, sid: str) -> dict:
+    """この案の、このステージの下書きだけを本線に入れる（工程ごとに案を選び分けられる）。"""
+    d = variant_stage(product, number, sid)["draft"]
+    changed = _copy_to_main(product, sid, d, user, number)
+    repo.log(product.id, sid, "human", user, "autodev.adopt_stage", {"pre_product": f"PP-{number}", "fields": changed})
+    return {"changed": changed}
 
 
 jobs.HANDLERS["autodev"] = run

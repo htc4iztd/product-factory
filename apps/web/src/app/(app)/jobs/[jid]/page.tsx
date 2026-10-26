@@ -6,6 +6,7 @@ import { UserMenu } from "@/components/UserMenu";
 import { AutoRefresh } from "@/components/autodev/AutoRefresh";
 import { JobProgress, JobStatus, duration, jobTarget } from "@/components/autodev/JobBits";
 import { JobControls } from "@/components/autodev/JobControls";
+import { TaskViews } from "@/components/jobs/TaskViews";
 import { when } from "@/components/team/RefText";
 
 const f = (n: number) => n.toLocaleString("ja-JP");
@@ -33,6 +34,10 @@ export default async function JobPage({ params }: { params: Promise<{ jid: strin
         </div>
         {active && <div className="card p-4"><JobProgress job={j} /></div>}
         {j.error && <p className="rounded-md bg-rose-50 px-4 py-3 text-[13px] text-rose-700">{j.error}</p>}
+        <section className="card p-5" aria-label="工程">
+          <div className="section-title mb-3">工程</div>
+          <TaskViews tasks={j.tasks ?? []} now={Date.now()} />
+        </section>
         <div className="grid gap-6 lg:grid-cols-2">
           <section className="card p-5 text-[13px]" aria-label="概要">
             <dl className="grid grid-cols-[8rem_1fr] gap-y-1.5">

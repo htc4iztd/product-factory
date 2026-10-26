@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { cookies } from "next/headers";
 import { SidebarShell } from "@/components/SidebarShell";
-import { BookText, Boxes, ChevronLeft, Code2, Diamond, FileText, KanbanSquare, LayoutDashboard, MessagesSquare, ScrollText, Settings2, Video } from "lucide-react";
+import { Activity, BookText, Boxes, ChevronLeft, Code2, Diamond, FileText, KanbanSquare, LayoutDashboard, MessagesSquare, ScrollText, Settings2, Video } from "lucide-react";
 import { agent, type Overview } from "@/lib/agent";
 import { NavItem } from "@/components/NavItem";
 import { StatusDot } from "@/components/StatusBadge";
@@ -77,6 +77,7 @@ export default async function ProductLayout({ children, params }: { children: Re
             <div className="section-title mb-1 px-2">プロダクト</div>
             <div className="space-y-0.5">
               <NavItem href={`/p/${id}/preproducts`}><Boxes size={15} />プリプロダクト</NavItem>
+              <NavItem href={`/jobs?product=${id}`}><Activity size={15} />ジョブ</NavItem>
               <NavItem href={`/p/${id}/code`}><Code2 size={15} />コード（IDE）</NavItem>
               <NavItem href={`/p/${id}/settings`}><Settings2 size={15} />ステージの設定</NavItem>
               <NavItem href={`/p/${id}/audit`}><ScrollText size={15} />監査ログ</NavItem>

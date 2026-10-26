@@ -8,12 +8,14 @@ Cloud Run では Cloud Run Jobs（環境変数 PF_JOB_NAME のジョブ）を、
 from __future__ import annotations
 
 import contextvars
+import copy
 import datetime as dt
 import json
 import os
 import threading
 import urllib.request
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
+from contextlib import contextmanager
 from dataclasses import dataclass
 
 from sqlalchemy import select
@@ -99,6 +101,7 @@ def create(
     total: int,
     model: str = "",
     retry_of: str | None = None,
+    tasks: list[dict] | None = None,
 ) -> str:
     with session() as s:
         j = JobRun(
@@ -113,6 +116,7 @@ def create(
             runner=runner(),
             created_by=user,
             retry_of=retry_of,
+            tasks=[_new_task(t) for t in tasks or []],
         )
         s.add(j)
         s.commit()
@@ -165,6 +169,9 @@ def execute(job_id: str) -> None:
             return
         if j.cancel_requested:
             j.status, j.finished_at = "cancelled", _now()
+            tasks = copy.deepcopy(j.tasks or [])
+            _close_tasks(tasks, "cancelled")
+            j.tasks = tasks
             s.commit()
             return
         j.status, j.started_at = "running", _now()
@@ -221,10 +228,101 @@ def step(job_id: str, text: str, advance: bool = True) -> None:
         raise Cancelled()
 
 
+# ---------------- 工程（タスク） ----------------
+# ジョブの中の工程を、依存関係つきで持つ（Airflow のタスクにあたる）。画面のグラフ・グリッド・ガントはこれを描く
+TASK_STATES = ("pending", "running", "done", "failed", "skipped", "cancelled")
+
+
+def _new_task(t: dict) -> dict:
+    return {
+        "id": t["id"],
+        "name": t.get("name", t["id"]),
+        "group": t.get("group", ""),
+        "deps": list(t.get("deps", [])),
+        "status": "pending",
+        "started_at": None,
+        "finished_at": None,
+        "error": None,
+        "detail": "",
+        "usage": None,
+    }
+
+
+def _update_tasks(job_id: str, fn: Callable[[list[dict]], None]) -> None:
+    # JSON の列は中身を書き換えても変更と見なされないので、複製して差し替える
+    with _step_lock, session() as s:
+        j = s.get(JobRun, job_id)
+        tasks = copy.deepcopy(j.tasks or [])
+        fn(tasks)
+        j.tasks = tasks
+        s.commit()
+
+
+def define_tasks(job_id: str, tasks: list[dict]) -> None:
+    """工程を足す。同じ id があれば名前とまとまり（group）だけ書き換える。"""
+
+    def apply(cur: list[dict]) -> None:
+        have = {t["id"]: t for t in cur}
+        for t in tasks:
+            if t["id"] in have:
+                have[t["id"]].update({k: t[k] for k in ("name", "group") if k in t})
+            else:
+                cur.append(_new_task(t))
+
+    _update_tasks(job_id, apply)
+
+
+def set_task(job_id: str, task_id: str, **fields) -> None:
+    def apply(cur: list[dict]) -> None:
+        for t in cur:
+            if t["id"] == task_id:
+                t.update(fields)
+
+    _update_tasks(job_id, apply)
+
+
+def skip_task(job_id: str, task_id: str, detail: str = "") -> None:
+    set_task(job_id, task_id, status="skipped", detail=detail, finished_at=_now().isoformat())
+
+
+@contextmanager
+def task(job_id: str, task_id: str) -> Iterator[None]:
+    """工程を1つ実行する。開始・終了の時刻、失敗の理由、この工程で使った LLM のトークンを残す。"""
+    set_task(job_id, task_id, status="running", started_at=_now().isoformat(), error=None)
+    m = llm.new_meter()
+    token = llm.task_meter.set(m)
+    try:
+        yield
+    except Cancelled:
+        set_task(job_id, task_id, status="cancelled", finished_at=_now().isoformat(), usage=copy.deepcopy(m))
+        raise
+    except Exception as e:
+        err = getattr(e, "message", None) or str(e)[:500] or type(e).__name__
+        set_task(job_id, task_id, status="failed", finished_at=_now().isoformat(), error=err, usage=copy.deepcopy(m))
+        raise
+    else:
+        set_task(job_id, task_id, status="done", finished_at=_now().isoformat(), usage=copy.deepcopy(m))
+    finally:
+        llm.task_meter.reset(token)
+
+
+def _close_tasks(tasks: list[dict], status: str) -> None:
+    """ジョブが終わったとき、まだ終わっていない工程の状態を決める。"""
+    now = _now().isoformat()
+    for t in tasks:
+        if t["status"] == "running":
+            t["status"], t["finished_at"] = ("cancelled" if status == "cancelled" else "failed"), now
+        elif t["status"] == "pending":
+            t["status"] = "cancelled" if status == "cancelled" else "skipped"
+
+
 def finish(job_id: str, status: str, error: str | None = None, usage: dict | None = None) -> None:
     with session() as s:
         j = s.get(JobRun, job_id)
         j.status, j.error, j.finished_at = status, error, _now()
+        tasks = copy.deepcopy(j.tasks or [])
+        _close_tasks(tasks, status)
+        j.tasks = tasks
         if usage is not None:
             j.usage = json.loads(json.dumps(usage))
         j.log = [
@@ -251,6 +349,9 @@ def cancel(job_id: str, tenant_id: str, user: str) -> dict:
         j.cancel_requested = True
         if j.status == "queued" and j.runner == "thread":
             j.status, j.finished_at = "cancelled", _now()
+            tasks = copy.deepcopy(j.tasks or [])
+            _close_tasks(tasks, "cancelled")
+            j.tasks = tasks
         execution = j.execution
         s.commit()
     if execution and runner() == "cloud-run-job":
@@ -262,6 +363,9 @@ def cancel(job_id: str, tenant_id: str, user: str) -> dict:
                 headers={"Authorization": f"Bearer {_gcp_token()}", "Content-Type": "application/json"},
             )
             urllib.request.urlopen(req, timeout=20).read()
+            # 実行を止めるとコンテナごと終わり、ジョブの中からは終了を書けないので、ここで取り消し済みにする
+            if get(job_id, tenant_id)["status"] in ("queued", "running"):
+                finish(job_id, "cancelled", None)
         except Exception:  # noqa: BLE001,S110  実行が既に終わっていても、取り消しの印は残っている
             pass
     repo.log(None, None, "human", user, "job.cancel", {"job": job_id}, tenant_id=tenant_id)
@@ -302,6 +406,7 @@ def _dict(j: JobRun, full: bool = True) -> dict:
         "started_at": j.started_at.isoformat() if j.started_at else None,
         "finished_at": j.finished_at.isoformat() if j.finished_at else None,
         "seconds": took,
+        "tasks": j.tasks or [],
     }
     if full:
         d["log"] = j.log or []
