@@ -313,6 +313,113 @@ class Variant(Base):
     created_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), default=_now)
 
 
+# ---------------- 社内のオントロジー ----------------
+class Concept(Base):
+    """社内の用語・組織・役割・業務・システムなど（テナント全体で1つ）。"""
+    __tablename__ = "concepts"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    tenant_id: Mapped[str] = mapped_column(String(64), index=True)
+    label: Mapped[str] = mapped_column(String(200))
+    kind: Mapped[str] = mapped_column(String(16), default="term")   # term | org | role | process | system | other
+    definition: Mapped[str] = mapped_column(Text, default="")
+    aliases: Mapped[list | None] = mapped_column(JSON, nullable=True)
+    examples: Mapped[list | None] = mapped_column(JSON, nullable=True)
+    status: Mapped[str] = mapped_column(String(10), default="active")  # active | proposed（AI の候補）
+    source: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    updated_by: Mapped[str] = mapped_column(String(200), default="")
+    updated_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), default=_now, onupdate=_now)
+
+
+class Relation(Base):
+    __tablename__ = "relations"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    tenant_id: Mapped[str] = mapped_column(String(64), index=True)
+    source_id: Mapped[int] = mapped_column(Integer, index=True)
+    target_id: Mapped[int] = mapped_column(Integer, index=True)
+    type: Mapped[str] = mapped_column(String(16))   # is_a | part_of | owned_by | uses | precedes | related
+    note: Mapped[str] = mapped_column(String(300), default="")
+
+
+# ---------------- 外部情報のリサーチライブラリ ----------------
+class ResearchLibrary(Base):
+    """トピックごとの資料室（RL-n）。記事を集め、ファクトを抜き出し、論点ごとにまとめる。"""
+    __tablename__ = "research_libraries"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    tenant_id: Mapped[str] = mapped_column(String(64), index=True)
+    number: Mapped[int] = mapped_column(Integer)
+    name: Mapped[str] = mapped_column(String(200))
+    description: Mapped[str] = mapped_column(Text, default="")
+    instructions: Mapped[str] = mapped_column(Text, default="")        # 何を集めるか（検索の指示）
+    use_search: Mapped[bool] = mapped_column(Boolean, default=True)
+    feeds: Mapped[list | None] = mapped_column(JSON, nullable=True)    # RSS / Atom の URL
+    sites: Mapped[list | None] = mapped_column(JSON, nullable=True)    # 変わったら取り込むページ（仕様・料金など）
+    issues: Mapped[list | None] = mapped_column(JSON, nullable=True)   # 論点
+    entities: Mapped[list | None] = mapped_column(JSON, nullable=True)  # 企業・団体（プレーヤー）
+    since: Mapped[str | None] = mapped_column(String(10), nullable=True)   # 集める期間の始まり
+    latest: Mapped[str | None] = mapped_column(String(10), nullable=True)  # 集めた記事の最新の日付
+    updated_at: Mapped[dt.datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_by: Mapped[str] = mapped_column(String(200))
+    created_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), default=_now)
+
+
+class ResearchArticle(Base):
+    __tablename__ = "research_articles"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    tenant_id: Mapped[str] = mapped_column(String(64), index=True)
+    library_id: Mapped[int] = mapped_column(Integer, index=True)
+    number: Mapped[int] = mapped_column(Integer)                        # RA-n（テナントの中で振る）
+    url: Mapped[str] = mapped_column(String(1000))
+    title: Mapped[str] = mapped_column(String(500))
+    publisher: Mapped[str] = mapped_column(String(200), default="")
+    published: Mapped[str | None] = mapped_column(String(10), nullable=True)
+    region: Mapped[str] = mapped_column(String(10), default="unknown")  # domestic | overseas | unknown
+    category: Mapped[str] = mapped_column(String(10), default="news")  # news | press | spec | public | other
+    summary: Mapped[str] = mapped_column(Text, default="")
+    issues: Mapped[list | None] = mapped_column(JSON, nullable=True)
+    entities: Mapped[list | None] = mapped_column(JSON, nullable=True)
+    checked: Mapped[bool] = mapped_column(Boolean, default=False)       # 本文を読んで要約したか
+    origin: Mapped[str] = mapped_column(String(10), default="manual")   # search | rss | site | manual
+    memo: Mapped[str] = mapped_column(Text, default="")
+    content_hash: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    added_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), default=_now)
+
+
+class ResearchFact(Base):
+    """記事に書かれた数字・事実を1件ずつの行にしたもの（RF-n）。"""
+    __tablename__ = "research_facts"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    tenant_id: Mapped[str] = mapped_column(String(64), index=True)
+    library_id: Mapped[int] = mapped_column(Integer, index=True)
+    article_id: Mapped[int] = mapped_column(Integer, index=True)
+    number: Mapped[int] = mapped_column(Integer)
+    date: Mapped[str | None] = mapped_column(String(10), nullable=True)
+    kind: Mapped[str] = mapped_column(String(20), default="other")      # survey | market | usage | price | spec | other
+    theme: Mapped[str] = mapped_column(String(100), default="")
+    metric: Mapped[str] = mapped_column(String(300))                    # 何の数字か
+    value: Mapped[str] = mapped_column(String(100))
+    scope: Mapped[str] = mapped_column(String(300), default="")         # 対象・範囲
+    source: Mapped[str] = mapped_column(String(300), default="")        # 出典（調査主体など）
+    quote: Mapped[str] = mapped_column(Text, default="")
+    verified: Mapped[bool] = mapped_column(Boolean, default=False)      # 原文に引用が見つかったか
+    added_by: Mapped[str] = mapped_column(String(200), default="")
+    added_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), default=_now)
+
+
+class ResearchNote(Base):
+    """論点のまとめ（issue）と、AI に頼んだ分析（analysis）。本文には根拠の RA-n を付ける。"""
+    __tablename__ = "research_notes"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    tenant_id: Mapped[str] = mapped_column(String(64), index=True)
+    library_id: Mapped[int] = mapped_column(Integer, index=True)
+    kind: Mapped[str] = mapped_column(String(10))       # issue | analysis
+    title: Mapped[str] = mapped_column(String(300))
+    body: Mapped[str] = mapped_column(Text, default="")
+    filters: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    articles: Mapped[int] = mapped_column(Integer, default=0)   # まとめたときの記事数
+    created_by: Mapped[str] = mapped_column(String(200))
+    created_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), default=_now)
+
+
 class TenantSecret(Base):
     """テナントの秘密情報（GitHub のトークンなど）。値は暗号化して置く。"""
     __tablename__ = "tenant_secrets"

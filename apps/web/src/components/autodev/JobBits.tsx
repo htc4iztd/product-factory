@@ -38,3 +38,11 @@ export function duration(sec: number | null): string {
   if (sec == null) return "—";
   return sec < 60 ? `${sec}秒` : `${Math.floor(sec / 60)}分${sec % 60}秒`;
 }
+
+// ジョブの結果を見る場所（ジョブの種類ごと）
+export function jobTarget(job: JobRun): { href: string; label: string } | null {
+  if (job.kind === "research" && job.params?.number) return { href: `/research/${job.params.number}`, label: `RL-${job.params.number}` };
+  if (!job.product_id) return null;
+  if (job.kind === "canvas") return { href: `/p/${job.product_id}/canvas`, label: "プロダクト・キャンバス" };
+  return { href: `/p/${job.product_id}/preproducts`, label: "プリプロダクト" };
+}

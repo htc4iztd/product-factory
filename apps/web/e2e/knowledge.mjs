@@ -1,0 +1,119 @@
+// 社内のオントロジーとリサーチライブラリ：対話でプロダクトを作る → 表紙が自動でできる → 用語と関係を登録し、AI に渡る内容を確かめる
+// → ライブラリを作り記事を足す → 論点・ファクト・分析・CSV → ②の対話にリサーチを取り込む
+// 使い方: BASE=http://localhost:3000 SHOTS=./shots node e2e/knowledge.mjs
+import { chromium } from "playwright";
+import fs from "node:fs";
+
+const BASE = process.env.BASE ?? "http://localhost:3000";
+const SHOTS = process.env.SHOTS ?? "./shots";
+fs.mkdirSync(SHOTS, { recursive: true });
+const browser = await chromium.launch();
+const page = await browser.newPage({ viewport: { width: 1440, height: 960 }, acceptDownloads: true });
+page.setDefaultTimeout(30000);
+page.on("dialog", (d) => d.accept());
+const shot = (n, full = false) => page.screenshot({ path: `${SHOTS}/${n}.png`, fullPage: full });
+const btn = (name, exact = false) => page.getByRole("button", { name, exact });
+
+await page.goto(`${BASE}/register`);
+await page.fill("input[name=name]", "KN");
+await page.fill("input[name=email]", `kn-${Date.now()}@example.com`);
+await page.fill("input[name=password]", "password123");
+await btn("登録して始める").click();
+await page.waitForURL(`${BASE}/`);
+
+// 対話で作ると、プロダクト・キャンバスの表紙がジョブで作られる
+await page.goto(`${BASE}/new`);
+for (const a of ["共働き世帯の家計簿アプリ。月次締めを楽にしたい", "共働きの夫婦。締め処理に時間がかかる", "レシートを撮るだけで締めまで終わる。MVP で"]) {
+  await page.getByText("考えています…").waitFor({ state: "detached" });
+  await page.getByLabel("返事").fill(a);
+  await btn("送信", true).click();
+}
+await page.getByText("作れます", { exact: true }).waitFor();
+await page.getByLabel("プロダクト名").fill("ふたりの家計簿");
+await btn("この内容でプロダクトをつくる").click();
+await page.waitForURL(/\/p\/[0-9a-f]+$/);
+const pid = page.url().split("/p/")[1];
+await page.goto(`${BASE}/jobs?kind=canvas`);
+await page.getByRole("link", { name: "ふたりの家計簿" }).first().waitFor();
+for (let i = 0; i < 30; i++) {
+  if (await page.getByText("完了").first().isVisible()) break;
+  await page.waitForTimeout(1000);
+  await page.reload();
+}
+await page.goto(`${BASE}/p/${pid}/canvas`);
+await page.locator("img").first().waitFor();
+await shot("k0-canvas-cover");
+
+// オントロジー：用語と組織を登録してつなぐ
+await page.goto(`${BASE}/ontology`);
+await page.getByLabel("名前", { exact: true }).fill("月次締め");
+await page.getByLabel("種類", { exact: true }).selectOption("process");
+await page.getByLabel("定義").fill("月末にその月の支出を確定させる作業");
+await page.getByLabel("別名").fill("締め処理");
+await btn("足す").click();
+await page.getByRole("cell", { name: "月次締め" }).waitFor();
+await page.getByLabel("名前", { exact: true }).fill("家計担当");
+await page.getByLabel("種類", { exact: true }).selectOption("role");
+await page.getByLabel("定義").fill("世帯で家計の締めを受け持つ人");
+await btn("足す").click();
+await page.getByRole("cell", { name: "家計担当" }).waitFor();
+await page.getByRole("cell", { name: "月次締め" }).click();
+await page.getByLabel("関係の種類").selectOption("owned_by");
+await page.getByLabel("相手").selectOption({ label: "家計担当" });
+await btn("つなぐ").click();
+await page.getByText("〜が担当").first().waitFor();
+await page.getByLabel("確かめる文章").fill("締め処理を5分で終わらせたい");
+await btn("確かめる").click();
+await page.locator("pre").getByText(/月次締め/).waitFor();
+await shot("k1-ontology", true);
+await btn("グラフ").click();
+await page.locator(".react-flow__node").nth(1).waitFor();
+await shot("k2-ontology-graph");
+const [ttl] = await Promise.all([page.waitForEvent("download"), page.getByRole("link", { name: "Turtle" }).click()]);
+const text = fs.readFileSync(await ttl.path(), "utf8");
+if (!text.includes("skos:prefLabel") || !text.includes("月次締め")) throw new Error("Turtle の書き出しがおかしい");
+
+// リサーチライブラリ：作る → 本文を貼って記事を足す
+await page.goto(`${BASE}/research`);
+await page.locator("input[name=name]").fill("家計管理アプリの動向");
+await page.locator("textarea[name=description]").fill("家計簿・家計管理サービスの利用実態");
+await page.locator("textarea[name=issues]").fill("利用実態\n締め処理");
+await page.locator("textarea[name=entities]").fill("調査会社");
+await btn("作る").click();
+await page.waitForURL(/\/research\/\d+\?tab=settings/);
+const lib = page.url().match(/research\/(\d+)/)[1];
+await page.getByRole("link", { name: "記事を足す" }).click();
+await page.waitForURL(/tab=add/);
+await page.getByLabel("URL", { exact: true }).fill("https://manual.example/kakeibo");
+await page.getByLabel("題名", { exact: true }).fill("家計簿アプリの利用調査");
+await page.getByLabel("本文", { exact: true }).fill("2026-10-20 調査会社による調査。共働き世帯の48%が家計簿アプリを使っている。市場規模は1200億円に達した。締め処理の手間が課題として挙がった。" + "本文。".repeat(60));
+await btn("足す").click();
+await page.getByText("読んでいます…").waitFor({ state: "detached" });
+await page.getByRole("link", { name: "記事", exact: true }).click();
+await page.getByRole("heading", { name: "家計簿アプリの利用調査" }).waitFor();
+await shot("k3-articles", true);
+await page.getByRole("link", { name: "論点", exact: true }).click();
+await page.getByRole("heading", { name: "締め処理" }).waitFor();
+await shot("k4-issues", true);
+await page.getByRole("link", { name: "ファクトDB" }).click();
+await page.getByRole("cell", { name: "48%" }).waitFor();
+const [csv] = await Promise.all([page.waitForEvent("download"), page.getByRole("link", { name: "CSVで保存" }).click()]);
+if (!fs.readFileSync(await csv.path(), "utf8").includes("48%")) throw new Error("CSV にファクトがない");
+await shot("k5-facts", true);
+await page.getByRole("link", { name: "データ分析" }).click();
+await page.getByLabel("問い").fill("利用は広がっているか");
+await btn("分析する").click();
+await page.getByRole("heading", { name: "利用は広がっているか", level: 3 }).waitFor();
+await shot("k6-analysis", true);
+
+// ②の対話にリサーチを取り込む
+await page.goto(`${BASE}/p/${pid}/s/s02`);
+await btn("リサーチから取り込む").click();
+await page.getByRole("combobox", { name: "ライブラリ" }).selectOption({ index: 0 });
+await page.getByLabel("論点", { exact: true }).selectOption("締め処理");
+await btn("送る", true).click();
+await page.getByText(/リサーチライブラリ RL-\d+「家計管理アプリの動向」から/).waitFor();
+await page.getByText("考えています…").waitFor({ state: "detached" });
+await shot("k7-stage-import");
+console.log(`ok product=${pid} library=RL-${lib}`);
+await browser.close();

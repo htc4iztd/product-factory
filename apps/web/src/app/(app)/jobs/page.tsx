@@ -4,7 +4,7 @@ import { agent, type JobDef, type JobRun, type Product } from "@/lib/agent";
 import { Logo } from "@/components/Logo";
 import { UserMenu } from "@/components/UserMenu";
 import { AutoRefresh } from "@/components/autodev/AutoRefresh";
-import { JobProgress, JobStatus, duration } from "@/components/autodev/JobBits";
+import { JobProgress, JobStatus, duration, jobTarget } from "@/components/autodev/JobBits";
 import { when } from "@/components/team/RefText";
 
 const f = (n: number) => n.toLocaleString("ja-JP");
@@ -61,7 +61,7 @@ export default async function JobsPage({ searchParams }: { searchParams: Promise
           <div className="card overflow-x-auto">
             <table className="w-full text-[12px]">
               <thead className="bg-zinc-50 text-left text-zinc-500">
-                <tr><th className="px-3 py-2">状態</th><th className="px-3 py-2">ジョブ</th><th className="px-3 py-2">プロダクト</th><th className="px-3 py-2 w-56">進み具合</th>
+                <tr><th className="px-3 py-2">状態</th><th className="px-3 py-2">ジョブ</th><th className="px-3 py-2">対象</th><th className="px-3 py-2 w-56">進み具合</th>
                   <th className="px-3 py-2">モデル</th><th className="px-3 py-2 text-right">入力</th><th className="px-3 py-2 text-right">出力</th><th className="px-3 py-2">所要</th><th className="px-3 py-2">開始</th></tr>
               </thead>
               <tbody>
@@ -70,7 +70,7 @@ export default async function JobsPage({ searchParams }: { searchParams: Promise
                   <tr key={r.id} className="border-t border-zinc-100 hover:bg-zinc-50">
                     <td className="px-3 py-2"><JobStatus status={r.status} /></td>
                     <td className="px-3 py-2"><Link href={`/jobs/${r.id}`} className="font-medium hover:underline">{r.name}</Link></td>
-                    <td className="px-3 py-2">{r.product_id ? <Link href={`/p/${r.product_id}/preproducts`} className="hover:underline">{pname[r.product_id] ?? r.product_id}</Link> : "—"}</td>
+                    <td className="px-3 py-2">{(() => { const t = jobTarget(r); return t ? <Link href={t.href} className="hover:underline">{r.product_id ? pname[r.product_id] ?? r.product_id : t.label}</Link> : "—"; })()}</td>
                     <td className="px-3 py-2"><JobProgress job={r} /></td>
                     <td className="px-3 py-2 font-mono text-[11px]">{r.model || "—"}</td>
                     <td className="px-3 py-2 text-right tabular-nums">{f(r.usage?.input_tokens ?? 0)}</td>

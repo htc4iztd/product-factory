@@ -264,7 +264,8 @@ class Engine:
                 "images": [{"id": r.id, "kind": r.kind, "note": r.note, "prompt": r.prompt, "model": r.model,
                             "created_by": r.created_by, "created_at": r.created_at.isoformat()} for r in rows]}
 
-    def generate_image(self, product: Product, user: str, kind: str, note: str) -> str:
+    @staticmethod
+    def generate_image(product: Product, user: str, kind: str, note: str) -> str:
         if product.status != "active":
             raise FactoryError(409, "このプロダクトは中止されています")
         if kind not in images.KINDS:

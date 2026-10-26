@@ -224,3 +224,38 @@ export type PreProduct = {
 };
 export type PreProductDetail = PreProduct & { markdown: Record<string, string>; job: JobRun };
 export type AutodevRun = JobRun & { upstream_changed: string[]; pre_products: PreProduct[] };
+
+// ---------------- 社内のオントロジー ----------------
+export type Concept = {
+  id: number; label: string; kind: string; definition: string; aliases: string[]; examples: string[];
+  status: "active" | "proposed"; source: string | null; updated_by: string; updated_at: string | null;
+};
+export type ConceptRelation = { id: number; source: number; target: number; type: string; note: string };
+export type Ontology = { concepts: Concept[]; relations: ConceptRelation[]; kinds: Record<string, string>; relation_types: Record<string, string> };
+
+// ---------------- リサーチライブラリ ----------------
+export type ResearchLibrary = {
+  id: number; number: number; key: string; name: string; description: string; instructions: string; use_search: boolean;
+  feeds: string[]; sites: string[]; issues: string[]; entities: string[]; since: string | null; latest: string | null;
+  updated_at: string | null; created_by: string; articles?: number; facts?: number;
+};
+export type ResearchArticle = {
+  id: number; number: number; key: string; url: string; title: string; publisher: string; published: string | null;
+  region: string; category: string; summary: string; issues: string[]; entities: string[]; checked: string | null;
+  origin: string; memo: string; added_at: string;
+};
+export type ResearchFact = {
+  number: number; key: string; date: string | null; kind: string; theme: string; metric: string; value: string; scope: string;
+  source: string; quote: string; verified: boolean; article: string; url: string; title: string; region: string; publisher: string;
+};
+export type ResearchNote = { id: number; title: string; body: string; filters: Record<string, string>; created_by: string; created_at: string };
+export type ResearchDetail = ResearchLibrary & {
+  items: ResearchArticle[]; facts: ResearchFact[];
+  issue_notes: Record<string, { body: string; articles: number; created_at: string }>;
+  analyses: ResearchNote[];
+  stats: {
+    articles: number; facts: number; by_month: [string, number][]; by_issue: [string, number][]; by_entity: [string, number][];
+    by_category: [string, number][]; by_region: [string, number][]; by_fact_kind: [string, number][];
+  };
+  options: { regions: Record<string, string>; categories: Record<string, string>; fact_kinds: Record<string, string> };
+};

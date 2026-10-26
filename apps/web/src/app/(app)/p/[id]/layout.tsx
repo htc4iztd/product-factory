@@ -86,7 +86,7 @@ export default async function ProductLayout({ children, params }: { children: Re
             運用ループ（L1〜L5）・トレース・変更要求は R2 で追加します。
           </div>
         </nav>
-        <div className="border-t border-zinc-200 p-3"><UserMenu /></div>
+        <div className="border-t border-zinc-200 p-3"><UserMenu stacked /></div>
     </>}>
       {children}
     </SidebarShell>

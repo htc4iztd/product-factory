@@ -8,9 +8,10 @@ from fastapi.responses import JSONResponse, Response
 from pydantic import BaseModel, Field
 from sqlalchemy import select
 
-from . import autodev, collab, ghsync, jobs, llm, llmconf
+from . import autodev, canvasjob, collab, ghsync, jobs, llm, llmconf, ontology, research
 from .api_collab import router as collab_router
 from .api_jobs import router as jobs_router
+from .api_knowledge import router as knowledge_router
 from .authz import GATE_GROUP, STAGE_GROUP, Caller, caller, require
 from .db import AuditLog, session
 from .engine import Engine, FactoryError, product_dict
@@ -53,8 +54,19 @@ async def _job_error(_, exc: jobs.JobError):
     return JSONResponse(status_code=exc.status, content={"detail": exc.message})
 
 
+@app.exception_handler(ontology.OntologyError)
+async def _ontology_error(_, exc: ontology.OntologyError):
+    return JSONResponse(status_code=exc.status, content={"detail": exc.message})
+
+
+@app.exception_handler(research.ResearchError)
+async def _research_error(_, exc: research.ResearchError):
+    return JSONResponse(status_code=exc.status, content={"detail": exc.message})
+
+
 app.include_router(collab_router)
 app.include_router(jobs_router)
+app.include_router(knowledge_router)
 
 
 class CreateProduct(BaseModel):
@@ -64,6 +76,7 @@ class CreateProduct(BaseModel):
     mode: str = Field(default="personal", pattern="^(personal|corporate)$")
     # 聞き取りで分かった①リーンキャンバスの値（下書きに入れる）
     canvas: dict[str, str | list[str]] | None = None
+    canvas_image: bool = False
 
 
 class IntakeMessage(BaseModel):
@@ -76,7 +89,7 @@ class IntakeBody(BaseModel):
 
 
 class Chat(BaseModel):
-    message: str = Field(min_length=1, max_length=8000)
+    message: str = Field(min_length=1, max_length=20000)  # リサーチの要約を貼れる長さ
     session_id: str | None = None
 
 
@@ -260,6 +273,8 @@ def create_product(body: CreateProduct, c: Caller = Depends(caller)):
     if c.base_role not in ("OWNER", "ADMIN"):
         raise HTTPException(403, "プロダクトを作れるのは ADMIN 以上")
     p = engine.create_product(c.tenant, c.user, body.name, body.idea, body.scope, body.mode, body.canvas)
+    if body.canvas_image:   # 対話で作ったときは、プロダクト・キャンバスの最初の1枚（表紙）も裏で作る
+        canvasjob.start(p, c.user)
     return product_dict(p)
 
 

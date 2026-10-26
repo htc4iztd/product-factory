@@ -95,9 +95,12 @@ await draftAndCommit("s05", "06-plan", async () => {
   await shot("06-plan-kpi-graph");
 });
 
-// プロダクト・キャンバス：最初の1枚を生成すると表紙になり、サイドバーに出る
+// プロダクト・キャンバス：対話で作ったので、最初の1枚（表紙）はジョブが作っている。もう1枚生成する
 await page.goto(`${BASE}/p/${pid}/canvas`);
-await btn("最初の1枚を生成する").click();
+for (let i = 0; i < 30 && !(await page.getByText("これまでの絵（1）").isVisible()); i++) {
+  await page.waitForTimeout(1000);
+  await page.reload();
+}
 await page.getByAltText(/プロダクトイメージ/).waitFor();
 await btn("生成する").click();
 await page.getByText("これまでの絵（2）").waitFor();

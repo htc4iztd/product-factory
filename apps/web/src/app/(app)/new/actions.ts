@@ -23,6 +23,7 @@ export async function createFromIntake(d: IntakeDraft): Promise<{ error?: string
     const p = await agent<Product>("/products", { method: "POST", body: {
       name: d.name.trim(), idea: d.idea.trim(), scope: d.scope === "poc" ? "poc" : "mvp",
       canvas: { customer_segments: d.customer_segments, problem: d.problem, solution: d.solution, uvp: d.uvp },
+      canvas_image: true,
     } });
     id = p.id;
   } catch (e) {

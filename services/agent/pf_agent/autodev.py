@@ -19,7 +19,7 @@ from pydantic import BaseModel
 from sqlalchemy import func, select
 
 from . import frameworks as fx
-from . import jobs, llm, llmconf, repo
+from . import jobs, llm, llmconf, ontology, repo
 from .db import JobRun, Product, Variant, session
 from .llmconf import Conn
 from .stages import STAGE_BY_ID, STAGES
@@ -109,6 +109,9 @@ def run(job_id: str) -> None:
     from_stage, stages, count, hint = p["from_stage"], list(p["stages"]), p["count"], p.get("hint", "")
     conn = llmconf.resolve(product.tenant_id)
     upstream, _ = _upstream(product.id, from_stage)
+    onto = ontology.context_for(product.tenant_id, product.idea + "\n".join(upstream.values()))
+    if onto:
+        upstream["社内の用語と関係"] = onto
     jobs.step(job_id, "パターンを決めています", advance=False)
     patterns = plan(conn, product, upstream, stages, count, hint)
     jobs.step(job_id, "パターンを決めました：" + "／".join(x.title for x in patterns))

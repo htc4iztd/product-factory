@@ -4,7 +4,7 @@ import { agent, type JobRun } from "@/lib/agent";
 import { Logo } from "@/components/Logo";
 import { UserMenu } from "@/components/UserMenu";
 import { AutoRefresh } from "@/components/autodev/AutoRefresh";
-import { JobProgress, JobStatus, duration } from "@/components/autodev/JobBits";
+import { JobProgress, JobStatus, duration, jobTarget } from "@/components/autodev/JobBits";
 import { JobControls } from "@/components/autodev/JobControls";
 import { when } from "@/components/team/RefText";
 
@@ -36,7 +36,7 @@ export default async function JobPage({ params }: { params: Promise<{ jid: strin
         <div className="grid gap-6 lg:grid-cols-2">
           <section className="card p-5 text-[13px]" aria-label="概要">
             <dl className="grid grid-cols-[8rem_1fr] gap-y-1.5">
-              <dt className="text-zinc-500">プロダクト</dt><dd>{j.product_id ? <Link href={`/p/${j.product_id}/preproducts`} className="text-brand-700 hover:underline">プリプロダクトを見る</Link> : "—"}</dd>
+              <dt className="text-zinc-500">結果</dt><dd>{jobTarget(j) ? <Link href={jobTarget(j)!.href} className="text-brand-700 hover:underline">{jobTarget(j)!.label}を見る</Link> : "—"}</dd>
               <dt className="text-zinc-500">実行基盤</dt><dd>{j.runner === "cloud-run-job" ? "Cloud Run Jobs" : "スレッド"}{j.execution && <div className="break-all font-mono text-[11px] text-zinc-500">{j.execution}</div>}</dd>
               <dt className="text-zinc-500">モデル</dt><dd className="font-mono text-[12px]">{j.model || "—"}</dd>
               <dt className="text-zinc-500">依頼</dt><dd>{j.created_by}・{when(j.created_at)}</dd>

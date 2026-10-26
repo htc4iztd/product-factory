@@ -14,7 +14,7 @@ import re
 
 from sqlalchemy import func, select
 
-from . import llm, llmconf, repo
+from . import llm, llmconf, ontology, repo
 from .db import Channel, Decision, Doc, Meeting, Notice, Post, Product, Ticket, session
 from .frameworks import ids_in
 
@@ -342,6 +342,11 @@ def stage_decisions(product_id: str, stage_id: str, draft_ids: list[str]) -> lis
 
 
 # ---------------- 会話から決定と宿題を抜き出す ----------------
+def _with_terms(product: Product, text: str) -> str:
+    """社内の用語（オントロジー）を前に付ける。記録の本文は後ろに置き、スタブの抜き出しには影響しない。"""
+    onto = ontology.context_for(product.tenant_id, text)
+    return text if not onto else f"{text}\n\n## 参考：{onto}"
+
 def _apply_extraction(s, product: Product, user: str, ex: llm.Extracted, source: dict) -> dict:
     made_d, made_t = [], []
     for x in ex.decisions:
@@ -360,7 +365,7 @@ def _apply_extraction(s, product: Product, user: str, ex: llm.Extracted, source:
 def extract_thread(product: Product, user: str, post_id: int) -> dict:
     th = thread(product, post_id)
     text = "\n".join(f"{p['author']}: {p['body']}" for p in [th["root"], *th["replies"]])
-    ex = llm.extract(llmconf.resolve(product.tenant_id), product.name, "スレッド", text)
+    ex = llm.extract(llmconf.resolve(product.tenant_id), product.name, "スレッド", _with_terms(product, text))
     with session() as s:
         out = _apply_extraction(s, product, user, ex, {"kind": "thread", "id": post_id})
         s.commit()
@@ -391,7 +396,7 @@ def import_posts(product: Product, user: str, channel_id: str, items: list[dict]
                  {"channel": channel_id, "provider": ext["provider"], "mode": "copy", "posts": len(items)})
         return {"mode": "copy", "posts": len(items)}
     text = "\n".join(f"{i.get('author') or '?'}: {i['body']}" for i in items)
-    ex = llm.extract(llmconf.resolve(product.tenant_id), product.name, f"{provider} の会話", text)
+    ex = llm.extract(llmconf.resolve(product.tenant_id), product.name, f"{provider} の会話", _with_terms(product, text))
     summary = f"【{provider} の会話の要約（{len(items)}件）】\n{ex.summary}"
     root = add_post(product, "ai", summary, channel_id=channel_id, source=src)
     with session() as s:
@@ -469,7 +474,7 @@ def make_minutes(product: Product, user: str, number: int) -> dict:
     if not text:
         raise CollabError(409, "文字起こし（会話の記録）を入れてから作ってください")
     ex = llm.extract(llmconf.resolve(product.tenant_id), product.name, f"会議「{title}」",
-                     (f"## 議題\n{agenda}\n\n" if agenda.strip() else "") + text)
+                     _with_terms(product, (f"## 議題\n{agenda}\n\n" if agenda.strip() else "") + text))
     with session() as s:
         m = _meeting(s, product, number)
         out = _apply_extraction(s, product, user, ex, {"kind": "meeting", "id": f"MTG-{m.number}"})
