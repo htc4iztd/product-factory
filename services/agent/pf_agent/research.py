@@ -74,7 +74,6 @@ DEFAULT_LAYERS = [
     "調査・投資家",
 ]
 MAX_NEW = 60  # 1回の更新で読む記事の上限
-MAX_QUERIES = 24  # 1回の更新で AI の検索に投げる問いの上限
 MAX_BYTES = 3_000_000
 REWRITE_AFTER = 3  # 論点のまとめを書き直す、新しい記事の数
 
@@ -497,82 +496,119 @@ def _date(s: str) -> str | None:
         return None
 
 
-def search_queries(lib: ResearchLibrary, since: str | None, today: str | None = None) -> list[tuple[str, str]]:
-    """AI の検索に投げる問い（問い, 期間）。1回の検索で返る出典は数件なので、
-    テーマ・論点・企業ごとと、期間を半年ずつに分けて投げる。"""
-    today = today or dt.date.today().isoformat()
-    topic = lib.instructions or lib.description or lib.name
-    # 期間を半年ずつ（新しい順）に分ける。期間の指定がなければ直近の半年
-    start = since or (dt.date.fromisoformat(today) - dt.timedelta(days=183)).isoformat()
-    wins, end = [], dt.date.fromisoformat(today)
-    while end.isoformat() > start and len(wins) < 8:
-        b = max(dt.date.fromisoformat(start), end - dt.timedelta(days=182))
-        wins.append(f"{b.isoformat()}〜{end.isoformat()}")
-        end = b - dt.timedelta(days=1)
-    wins = wins or [f"{start}〜{today}"]
-    whole = f"{start}〜{today}"
-    qs = [(f"{lib.name}：{topic}", w) for w in wins]
-    qs += [(f"{lib.name}：{i}（{(lib.issue_defs or {}).get(i, '')}）", whole) for i in lib.issues or []]
-    qs += [(f"{e} と {lib.name}", whole) for e in (lib.entities or [])[:8]]
-    return qs[:MAX_QUERIES]
-
-
 def search(conn: Conn, lib: ResearchLibrary, since: str | None, on_query=None) -> list[dict]:
-    """期間内の記事を探す。Claude の接続なら Claude が Web 検索を繰り返すエージェントとして集め（claude_search）、
-    Gemini の接続なら Google 検索（Grounding）に問いを分けて何度も投げる。
+    """期間内の記事を探す。どちらの接続でも、期間を区切って、区切りごとに AI に Web 検索を繰り返させ、
+    見つけた記事を伝えて「まだ見つけていない記事」を探し直させる（新しく見つからなくなったら次の区切りへ）。
+    Claude の接続なら Claude の Web 検索ツール、Gemini の接続なら Google 検索（Grounding）を使う。
     出典ごとに、検索結果の文章（見出し・公開日・要点）も持っておく（本文が開けないときに使う）。"""
     if not can_search(conn):
         return []
     if llm._is_claude(conn, conn.chat_model):
         return claude_search(conn, lib, since, on_query)
+    return gemini_search(conn, lib, since, on_query)
+
+
+def _hunt_prompt(lib: ResearchLibrary, lo: str, hi: str, mine: list[dict], angle: str, out: str) -> str:
+    topic = lib.instructions or lib.description or lib.name
+    issues = "、".join(
+        f"{i}（{(lib.issue_defs or {}).get(i)}）" if (lib.issue_defs or {}).get(i) else i for i in lib.issues or []
+    )
+    return (
+        "あなたは調査担当の司書です。Web 検索を何度も使って、次のテーマについて"
+        f" {lo} から {hi} の間に公開されたニュース記事・プレスリリース・技術仕様・公的資料を、"
+        "漏れなく集めてください。\n"
+        f"テーマ：{lib.name}\n集める範囲：{topic}\n"
+        + (f"今回の切り口：{angle}\n" if angle else "")
+        + (f"論点：{issues}\n" if issues else "")
+        + (f"注目する企業・団体：{'、'.join(lib.entities or [])}\n" if lib.entities else "")
+        + "- 日本語と英語の両方で、論点ごと・企業ごとに問いを変えて検索する。期間外の記事は入れない。\n"
+        "- 集約サイトより一次情報（各社の発表・報道機関・公的機関）を優先する。\n"
+        + (
+            "- 次の記事は見つけ済みなので、これ以外を探す：\n"
+            + "\n".join(f"  - {f['title']}" for f in mine[:60] if f.get("title"))
+            + "\n"
+            if mine
+            else ""
+        )
+        + out
+    )
+
+
+GEMINI_ROUNDS = 3  # Gemini は1回で返る出典が少ないので、探し直しを多めにする
+
+
+def _gemini_round(conn: Conn, prompt: str) -> list[dict]:
+    """Google 検索つきで1回答えさせ、出典ごとに（URL, 題名, 発信元, 日付, 検索結果の文章）にする。
+    Gemini は1件1行で書かせ、その行を根拠にした出典（grounding_supports）から、行と URL を対応づける。"""
     from google.genai import types
 
     client = llm._genai(conn)
+    resp = client.models.generate_content(
+        model=conn.chat_model,
+        contents=prompt,
+        config=types.GenerateContentConfig(tools=[types.Tool(google_search=types.GoogleSearch())]),
+    )
+    llm._record_gemini(conn.chat_model, resp)
     out: dict[str, dict] = {}
-    for q, win in search_queries(lib, since):
-        prompt = (
-            f"次のテーマについて、{win} に公開されたニュース記事・プレスリリース・技術仕様・公的資料を"
-            "できるだけ多く（10件以上）探してください。見つけたものを1件ずつ"
-            "「公開日（YYYY-MM-DD）｜発信元｜見出し｜要点（1〜2文）」の形で1行に書いてください。\n"
-            f"テーマ：{q}\n" + (f"注目する企業・団体：{'、'.join(lib.entities or [])}\n" if lib.entities else "")
-        )
-        try:
-            resp = client.models.generate_content(
-                model=conn.chat_model,
-                contents=prompt,
-                config=types.GenerateContentConfig(tools=[types.Tool(google_search=types.GoogleSearch())]),
-            )
-        except Exception as e:  # noqa: BLE001  1つの問いの失敗で止めない
-            if on_query:
-                on_query(q, win, -1, str(e)[:120])
-            continue
-        llm._record_gemini(conn.chat_model, resp)
-        got = 0
-        for cand in resp.candidates or []:
-            gm = getattr(cand, "grounding_metadata", None)
-            chunks = getattr(gm, "grounding_chunks", None) or []
-            snip: dict[int, list[str]] = {}
-            for sp in getattr(gm, "grounding_supports", None) or []:
-                text = getattr(getattr(sp, "segment", None), "text", "") or ""
-                for i in getattr(sp, "grounding_chunk_indices", None) or []:
-                    snip.setdefault(i, []).append(text)
-            for i, ch in enumerate(chunks):
-                web = getattr(ch, "web", None)
-                if web is None or not web.uri:
-                    continue
-                key = web.uri
-                if key not in out:
-                    got += 1
-                    out[key] = {"url": web.uri, "title": "", "site": web.title or "", "snippet": ""}
-                more = "\n".join(snip.get(i, []))
-                if more and more not in out[key]["snippet"]:
-                    out[key]["snippet"] = (out[key]["snippet"] + "\n" + more).strip()[:3000]
-                    d = _date(more)
-                    if d and not out[key].get("date"):
-                        out[key]["date"] = d
-        if on_query:
-            on_query(q, win, got, "")
+    for cand in resp.candidates or []:
+        gm = getattr(cand, "grounding_metadata", None)
+        chunks = getattr(gm, "grounding_chunks", None) or []
+        lines: dict[int, list[str]] = {}
+        for sp in getattr(gm, "grounding_supports", None) or []:
+            text = (getattr(getattr(sp, "segment", None), "text", "") or "").strip()
+            for i in getattr(sp, "grounding_chunk_indices", None) or []:
+                if text:
+                    lines.setdefault(i, []).append(text)
+        for i, ch in enumerate(chunks):
+            web = getattr(ch, "web", None)
+            if web is None or not web.uri or web.uri in out:
+                continue
+            ls = lines.get(i, [])
+            head = next((x for x in ls if "｜" in x or "|" in x), ls[0] if ls else "")
+            parts = [x.strip(" -・*") for x in re.split(r"[｜|]", head)]
+            title = parts[2] if len(parts) >= 3 else (parts[0] if parts else "")
+            out[web.uri] = {
+                "url": web.uri,
+                "title": title[:300],
+                "site": (parts[1] if len(parts) >= 2 else "") or (web.title or ""),
+                "date": _date(head),
+                "snippet": "\n".join(ls)[:3000],
+            }
     return list(out.values())
+
+
+def gemini_search(conn: Conn, lib: ResearchLibrary, since: str | None, on_query=None) -> list[dict]:
+    found: dict[str, dict] = {}
+    titles: set[str] = set()
+    fmt = "見つけたものを1件ずつ「公開日（YYYY-MM-DD）｜発信元｜見出し｜要点（1〜2文）」の形で1行に書いてください。"
+    plan = [(lo, hi, "") for lo, hi in windows(since)]
+    whole = (plan[-1][0], plan[0][1]) if plan else ("", "")
+    plan += [(whole[0], whole[1], f"論点「{i}」") for i in lib.issues or []]
+    plan += [(whole[0], whole[1], f"「{e}」の動き") for e in (lib.entities or [])[:8]]
+    for lo, hi, angle in plan:
+        for rnd in range(GEMINI_ROUNDS if not angle else 1):
+            mine = [f for f in found.values() if f.get("win") == (lo, hi) or lo <= (f.get("date") or "") <= hi]
+            try:
+                got = _gemini_round(conn, _hunt_prompt(lib, lo, hi, mine, angle, fmt))
+            except Exception as e:  # noqa: BLE001  1回の失敗で止めない
+                if on_query:
+                    on_query(f"{lo}〜{hi}{angle}", f"{rnd + 1}回目", -1, str(e)[:120])
+                break
+            new = 0
+            for x in got:
+                key = x["title"] or x["url"]
+                if x["url"] in found or key in titles:
+                    continue
+                if x["date"] and not (lo <= x["date"] <= hi):
+                    continue
+                found[x["url"]] = {**x, "win": (lo, hi)}
+                titles.add(key)
+                new += 1
+            if on_query:
+                on_query(f"{lo}〜{hi}{angle}", f"{rnd + 1}回目", new, "")
+            if new < 3:
+                break
+    return [{k: v for k, v in f.items() if k != "win"} for f in found.values()]
 
 
 def grounded(conn: Conn, prompt: str) -> tuple[str, list[dict]]:
@@ -650,7 +686,7 @@ def _claude_web(conn: Conn, prompt: str, max_uses: int) -> tuple[str, list[dict]
     return text.strip(), list(results.values())
 
 
-def claude_windows(since: str | None, today: str | None = None) -> list[tuple[str, str]]:
+def windows(since: str | None, today: str | None = None) -> list[tuple[str, str]]:
     """期間を、新しい順の区切り（開始, 終了）に分ける。最大 MAX_WINDOWS 個（長い期間は1区切りを広げる）。"""
     end = dt.date.fromisoformat(today or dt.date.today().isoformat())
     start = dt.date.fromisoformat(since) if since else end - dt.timedelta(days=31)
@@ -678,36 +714,17 @@ def _json_list(text: str) -> list[dict]:
 
 
 def claude_search(conn: Conn, lib: ResearchLibrary, since: str | None, on_query=None) -> list[dict]:
-    """Claude を、期間の区切りごとに Web 検索を繰り返すエージェントとして動かし、記事を集める。
-    区切りごとに、見つけた記事を伝えて「まだ見つけていない記事」を探し直す（新しく見つからなくなったら次へ）。"""
+    """Claude を、期間の区切りごとに Web 検索を繰り返すエージェントとして動かし、記事を集める。"""
     found: dict[str, dict] = {}
-    topic = lib.instructions or lib.description or lib.name
-    issues = "、".join(
-        f"{i}（{(lib.issue_defs or {}).get(i)}）" if (lib.issue_defs or {}).get(i) else i for i in lib.issues or []
+    fmt = (
+        "最後に、見つけた記事を次の形の JSON の配列だけで、```json のコードブロックに書いてください。"
+        '[{"url": "...", "title": "見出し", "published": "YYYY-MM-DD", "publisher": "発信元", '
+        '"summary": "要点を1〜2文"}]'
     )
-    for lo, hi in claude_windows(since):
+    for lo, hi in windows(since):
         for rnd in range(MAX_ROUNDS):
             mine = [f for f in found.values() if lo <= (f.get("date") or "") <= hi]
-            prompt = (
-                "あなたは調査担当の司書です。Web 検索を何度も使って、次のテーマについて"
-                f" {lo} から {hi} の間に公開されたニュース記事・プレスリリース・技術仕様・公的資料を、"
-                "漏れなく集めてください。\n"
-                f"テーマ：{lib.name}\n集める範囲：{topic}\n"
-                + (f"論点：{issues}\n" if issues else "")
-                + (f"注目する企業・団体：{'、'.join(lib.entities or [])}\n" if lib.entities else "")
-                + "- 日本語と英語の両方で、論点ごと・企業ごとに問いを変えて検索する。期間外の記事は入れない。\n"
-                "- 集約サイトより一次情報（各社の発表・報道機関・公的機関）を優先する。\n"
-                + (
-                    "- 次の記事は見つけ済みなので、これ以外を探す：\n"
-                    + "\n".join(f"  - {f['title']}（{f['url']}）" for f in mine[:60])
-                    + "\n"
-                    if mine
-                    else ""
-                )
-                + "最後に、見つけた記事を次の形の JSON の配列だけで、```json のコードブロックに書いてください。"
-                '[{"url": "...", "title": "見出し", "published": "YYYY-MM-DD", "publisher": "発信元", '
-                '"summary": "要点を1〜2文"}]'
-            )
+            prompt = _hunt_prompt(lib, lo, hi, mine, "", fmt)
             try:
                 text, results = _claude_web(conn, prompt, max_uses=SEARCHES_PER_ROUND)
             except Exception as e:  # noqa: BLE001  1つの区切りの失敗で止めない
@@ -954,10 +971,8 @@ def run_update(job_id: str) -> None:
                     found = search(conn, lib, since, on_query)
                     cands += [{**x, "origin": "search"} for x in found]
                     how = (
-                        f"Claude の Web 検索（{len(claude_windows(since))}の期間に区切って）"
-                        if llm._is_claude(conn, conn.chat_model)
-                        else f"Google 検索 {len(search_queries(lib, since))}回"
-                    )
+                        "Claude の Web 検索" if llm._is_claude(conn, conn.chat_model) else "Gemini の Google 検索"
+                    ) + f"（{len(windows(since))}の期間に区切って）"
                     jobs.set_task(job_id, "search", detail=f"{how}で {len(found)}件")
                 jobs.step(job_id, f"検索：{len(found)}件")
             except jobs.Cancelled:

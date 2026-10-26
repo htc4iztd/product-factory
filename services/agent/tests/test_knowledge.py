@@ -258,14 +258,6 @@ def test_research_search_many_queries_snippet_fallback_and_period(client, monkey
         headers=H,
         json={"name": "家計管理", "issues": ["締め処理", "利用実態"], "entities": ["調査会社"], "since": "2025-01-01"},
     )
-    lib = research.libraries("tenant-a")[0]
-    from pf_agent.db import ResearchLibrary, session
-
-    with session() as s:
-        qs = research.search_queries(s.get(ResearchLibrary, lib["id"]), "2025-01-01", today="2026-10-26")
-    wins = [w for q, w in qs if q.startswith("家計管理：") and "締め処理" not in q and "利用実態" not in q]
-    assert len(wins) == 4 and wins[0].endswith("2026-10-26") and wins[-1].startswith("2025-01-01")
-    assert any("締め処理" in q for q, _ in qs) and any(q.startswith("調査会社") for q, _ in qs)
     # 最新の記事（2026-10-20）があっても、期間の始まり（2025-01-01）から探す
     c.post("/research/1/articles", headers=H, json={"url": "https://manual.example/1", "text": ARTICLE})
     seen = {}
@@ -310,7 +302,7 @@ def test_claude_web_search_agent(client, monkeypatch):
     from pf_agent import llm, research
     from pf_agent.llmconf import Conn
 
-    wins = research.claude_windows("2025-01-01", today="2026-10-26")
+    wins = research.windows("2025-01-01", today="2026-10-26")
     assert len(wins) == 12 and wins[0][1] == "2026-10-26" and wins[-1][0] == "2025-01-01"
     assert all(wins[i][0] > wins[i + 1][1] for i in range(len(wins) - 1))  # 重ならない
 
@@ -378,3 +370,51 @@ def test_claude_web_search_agent(client, monkeypatch):
     conn1p = Conn(**{**conn.__dict__, "provider": "anthropic", "api_key": "k"})
     assert research._web_tool(conn1p, 3)["type"] == "web_search_20260209"
     assert research.can_search(conn1p) and not research.can_search(Conn(**{**conn.__dict__, "provider": "openai"}))
+
+
+def test_gemini_search_hunts_by_window_until_no_new(client, monkeypatch):
+    """Gemini の接続でも、期間の区切りごとに検索を繰り返し、見つけた見出しを伝えて探し直す。
+    1件1行の出力と出典（grounding_supports）を対応づけて、URL・見出し・日付・文章にする。"""
+    import re as _re
+    from types import SimpleNamespace as NS
+
+    from pf_agent import llm, research
+    from pf_agent.llmconf import Conn
+
+    prompts = []
+
+    def fake_generate(model, contents, config):
+        prompts.append(contents)
+        lo = _re.search(r"(\d{4}-\d{2}-\d{2}) から", contents).group(1)
+        n = sum(1 for p in prompts if lo in p)  # この区切りで何回目か
+        k = 4 if n == 1 else (1 if n == 2 else 0)  # 1回目は4件、2回目は1件（3件未満なので打ち切り）
+        lines = [f"{lo}｜報道{i}｜記事 {lo} #{n}-{i}｜要点。" for i in range(k)]
+        if "切り口" in contents:
+            lines = []
+        chunks = [NS(web=NS(uri=f"https://redirect.example/{lo}/{n}/{i}", title="news.example")) for i in range(k)]
+        sups = [NS(segment=NS(text=line), grounding_chunk_indices=[i]) for i, line in enumerate(lines)]
+        gm = NS(grounding_chunks=chunks, grounding_supports=sups)
+        return NS(candidates=[NS(grounding_metadata=gm)], usage_metadata=None, text="\n".join(lines))
+
+    monkeypatch.setattr(llm, "_genai", lambda conn: NS(models=NS(generate_content=fake_generate)))
+    conn = Conn(
+        provider="vertex",
+        chat_model="gemini-3.5-flash",
+        summary_model="gemini-3.5-flash",
+        image_model="",
+        source="app",
+        project="p",
+        location="global",
+    )
+    lib = NS(name="家計管理", instructions="", description="家計簿", issues=["締め処理"], issue_defs={}, entities=[])
+    log = []
+    out = research.search(conn, lib, "2026-07-01", lambda q, w, n, e: log.append((q, w, n)))
+    wins = research.windows("2026-07-01")
+    assert len(out) == 5 * len(wins)  # 区切りごとに 4 + 1 件
+    first = next(x for x in out if x["url"].endswith("/1/0"))
+    assert (
+        first["title"].startswith("記事 ") and first["site"] == "報道0" and first["date"] and "要点" in first["snippet"]
+    )
+    second = [p for p in prompts if wins[0][0] in p and "切り口" not in p][1]
+    assert "見つけ済み" in second and "記事 " in second  # 2回目は見つけた見出しを伝える
+    assert any("論点「締め処理」" in p for p in prompts)  # 論点の切り口でも探す
