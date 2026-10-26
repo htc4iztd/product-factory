@@ -8,8 +8,9 @@ from fastapi.responses import JSONResponse, Response
 from pydantic import BaseModel, Field
 from sqlalchemy import select
 
-from . import collab, ghsync, llm, llmconf
+from . import autodev, collab, ghsync, jobs, llm, llmconf
 from .api_collab import router as collab_router
+from .api_jobs import router as jobs_router
 from .authz import GATE_GROUP, STAGE_GROUP, Caller, caller, require
 from .db import AuditLog, session
 from .engine import Engine, FactoryError, product_dict
@@ -42,7 +43,18 @@ async def _sync_error(_, exc: ghsync.SyncError):
     return JSONResponse(status_code=exc.status, content={"detail": exc.message})
 
 
+@app.exception_handler(autodev.AutodevError)
+async def _autodev_error(_, exc: autodev.AutodevError):
+    return JSONResponse(status_code=exc.status, content={"detail": exc.message})
+
+
+@app.exception_handler(jobs.JobError)
+async def _job_error(_, exc: jobs.JobError):
+    return JSONResponse(status_code=exc.status, content={"detail": exc.message})
+
+
 app.include_router(collab_router)
+app.include_router(jobs_router)
 
 
 class CreateProduct(BaseModel):

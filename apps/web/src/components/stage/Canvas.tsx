@@ -36,7 +36,8 @@ function Panel({ children, className = "" }: { children: React.ReactNode; classN
 // ---------- ① リーンキャンバス ----------
 function LeanCanvas({ c }: { c: Ctx }) {
   return (
-    <div className="grid gap-px overflow-hidden rounded-xl border border-zinc-200 bg-zinc-200 shadow-card lg:grid-cols-10">
+    // 画面の縦いっぱいに広げる（上の2段は同じ高さ、下のコスト・収益は低め）
+    <div className="grid gap-px overflow-hidden rounded-xl border border-zinc-200 bg-zinc-200 shadow-card lg:min-h-[calc(100vh-15rem)] lg:grid-cols-10 lg:grid-rows-[3fr_3fr_2fr]">
       <Cell className="lg:col-span-2 lg:col-start-1 lg:row-span-2 lg:row-start-1">
         <F c={c} k="problem" compact /><F c={c} k="alternatives" compact />
       </Cell>

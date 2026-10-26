@@ -128,6 +128,7 @@ export type StageDetail = {
   references: { id: string; no: string; name: string; framework: string; status: string; source: string; markdown: string }[];
   trace: Trace | null;
   decisions: Decision[];
+  autodev_targets: string[];
 };
 export type Trace =
   | { kind: "stories_without_ac"; total: number; items: { id: string; text: string; release: string }[] }
@@ -202,3 +203,24 @@ export type GithubStatus = {
   token: { source: "tenant" | "server" | "none"; hint: string | null };
 };
 export type GithubToken = { source: "tenant" | "server" | "none"; hint: string | null; can_edit: boolean };
+
+// ---------------- ジョブとプリプロダクト ----------------
+export type JobUsage = { calls: number; input_tokens: number; output_tokens: number; by_model: Record<string, { calls: number; input_tokens: number; output_tokens: number }> };
+export type JobRun = {
+  id: string; kind: string; name: string; product_id: string | null; params: Record<string, unknown>;
+  status: "queued" | "running" | "done" | "failed" | "cancelled"; progress: { done: number; total: number; step: string } | null;
+  usage: JobUsage | null; runner: "cloud-run-job" | "thread"; execution: string | null; error: string | null; model: string;
+  retry_of: string | null; cancel_requested: boolean; created_by: string; created_at: string; started_at: string | null;
+  finished_at: string | null; seconds: number | null; log?: { at: string; step: string }[];
+};
+export type JobDef = {
+  kind: string; name: string; description: string; trigger: string; timeout_min: number; status: "available" | "planned";
+  runner: string; cloud_run_job: string | null; region: string | null; runs: number; running: number; failed: number; tokens: number;
+};
+export type PreProduct = {
+  number: number; key: string; job_id: string; title: string; concept: string; assumptions: string[];
+  status: "generating" | "ready" | "failed" | "adopted"; error: string | null; stages: string[]; has_prototype: boolean;
+  adopted_by: string | null; adopted_at: string | null; created_at: string;
+};
+export type PreProductDetail = PreProduct & { markdown: Record<string, string>; job: JobRun };
+export type AutodevRun = JobRun & { upstream_changed: string[]; pre_products: PreProduct[] };

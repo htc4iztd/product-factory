@@ -7,6 +7,7 @@ import { cookies } from "next/headers";
 import { AiDrawer } from "@/components/stage/AiDrawer";
 import { DocEditor } from "@/components/stage/DocEditor";
 import { ApprovalPanel, ClosedBanner, CommitButton, RecheckBanner } from "@/components/stage/StageActions";
+import { AutodevButton } from "@/components/autodev/AutodevButton";
 
 type Props = { params: Promise<{ id: string; stage: string }>; searchParams: Promise<{ tab?: string; session?: string }> };
 
@@ -45,6 +46,7 @@ export default async function StagePage({ params, searchParams }: Props) {
               <div>{st.approved_version ? `最新版 v${st.approved_version}` : "版なし"}{st.dirty && st.approved_version > 0 ? "・未更新の変更あり" : ""}</div>
             </div>
             {st.approval_required && <span className="chip"><Lock size={11} />承認あり</span>}
+            {!readOnly && <AutodevButton pid={id} sid={stage} targets={st.autodev_targets} />}
             {st.enabled && !awaiting && (
               <CommitButton pid={id} sid={stage} missing={st.missing} dirty={st.dirty} approval={st.approval_required} hasVersion={st.current_version > 0} />
             )}

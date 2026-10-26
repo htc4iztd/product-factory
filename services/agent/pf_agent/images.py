@@ -122,6 +122,7 @@ def generate(conn: Conn, kind: str, prompt: str, name: str, facts: list[dict]) -
         config=types.GenerateContentConfig(response_modalities=["IMAGE"],
                                            image_config=types.ImageConfig(aspect_ratio="16:9")),
     )
+    llm._record_gemini(model_name(conn), resp)
     for cand in resp.candidates or []:
         for part in (cand.content.parts if cand.content else None) or []:
             if part.inline_data and part.inline_data.data:

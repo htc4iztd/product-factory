@@ -5,13 +5,16 @@ APIキーがない環境（CI・ローカル）では決定的なスタブで動
 """
 from __future__ import annotations
 
+import contextvars
 import ipaddress
 import json
 import re
 import socket
+import threading
 import time
 import urllib.error
 import urllib.request
+from contextlib import contextmanager
 from urllib.parse import urlparse
 
 from pydantic import BaseModel
@@ -26,6 +29,54 @@ _FALLBACK_MODELS = {"claude-opus-5-5", "claude-opus-5", "claude-sonnet-5-5", "cl
 
 class LLMError(Exception):
     pass
+
+
+# ---------------- 使用量の記録 ----------------
+# ジョブの中で呼んだ LLM のトークン量を、ジョブごとに数える。track() の中の呼び出しだけを数える
+_meter: contextvars.ContextVar[dict | None] = contextvars.ContextVar("pf_llm_meter", default=None)
+_meter_lock = threading.Lock()
+
+
+def new_meter() -> dict:
+    return {"calls": 0, "input_tokens": 0, "output_tokens": 0, "by_model": {}}
+
+
+@contextmanager
+def track(meter: dict):
+    token = _meter.set(meter)
+    try:
+        yield meter
+    finally:
+        _meter.reset(token)
+
+
+def _record(model: str, input_tokens: int | None, output_tokens: int | None) -> None:
+    m = _meter.get()
+    if m is None:
+        return
+    i, o = int(input_tokens or 0), int(output_tokens or 0)
+    with _meter_lock:
+        m["calls"] += 1
+        m["input_tokens"] += i
+        m["output_tokens"] += o
+        b = m["by_model"].setdefault(model, {"calls": 0, "input_tokens": 0, "output_tokens": 0})
+        b["calls"] += 1
+        b["input_tokens"] += i
+        b["output_tokens"] += o
+
+
+def _record_claude(model: str, resp) -> None:
+    u = getattr(resp, "usage", None)
+    if u is not None:
+        cached = (getattr(u, "cache_read_input_tokens", 0) or 0) + (getattr(u, "cache_creation_input_tokens", 0) or 0)
+        _record(model, (u.input_tokens or 0) + cached, u.output_tokens)
+
+
+def _record_gemini(model: str, resp) -> None:
+    u = getattr(resp, "usage_metadata", None)
+    if u is not None:
+        out = (getattr(u, "candidates_token_count", 0) or 0) + (getattr(u, "thoughts_token_count", 0) or 0)
+        _record(model, getattr(u, "prompt_token_count", 0), out)
 
 
 class Proposal(BaseModel):
@@ -118,6 +169,7 @@ def _stub(fw: Framework, idea: str, draft: dict, message: str) -> Turn:
 def converse(conn: Conn, stage: Stage, fw: Framework, idea: str, draft: dict, upstream: dict[str, str],
              history: list[dict], message: str) -> Turn:
     if conn.provider == "stub":
+        _record("stub", 0, 0)
         return _stub(fw, idea, draft, message)
     return _json(conn, conn.chat_model, _prompt(stage, fw, idea, draft, upstream, history, message), Turn)
 
@@ -345,6 +397,7 @@ def _json(conn: Conn, model: str, prompt: str, schema: type[BaseModel]):
                                               betas=["server-side-fallback-2026-07-01"], fallbacks="default")
         else:
             resp = client.messages.parse(**_claude_kwargs(prompt, model), output_format=schema)
+        _record_claude(model, resp)
         _claude_check(resp)
         return resp.parsed_output
     if conn.provider in ("gemini", "vertex"):
@@ -353,6 +406,7 @@ def _json(conn: Conn, model: str, prompt: str, schema: type[BaseModel]):
         resp = client.models.generate_content(
             model=model, contents=prompt,
             config=types.GenerateContentConfig(response_mime_type="application/json", response_schema=schema))
+        _record_gemini(model, resp)
         if isinstance(resp.parsed, schema):
             return resp.parsed
         return schema.model_validate_json(resp.text or "{}")
@@ -369,11 +423,14 @@ def _text(conn: Conn, model: str, prompt: str) -> str:
                                                betas=["server-side-fallback-2026-07-01"], fallbacks="default")
         else:
             resp = client.messages.create(**_claude_kwargs(prompt, model))
+        _record_claude(model, resp)
         _claude_check(resp)
         return "".join(b.text for b in resp.content if b.type == "text")
     if conn.provider in ("gemini", "vertex"):
         client = _genai(conn)
-        return client.models.generate_content(model=model, contents=prompt).text or ""
+        resp = client.models.generate_content(model=model, contents=prompt)
+        _record_gemini(model, resp)
+        return resp.text or ""
     if conn.provider == "openai":
         return _openai(conn, model, prompt, None)
     raise LLMError(f"未対応の接続方式：{conn.provider}")
@@ -414,6 +471,8 @@ def _openai(conn: Conn, model: str, prompt: str, schema: type[BaseModel] | None)
         req = urllib.request.Request(url, data=json.dumps(body).encode(), headers=headers, method="POST")
         with urllib.request.urlopen(req, timeout=180) as r:  # noqa: S310 - URL は保存時と呼び出し時に検査済み
             data = json.loads(r.read())
+        u = data.get("usage") or {}
+        _record(model, u.get("prompt_tokens"), u.get("completion_tokens"))
         return data["choices"][0]["message"]["content"] or ""
 
     messages = [{"role": "user", "content": prompt}]

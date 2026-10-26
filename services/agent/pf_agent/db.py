@@ -269,6 +269,50 @@ class Notice(Base):
     created_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), default=_now)
 
 
+# ---------------- ジョブと自動開発（プリプロダクト） ----------------
+class JobRun(Base):
+    """長時間の処理（ジョブ）の1回分。Cloud Run Jobs で動かし、走行状況・履歴・LLM の使用量を残す。"""
+    __tablename__ = "job_runs"
+    id: Mapped[str] = mapped_column(String(32), primary_key=True, default=_id)
+    kind: Mapped[str] = mapped_column(String(24), index=True)          # autodev | ...（jobs.JOBS）
+    tenant_id: Mapped[str] = mapped_column(String(64), index=True)
+    product_id: Mapped[str | None] = mapped_column(String(32), index=True, nullable=True)
+    params: Mapped[dict] = mapped_column(JSON)                         # ジョブごとの入力
+    status: Mapped[str] = mapped_column(String(12), default="queued")  # queued | running | done | failed | cancelled
+    cancel_requested: Mapped[bool] = mapped_column(Boolean, default=False)
+    progress: Mapped[dict | None] = mapped_column(JSON, nullable=True)  # {done, total, step}
+    log: Mapped[list | None] = mapped_column(JSON, nullable=True)       # [{at, step}]
+    usage: Mapped[dict | None] = mapped_column(JSON, nullable=True)     # {calls, input_tokens, output_tokens, by_model}
+    runner: Mapped[str] = mapped_column(String(12), default="thread")   # cloud-run-job | thread
+    execution: Mapped[str | None] = mapped_column(String(300), nullable=True)  # Cloud Run Jobs の実行名
+    error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    model: Mapped[str] = mapped_column(String(120), default="")
+    retry_of: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    created_by: Mapped[str] = mapped_column(String(200))
+    created_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), default=_now)
+    started_at: Mapped[dt.datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    finished_at: Mapped[dt.datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+class Variant(Base):
+    """プリプロダクト（PP-n）：一つのプロダクトに複数ぶら下がる、動く試作つきのプロダクト案。"""
+    __tablename__ = "variants"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    product_id: Mapped[str] = mapped_column(String(32), index=True)
+    run_id: Mapped[str] = mapped_column(String(32), index=True)
+    number: Mapped[int] = mapped_column(Integer)
+    title: Mapped[str] = mapped_column(String(200))
+    concept: Mapped[str] = mapped_column(Text, default="")        # この案の考え方と、他の案との違い
+    assumptions: Mapped[list | None] = mapped_column(JSON, nullable=True)
+    drafts: Mapped[dict | None] = mapped_column(JSON, nullable=True)     # {stage_id: 下書き}
+    prototype: Mapped[str] = mapped_column(Text, default="")      # 単一ファイルの HTML
+    status: Mapped[str] = mapped_column(String(12), default="generating")  # generating | ready | failed | adopted
+    error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    adopted_by: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    adopted_at: Mapped[dt.datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), default=_now)
+
+
 class TenantSecret(Base):
     """テナントの秘密情報（GitHub のトークンなど）。値は暗号化して置く。"""
     __tablename__ = "tenant_secrets"
