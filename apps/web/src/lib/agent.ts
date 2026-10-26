@@ -98,6 +98,19 @@ export type CanvasInfo = {
   facts: { stage: string; label: string; value: string; source: string }[]; images: CanvasImage[];
 };
 export type Overview = { product: Product; phases: Phase[]; stages: StageSummary[] };
+// 自律エージェント（AG-n）と、その提案（受け箱）
+export type AgentSchedule = {
+  number: number; key: string; name: string; task: "review" | "custom" | "research" | "report"; task_label: string;
+  instruction: string; stages: string[]; params: { library?: number | string; scope?: string; report?: number | string };
+  cron: string; cron_label: string; timezone: string; enabled: boolean; next_run_at: string | null; last_run_at: string | null;
+  last_job_id: string | null; runs: number; created_by: string; created_at: string;
+};
+export type AgentFinding = {
+  id: number; agent: string | null; stage: string | null; stage_label: string | null; severity: "info" | "warn" | "action";
+  title: string; body: string; proposals: { field: string; label: string; value: FieldValue; reason: string }[];
+  status: "open" | "accepted" | "rejected" | "noted"; thread: { role: "user" | "agent"; actor: string; text: string; at: string }[];
+  decided_by: string | null; job_id: string | null; created_at: string; updated_at: string;
+};
 // 報告資料（RP-n）
 export type ReportSlide = {
   kind: "content" | "table"; title: string; message: string; bullets: string[]; sources: string[]; notes: string;

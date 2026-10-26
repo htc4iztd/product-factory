@@ -74,6 +74,19 @@ jobs:
             --port 8100 --cpu 1 --memory 1Gi --cpu-boost --timeout 600 --min-instances 0 --max-instances 1 \
             --set-env-vars "$ENVS,PF_JOB_NAME=pf-autodev,PF_JOB_REGION=$REGION" --set-secrets "$SECRETS"
 
+      - name: scheduler for autonomous agents
+        # 自律エージェントの予定は、Cloud Scheduler が5分ごとに agent-api の tick を呼んで動かす（pf-web の SA の ID トークンで呼ぶ）
+        # 権限や API が足りなくてもデプロイ自体は止めない（警告を出す）
+        run: |
+          AGENT_URL=$(gcloud run services describe pf-agent --region $REGION --format 'value(status.url)')
+          WEB_SA=pf-web@$PROJECT.iam.gserviceaccount.com
+          gcloud services enable cloudscheduler.googleapis.com --quiet >/dev/null 2>&1 || true
+          if gcloud scheduler jobs describe pf-agent-tick --location $REGION >/dev/null 2>&1; then OP=update; else OP=create; fi
+          gcloud scheduler jobs $OP http pf-agent-tick --location $REGION --schedule "*/5 * * * *" --time-zone "Asia/Tokyo" \
+            --uri "$AGENT_URL/internal/scheduler/tick" --http-method POST \
+            --oidc-service-account-email $WEB_SA --oidc-token-audience "$AGENT_URL" --quiet \
+            || echo "::warning::Cloud Scheduler の pf-agent-tick を作れませんでした。自律エージェントの予定は「今すぐ」でだけ動きます"
+
       - name: deploy web
         env:
           ALLOW_SIGNUP: ${{ vars.PF_ALLOW_SIGNUP || 'true' }}

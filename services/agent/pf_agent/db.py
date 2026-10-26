@@ -531,6 +531,49 @@ class ProductReport(Base):
     updated_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), default=_now, onupdate=_now)
 
 
+class AgentSchedule(Base):
+    """自律エージェント（AG-n）：cron の時刻に、決めた仕事（工程の見直し・リサーチの更新など）をジョブで動かす。"""
+    __tablename__ = "agent_schedules"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    tenant_id: Mapped[str] = mapped_column(String(64), index=True)
+    product_id: Mapped[str] = mapped_column(String(32), index=True)
+    number: Mapped[int] = mapped_column(Integer)
+    name: Mapped[str] = mapped_column(String(200))
+    task: Mapped[str] = mapped_column(String(20))                       # review | custom | research | report
+    instruction: Mapped[str] = mapped_column(Text, default="")
+    stages: Mapped[list | None] = mapped_column(JSON, nullable=True)
+    params: Mapped[dict | None] = mapped_column(JSON, nullable=True)    # {library, scope, report}
+    cron: Mapped[str] = mapped_column(String(100))
+    timezone: Mapped[str] = mapped_column(String(40), default="Asia/Tokyo")
+    enabled: Mapped[bool] = mapped_column(Boolean, default=True)
+    next_run_at: Mapped[dt.datetime | None] = mapped_column(DateTime(timezone=True), nullable=True, index=True)
+    last_run_at: Mapped[dt.datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    last_job_id: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    runs: Mapped[int] = mapped_column(Integer, default=0)
+    created_by: Mapped[str] = mapped_column(String(200))
+    created_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), default=_now)
+
+
+class AgentFinding(Base):
+    """自律エージェントの提案・指摘。人が採用・却下・返信する（返信には AI が答え、案を直す）。"""
+    __tablename__ = "agent_findings"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    tenant_id: Mapped[str] = mapped_column(String(64), index=True)
+    product_id: Mapped[str] = mapped_column(String(32), index=True)
+    schedule_id: Mapped[int | None] = mapped_column(Integer, index=True, nullable=True)
+    job_id: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    stage_id: Mapped[str | None] = mapped_column(String(8), nullable=True)
+    severity: Mapped[str] = mapped_column(String(10), default="info")   # info | warn | action
+    title: Mapped[str] = mapped_column(String(300))
+    body: Mapped[str] = mapped_column(Text, default="")
+    proposals: Mapped[list | None] = mapped_column(JSON, nullable=True)  # [{field, label, value, reason}]
+    status: Mapped[str] = mapped_column(String(10), default="open")     # open | accepted | rejected | noted
+    thread: Mapped[list | None] = mapped_column(JSON, nullable=True)    # [{role, actor, text, at}]
+    decided_by: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    created_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), default=_now)
+    updated_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), default=_now, onupdate=_now)
+
+
 class TenantSecret(Base):
     """テナントの秘密情報（GitHub のトークンなど）。値は暗号化して置く。"""
     __tablename__ = "tenant_secrets"

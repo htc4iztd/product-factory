@@ -5,7 +5,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import Response
 from pydantic import BaseModel, Field
 
-from . import autodev, imports, jobs, reports
+from . import agents, autodev, imports, jobs, reports
 from .api_collab import _p
 from .authz import Caller, caller
 from .stages import STAGE_BY_ID
@@ -85,6 +85,68 @@ def regenerate_report(product_id: str, number: int, c: Caller = Depends(caller))
 def delete_report(product_id: str, number: int, c: Caller = Depends(caller)):
     reports.delete(_p(c, product_id, True), number)
     return {"ok": True}
+
+
+class AgentBody(BaseModel):
+    name: str | None = Field(default=None, max_length=200)
+    task: str | None = None
+    instruction: str | None = Field(default=None, max_length=4000)
+    stages: list[str] | None = Field(default=None, max_length=14)
+    params: dict | None = None
+    cron: str | None = Field(default=None, max_length=100)
+    timezone: str | None = Field(default=None, max_length=40)
+    enabled: bool | None = None
+
+
+class DecideBody(BaseModel):
+    action: str
+    picks: list[int] | None = None
+    reason: str = Field(default="", max_length=1000)
+
+
+class ReplyBody(BaseModel):
+    text: str = Field(min_length=1, max_length=4000)
+
+
+@router.get(P + "/agents")
+def agents_overview(product_id: str, c: Caller = Depends(caller)):
+    return agents.overview(_p(c, product_id))
+
+
+@router.post(P + "/agents")
+def create_agent(product_id: str, body: AgentBody, c: Caller = Depends(caller)):
+    return agents.create(_p(c, product_id, True), c.user, body.model_dump())
+
+
+@router.put(P + "/agents/{number}")
+def edit_agent(product_id: str, number: int, body: AgentBody, c: Caller = Depends(caller)):
+    return agents.edit(_p(c, product_id, True), number, body.model_dump())
+
+
+@router.delete(P + "/agents/{number}")
+def delete_agent(product_id: str, number: int, c: Caller = Depends(caller)):
+    agents.delete(_p(c, product_id, True), number)
+    return {"ok": True}
+
+
+@router.post(P + "/agents/{number}/run")
+def run_agent(product_id: str, number: int, c: Caller = Depends(caller)):
+    return agents.run_now(_p(c, product_id, True), c.user, number)
+
+
+@router.get(P + "/agent-findings")
+def agent_findings(product_id: str, status: str | None = None, c: Caller = Depends(caller)):
+    return agents.findings(_p(c, product_id), status)
+
+
+@router.post(P + "/agent-findings/{fid}/decide")
+def decide_finding(product_id: str, fid: int, body: DecideBody, c: Caller = Depends(caller)):
+    return agents.decide(_p(c, product_id, True), c.user, fid, body.action, body.picks, body.reason)
+
+
+@router.post(P + "/agent-findings/{fid}/reply")
+def reply_finding(product_id: str, fid: int, body: ReplyBody, c: Caller = Depends(caller)):
+    return agents.reply(_p(c, product_id, True), c.user, fid, body.text)
 
 
 class AutodevBody(BaseModel):

@@ -44,6 +44,7 @@ export function jobTarget(job: JobRun): { href: string; label: string } | null {
   if (job.kind === "research" && job.params?.number) return { href: `/research/${job.params.number}`, label: `RL-${job.params.number}` };
   if (!job.product_id) return null;
   if (job.kind === "canvas") return { href: `/p/${job.product_id}/canvas`, label: "プロダクト・キャンバス" };
+  if (job.kind === "agent") return { href: `/p/${job.product_id}/agents`, label: `AG-${job.params?.agent ?? ""}` };
   if (job.kind === "report") return { href: `/p/${job.product_id}/reports/${job.params?.number ?? ""}`, label: `RP-${job.params?.number ?? ""}` };
   if (job.kind === "import") return { href: `/p/${job.product_id}/import?doc=${job.params?.doc ?? ""}`, label: "資料の取り込み" };
   return { href: `/p/${job.product_id}/preproducts`, label: "プリプロダクト" };

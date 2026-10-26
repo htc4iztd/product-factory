@@ -1,14 +1,15 @@
 """agent-api（FastAPI）。web からだけ呼ばれる内部API。"""
 from __future__ import annotations
 
+import os
 from contextlib import asynccontextmanager
 
-from fastapi import Depends, FastAPI, HTTPException
+from fastapi import Depends, FastAPI, Header, HTTPException
 from fastapi.responses import JSONResponse, Response
 from pydantic import BaseModel, Field
 from sqlalchemy import select
 
-from . import autodev, canvasjob, collab, ghsync, imports, jobs, llm, llmconf, ontology, reports, research
+from . import agents, autodev, canvasjob, collab, ghsync, imports, jobs, llm, llmconf, ontology, reports, research
 from .api_collab import router as collab_router
 from .api_jobs import router as jobs_router
 from .api_knowledge import router as knowledge_router
@@ -23,6 +24,8 @@ engine: Engine | None = None
 async def lifespan(app: FastAPI):
     global engine
     engine = Engine()
+    if agents.ticker_enabled():
+        agents.start_ticker()
     yield
 
 
@@ -59,6 +62,11 @@ async def _report_error(_, exc: reports.ReportError):
     return JSONResponse(status_code=exc.status, content={"detail": exc.message})
 
 
+@app.exception_handler(agents.AgentError)
+async def _agent_error(_, exc: agents.AgentError):
+    return JSONResponse(status_code=exc.status, content={"detail": exc.message})
+
+
 @app.exception_handler(jobs.JobError)
 async def _job_error(_, exc: jobs.JobError):
     return JSONResponse(status_code=exc.status, content={"detail": exc.message})
@@ -72,6 +80,16 @@ async def _ontology_error(_, exc: ontology.OntologyError):
 @app.exception_handler(research.ResearchError)
 async def _research_error(_, exc: research.ResearchError):
     return JSONResponse(status_code=exc.status, content={"detail": exc.message})
+
+
+@app.post("/internal/scheduler/tick")
+def scheduler_tick(x_pf_internal_token: str = Header(default="")):
+    """自律エージェントの予定を動かす。Cloud Scheduler が数分ごとに呼ぶ。
+    Cloud Run では IAM（呼び出せるサービスアカウント）で守られているので、内部トークンは手元でだけ確かめる。"""
+    on_cloud_run = bool(os.environ.get("K_SERVICE"))
+    if not on_cloud_run and x_pf_internal_token != os.environ.get("PF_INTERNAL_TOKEN", "dev-internal-token"):
+        raise HTTPException(401, "invalid internal token")
+    return {"started": agents.tick()}
 
 
 app.include_router(collab_router)
