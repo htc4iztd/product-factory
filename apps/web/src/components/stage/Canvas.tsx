@@ -5,6 +5,7 @@ import { FlowEditor } from "./FlowEditor";
 import type { Flow, Trace } from "@/lib/agent";
 import { ImportAcButton } from "./StageActions";
 import { tableFilled } from "./table";
+import { Circles, PositionMap } from "./Maps";
 
 type Ctx = { pid: string; st: StageDetail; readOnly: boolean; proposed: Set<string> };
 
@@ -58,30 +59,10 @@ function LeanCanvas({ c }: { c: Ctx }) {
 }
 
 // ---------- ② 市場規模 ----------
-function Circles({ rows }: { rows: Row[] }) {
-  const by = Object.fromEntries(rows.map((r) => [String(r.tier), r]));
-  const ring = [
-    { k: "TAM", r: 96, fill: "#eef0fe", text: "#4547c4" },
-    { k: "SAM", r: 66, fill: "#dfe2fc", text: "#4547c4" },
-    { k: "SOM", r: 36, fill: "#6366f1", text: "#ffffff" },
-  ];
-  return (
-    <svg viewBox="0 0 220 220" className="mx-auto w-full max-w-[260px]" role="img" aria-label="TAM SAM SOM">
-      {ring.map((x) => <circle key={x.k} cx="110" cy={214 - x.r} r={x.r} fill={x.fill} stroke="#c9cdf7" />)}
-      {ring.map((x, i) => (
-        <g key={x.k + "t"}>
-          <text x="110" y={214 - 2 * x.r + (i === 2 ? 34 : 18)} textAnchor="middle" fontSize="10" fontWeight="600" fill={x.text}>{x.k}</text>
-          <text x="110" y={214 - 2 * x.r + (i === 2 ? 48 : 31)} textAnchor="middle" fontSize="9" fill={x.text}>{String(by[x.k]?.value ?? "") || "—"}</text>
-        </g>
-      ))}
-    </svg>
-  );
-}
-
 function Market({ c }: { c: Ctx }) {
   return (
     <div className="space-y-4">
-      <div className="grid gap-4 xl:grid-cols-[280px_1fr]">
+      <div className="grid gap-4 xl:grid-cols-[400px_1fr]">
         <Panel className="flex items-center"><Circles rows={(c.st.draft.market_size as Row[]) ?? []} /></Panel>
         <Panel><F c={c} k="market_size" /></Panel>
       </div>
@@ -95,31 +76,6 @@ function Market({ c }: { c: Ctx }) {
 }
 
 // ---------- ③ 競合とポジショニング ----------
-const short = (t: string, n = 22) => (t.length > n ? t.slice(0, n) + "…" : t);
-
-function PositionMap({ rows, x, y }: { rows: Row[]; x: string; y: string }) {
-  const pts = rows.filter((r) => String(r.name ?? "").trim());
-  const pos = (v: unknown) => 150 + Math.max(-5, Math.min(5, Number(v) || 0)) * 26;
-  return (
-    <svg viewBox="0 0 300 300" className="w-full" role="img" aria-label="ポジショニングマップ">
-      <rect x="10" y="10" width="280" height="280" rx="12" fill="#fafafa" stroke="#e4e4e7" />
-      <line x1="20" y1="150" x2="280" y2="150" stroke="#d4d4d8" />
-      <line x1="150" y1="20" x2="150" y2="280" stroke="#d4d4d8" />
-      <text x="280" y="164" textAnchor="end" fontSize="9" fill="#71717a">→ {short(x || "横軸")}</text>
-      <text x="156" y="28" fontSize="9" fill="#71717a">↑ {short(y || "縦軸")}</text>
-      {pts.map((p, i) => {
-        const self = /自社|当社|us|self/i.test(String(p.name));
-        return (
-          <g key={i}>
-            <circle cx={pos(p.x)} cy={300 - pos(p.y)} r={self ? 7 : 5} fill={self ? "#6366f1" : "#a1a1aa"} stroke="#fff" strokeWidth="2" />
-            <text x={pos(p.x) + 9} y={300 - pos(p.y) + 3} fontSize="9" fontWeight={self ? 700 : 400} fill={self ? "#4547c4" : "#3f3f46"}>{short(String(p.name), 14)}</text>
-          </g>
-        );
-      })}
-    </svg>
-  );
-}
-
 function Competitors({ c }: { c: Ctx }) {
   return (
     <div className="space-y-4">
@@ -128,7 +84,7 @@ function Competitors({ c }: { c: Ctx }) {
         <Panel>
           <div className="mb-2 text-[13px] font-medium">ポジショニングマップ</div>
           <PositionMap rows={(c.st.draft.positions as Row[]) ?? []} x={String(c.st.draft.axis_x ?? "")} y={String(c.st.draft.axis_y ?? "")} />
-          <p className="mt-1 text-[11px] text-zinc-400">軸の名前は右の項目で編集します。名前に「自社」を含む点を強調します。</p>
+          <p className="mt-1 text-[11px] text-zinc-400">軸の名前は右の項目で編集します。名前に「自社」を含む点を強調します。点に触れると名前の全文を出します。拡大・縮小は右下のボタンか Ctrl / ⌘ ＋ホイール、ドラッグで移動。</p>
         </Panel>
         <Panel className="space-y-4"><F c={c} k="axis_x" /><F c={c} k="axis_y" /><F c={c} k="positions" /></Panel>
       </div>

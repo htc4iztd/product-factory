@@ -4,6 +4,7 @@ import { Plus, RotateCcw, Trash2 } from "lucide-react";
 import type { ResearchData, ResearchReport } from "@/lib/agent";
 import { createReport, deleteReport, retryReport } from "@/app/(app)/research/actions";
 import { UpdateButton } from "@/components/knowledge/ResearchBits";
+import { ZoomPan } from "@/components/ZoomPan";
 
 type Kind = ResearchReport["kind"];
 const LEAD: Record<Kind, string> = {
@@ -27,8 +28,7 @@ function Seq({ d }: { d: TDoc }) {
   const X: Record<string, number> = {};
   parts.forEach((p, i) => { X[p.id] = 40 + cw / 2 + i * cw; });
   return (
-    <div className="overflow-x-auto">
-      <svg viewBox={`0 0 ${W} ${H}`} width={W} height={H} role="img" aria-label={`${d.title}の処理の流れ`}>
+    <ZoomPan width={W} height={H} label={`${d.title}の処理の流れ`} className="max-w-full" >
         <defs><marker id={`ah-${d.id}`} viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#6366f1" /></marker></defs>
         {parts.map((p) => (
           <g key={p.id}>
@@ -52,8 +52,7 @@ function Seq({ d }: { d: TDoc }) {
             </g>
           );
         })}
-      </svg>
-    </div>
+    </ZoomPan>
   );
 }
 
@@ -86,7 +85,7 @@ function TechView({ t }: { t: Tech }) {
         <div className="card space-y-2 p-4">
           <h3 className="text-[13px] font-semibold">文書どうしのつながり</h3>
           <p className="text-[11px] text-zinc-500">文書が「使う・つながる」と書いている相手を矢印で結んだ。点の大きさはつながりの数。点を押すと詳細を表示する。</p>
-          <svg viewBox={`0 0 ${C * 2} ${C * 2}`} className="mx-auto w-full max-w-[380px]" role="img" aria-label="文書どうしのつながり">
+          <ZoomPan width={C * 2} height={C * 2} label="文書どうしのつながり" className="mx-auto w-full max-w-[380px]">
             <defs><marker id="lnk" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="#a1a1aa" /></marker></defs>
             {t.docs.flatMap((d) => d.links.filter((l) => pos[l.to]).map((l) => <line key={`${d.id}-${l.to}`} x1={pos[d.id].x} y1={pos[d.id].y} x2={pos[l.to].x} y2={pos[l.to].y} stroke="#d4d4d8" markerEnd="url(#lnk)"><title>{`${d.title} → ${l.rel}`}</title></line>))}
             {t.docs.map((d) => (
@@ -95,7 +94,7 @@ function TechView({ t }: { t: Tech }) {
                 <text x={pos[d.id].x} y={pos[d.id].y + 18} textAnchor="middle" fontSize="9.5" fill="#3f3f46">{d.title.split(/[（(]/)[0].slice(0, 14)}</text>
               </g>
             ))}
-          </svg>
+          </ZoomPan>
         </div>
       </div>
       <div className="card overflow-x-auto p-4">

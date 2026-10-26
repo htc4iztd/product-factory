@@ -7,6 +7,7 @@ import type { ResearchData, ResearchFact } from "@/lib/agent";
 import { AF0, type AF, type Art, type Dim, type Model, csvDownload, dims, heat, inAF, layerColor, pct, periods } from "./model";
 import { Seg } from "./NewsTab";
 import { analyze } from "@/app/(app)/research/actions";
+import { ZoomPan } from "@/components/ZoomPan";
 
 type Item = { k: string; l: string; n: number; s?: string; sx?: string; dot?: string; tip?: string };
 type Drill = { t: string; keys: string[]; sub?: string } | null;
@@ -305,7 +306,8 @@ function Network({ rows, M, names, onPick, sel }: { rows: Art[]; M: Model; names
   if (N < 2) return <p className="text-[12px] text-zinc-400">表示できる関係がない。</p>;
   const on = (i: number) => hov === i || (hov != null && edges.some((e) => (e.a === hov && e.b === i) || (e.b === hov && e.a === i)));
   return (
-    <svg viewBox={`0 0 ${W} ${H}`} className="w-full" role="img" aria-label="企業・団体の関係図" onMouseLeave={() => setHov(null)}>
+    <ZoomPan width={W} height={H} label="企業・団体の関係図">
+      <g onMouseLeave={() => setHov(null)}>
       {edges.map((e) => <line key={`${e.a}-${e.b}`} x1={P[e.a].x} y1={P[e.a].y} x2={P[e.b].x} y2={P[e.b].y} strokeWidth={e.sw} stroke={hov != null && (e.a === hov || e.b === hov) ? "#6366f1" : "#d4d4d8"} opacity={hov != null && !(e.a === hov || e.b === hov) ? 0.25 : 0.9}><title>{`${names[e.a]} と ${names[e.b]}：${e.w}記事`}</title></line>)}
       {names.map((n, i) => (
         <g key={n} onMouseEnter={() => setHov(i)} onClick={() => onPick(n)} className="cursor-pointer" opacity={hov != null && !on(i) ? 0.3 : 1}>
@@ -313,7 +315,8 @@ function Network({ rows, M, names, onPick, sel }: { rows: Art[]; M: Model; names
           <text x={P[i].x} y={P[i].y + rad[i] + 11} textAnchor="middle" fontSize="10.5" fill="#3f3f46">{n}</text>
         </g>
       ))}
-    </svg>
+      </g>
+    </ZoomPan>
   );
 }
 
