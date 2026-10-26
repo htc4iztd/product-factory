@@ -98,6 +98,13 @@ export type CanvasInfo = {
   facts: { stage: string; label: string; value: string; source: string }[]; images: CanvasImage[];
 };
 export type Overview = { product: Product; phases: Phase[]; stages: StageSummary[] };
+// 取り込んだ資料と、工程の項目への割り当ての結果
+export type ImportResult = { stage: string; field: string; label: string; action: "filled" | "proposed" | "dropped"; reason: string };
+export type ImportDoc = {
+  id: number; filename: string; kind: string; kind_label: string; size: number; chars: number; mode: "propose" | "fill";
+  stages: string[]; status: "queued" | "running" | "done" | "failed"; result: ImportResult[]; job_id: string | null;
+  created_by: string; created_at: string; outline: string[]; preview?: string;
+};
 
 export type Column = { key: string; label: string; kind: "text" | "number"; options: string[] };
 export type FieldSpec = {

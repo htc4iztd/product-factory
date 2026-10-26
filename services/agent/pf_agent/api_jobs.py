@@ -5,13 +5,35 @@ from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import Response
 from pydantic import BaseModel, Field
 
-from . import autodev, jobs
+from . import autodev, imports, jobs
 from .api_collab import _p
 from .authz import Caller, caller
 from .stages import STAGE_BY_ID
 
 router = APIRouter()
 P = "/products/{product_id}"
+
+
+class ImportBody(BaseModel):
+    filename: str = Field(min_length=1, max_length=300)
+    content_b64: str = Field(min_length=1, max_length=28_000_000)
+    mode: str = "propose"
+    stages: list[str] = Field(default_factory=list, max_length=14)
+
+
+@router.post(P + "/imports")
+def start_import(product_id: str, body: ImportBody, c: Caller = Depends(caller)):
+    return imports.start(_p(c, product_id, True), c.user, body.filename, body.content_b64, body.mode, body.stages)
+
+
+@router.get(P + "/imports")
+def list_imports(product_id: str, c: Caller = Depends(caller)):
+    return imports.list_docs(_p(c, product_id))
+
+
+@router.get(P + "/imports/{doc_id}")
+def get_import(product_id: str, doc_id: int, c: Caller = Depends(caller)):
+    return imports.get(_p(c, product_id), doc_id)
 
 
 class AutodevBody(BaseModel):

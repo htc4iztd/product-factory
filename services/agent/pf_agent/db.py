@@ -489,6 +489,26 @@ class ResearchReport(Base):
     created_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), default=_now)
 
 
+class ImportDoc(Base):
+    """取り込んだ資料（Office など）。本文を文章にして置き、工程の項目への割り当てはジョブで行う。"""
+    __tablename__ = "import_docs"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    tenant_id: Mapped[str] = mapped_column(String(64), index=True)
+    product_id: Mapped[str] = mapped_column(String(32), index=True)
+    filename: Mapped[str] = mapped_column(String(300))
+    kind: Mapped[str] = mapped_column(String(10))                      # xlsx | docx | pptx | md | txt | csv
+    size: Mapped[int] = mapped_column(Integer, default=0)
+    text: Mapped[str] = mapped_column(Text, default="")
+    outline: Mapped[list | None] = mapped_column(JSON, nullable=True)   # 見出し（シート・スライド・章）
+    mode: Mapped[str] = mapped_column(String(10), default="propose")   # propose | fill
+    stages: Mapped[list | None] = mapped_column(JSON, nullable=True)    # 割り当て先を絞るとき
+    status: Mapped[str] = mapped_column(String(12), default="queued")   # queued | running | done | failed
+    result: Mapped[list | None] = mapped_column(JSON, nullable=True)    # [{stage, field, label, action, reason}]
+    job_id: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    created_by: Mapped[str] = mapped_column(String(200))
+    created_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), default=_now)
+
+
 class TenantSecret(Base):
     """テナントの秘密情報（GitHub のトークンなど）。値は暗号化して置く。"""
     __tablename__ = "tenant_secrets"

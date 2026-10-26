@@ -9,7 +9,7 @@ import {
   Bot, Box, Boxes, Cloud, Database, Globe, HardDrive, Layers, MessagesSquare, Monitor, Network, Activity, Server, User, Zap,
 } from "lucide-react";
 import type { ArchEdge, ArchGraph, ArchNode } from "@/lib/agent";
-import { Expandable, MiniTable, SaveBar, uid, useEditable } from "./kit";
+import { Expandable, MiniTable, SaveBar, sides, uid, useEditable } from "./kit";
 
 export const NODE_KINDS: Record<string, { label: string; icon: typeof Box; color: string }> = {
   user: { label: "利用者", icon: User, color: "#0f766e" },
@@ -89,8 +89,9 @@ function Editor({ pid, sid, fieldKey, value, readOnly }: { pid: string; sid: str
     ...zoneNodes,
     ...g.nodes.map((n): Node<NData> => ({ id: n.id, type: "res", data: { n, selected: sel === n.id }, position: pos(n), draggable: !readOnly })),
   ];
+  const at = Object.fromEntries(g.nodes.map((n) => [n.id, pos(n)]));
   const edges: Edge[] = g.edges.map((e) => ({
-    id: e.id, source: e.source, target: e.target, type: "smoothstep", label: e.label || undefined,
+    id: e.id, source: e.source, target: e.target, type: "smoothstep", ...sides(at[e.source], at[e.target]), label: e.label || undefined,
     markerEnd: { type: MarkerType.ArrowClosed, color: "#71717a" }, style: { stroke: sel === e.id ? "#6366f1" : "#71717a", strokeWidth: 1.5 },
     labelStyle: { fontSize: 10, fill: "#3f3f46" }, labelBgStyle: { fill: "#fff" }, labelBgPadding: [4, 2] as [number, number],
   }));

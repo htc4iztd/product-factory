@@ -93,6 +93,21 @@ class Turn(BaseModel):
     proposals: list[Proposal]
 
 
+def value_rules(fw: Framework) -> str:
+    """案（proposals）の value の書き方。対話と資料の取り込みで同じものを使う。"""
+    return (
+        "- id_prefix のある表は先頭列が ID。既存の行の ID は変えない。新しい行の ID は空でよい（自動で振る）。"
+        "ストーリーID・機能要求IDなど他の行を指す列は「US-01, US-03」のように ID で書く。\n"
+        "- options のある列は、その選択肢のどれかを入れる。\n"
+        "- proposals の value は、text はそのまま、list は1行1要素の改行区切り、"
+        "table は columns の key を持つオブジェクトの JSON 配列（rows がある表は先頭列にその見出し）、"
+        "flows は [{business: 業務名, lanes: [担当名...], nodes: [{id, type: start|task|decision|system|end, "
+        "label, lane: レーンの番号, x: 左からの位置(px)}], edges: [{source, target, label}]}] の JSON。\n"
+        + "".join(f"- kind が {k} の項目の value は {designs.FORMATS[k]} の JSON。\n"
+                  for k in designs.KINDS if any(f.kind == k for f in fw.fields))
+    )
+
+
 def _prompt(stage: Stage, fw: Framework, idea: str, draft: dict, upstream: dict[str, str],
             history: list[dict], message: str) -> str:
     ups = "\n\n".join(f"### {k}\n{v}" for k, v in upstream.items()) or "（なし）"
@@ -105,16 +120,7 @@ def _prompt(stage: Stage, fw: Framework, idea: str, draft: dict, upstream: dict[
         "- 前提があいまいなら、まず1〜2個の具体的な質問で詰める。\n"
         "- 矛盾・飛躍・根拠のない数値を見つけたら指摘する。出典のない数値は「要確認」と書く。\n"
         "- 項目を書き換えるべきときだけ proposals に入れる。書き換えない項目は入れない。\n"
-        "- id_prefix のある表は先頭列が ID。既存の行の ID は変えない。新しい行の ID は空でよい（自動で振る）。"
-        "ストーリーID・機能要求IDなど他の行を指す列は「US-01, US-03」のように ID で書く。\n"
-        "- options のある列は、その選択肢のどれかを入れる。\n"
-        "- proposals の value は、text はそのまま、list は1行1要素の改行区切り、"
-        "table は columns の key を持つオブジェクトの JSON 配列（rows がある表は先頭列にその見出し）、"
-        "flows は [{business: 業務名, lanes: [担当名...], nodes: [{id, type: start|task|decision|system|end, "
-        "label, lane: レーンの番号, x: 左からの位置(px)}], edges: [{source, target, label}]}] の JSON。\n"
-        + "".join(f"- kind が {k} の項目の value は {designs.FORMATS[k]} の JSON。\n"
-                  for k in designs.KINDS if any(f.kind == k for f in fw.fields))
-        + "\n"
+        + value_rules(fw) + "\n"
         f"## 項目の定義\n{json.dumps(spec(fw), ensure_ascii=False)}\n\n"
         f"## 現在の値\n{json.dumps(draft, ensure_ascii=False)}\n\n"
         f"## プロダクトの意図\n{idea or '（なし）'}\n\n"

@@ -7,7 +7,7 @@ import {
 } from "@xyflow/react";
 import { Plus, Trash2 } from "lucide-react";
 import type { SmState, SmTransition, StateMachine } from "@/lib/agent";
-import { Expandable, MiniTable, SaveBar, layered, uid, useEditable } from "./kit";
+import { Expandable, MiniTable, SaveBar, layered, sides, uid, useEditable } from "./kit";
 
 const KIND = [{ value: "initial", label: "開始" }, { value: "normal", label: "途中" }, { value: "final", label: "終了" }];
 type SData = { s: SmState; selected: boolean };
@@ -45,8 +45,9 @@ function Editor({ pid, sid, fieldKey, value, readOnly }: { pid: string; sid: str
     id: s.id, type: "state", data: { s, selected: sel === s.id },
     position: { x: s.x ?? auto[s.id]?.x ?? 0, y: s.y ?? auto[s.id]?.y ?? 0 }, draggable: !readOnly,
   }));
+  const at = Object.fromEntries(nodes.map((n) => [n.id, n.position]));
   const edges: Edge[] = (m?.transitions ?? []).map((t) => ({
-    id: t.id, source: t.source, target: t.target, type: t.source === t.target ? "default" : "smoothstep", label: label(t) || undefined,
+    id: t.id, source: t.source, target: t.target, ...(t.source === t.target ? { sourceHandle: "t", targetHandle: "r" } : sides(at[t.source], at[t.target])), type: t.source === t.target ? "default" : "smoothstep", label: label(t) || undefined,
     markerEnd: { type: MarkerType.ArrowClosed, color: "#71717a" }, style: { stroke: sel === t.id ? "#6366f1" : "#71717a", strokeWidth: 1.5 },
     labelStyle: { fontSize: 10, fill: "#3f3f46" }, labelBgStyle: { fill: "#fff" }, labelBgPadding: [4, 2] as [number, number],
   }));

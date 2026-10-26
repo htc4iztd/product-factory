@@ -87,5 +87,18 @@ await shot("d6-infra", true);
 await draft("s11");
 await page.getByText("S1（全面停止）").first().scrollIntoViewIfNeeded();
 await shot("d7-ops");
+// 資料の取り込み：資料を読み、工程の項目にあたる中身を案として出す
+await page.goto(`${BASE}/p/${pid}/import`);
+await page.getByLabel("取り込む資料").setInputFiles({
+  name: "運用設計.md", mimeType: "text/markdown",
+  buffer: Buffer.from("# 運用設計書\n## 監視項目\n| 対象 | 閾値 |\n|---|---|\n| DB | CPU 80% |\n## 設計方針\nコンテナで動かす"),
+});
+await btn("取り込む").click();
+await page.getByText("完了", { exact: true }).first().waitFor({ timeout: 60000 });
+await page.getByRole("link", { name: /工程を開いて案を選ぶ/ }).first().waitFor();
+await shot("d8-import", true);
+await page.getByRole("link", { name: /工程を開いて案を選ぶ/ }).first().click();
+await page.getByText(/資料「運用設計.md」から 1 項目の案を作りました/).waitFor();
+await shot("d9-import-proposals");
 console.log(`ok product=${pid}`);
 await browser.close();

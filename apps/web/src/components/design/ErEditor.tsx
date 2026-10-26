@@ -7,7 +7,7 @@ import {
 } from "@xyflow/react";
 import { KeyRound, Link2, Plus, Trash2 } from "lucide-react";
 import type { ErAttr, ErEntity, ErModel, ErRelation } from "@/lib/agent";
-import { Expandable, MiniTable, SaveBar, layered, uid, useEditable } from "./kit";
+import { Expandable, MiniTable, SaveBar, layered, sides, uid, useEditable } from "./kit";
 
 const CARDS: ErRelation["card"][] = ["1:1", "1:N", "N:1", "N:M"];
 type EData = { e: ErEntity; selected: boolean };
@@ -54,8 +54,9 @@ function Editor({ pid, sid, fieldKey, value, readOnly }: { pid: string; sid: str
     id: e.id, type: "entity", data: { e, selected: sel?.kind === "entity" && sel.id === e.id },
     position: { x: e.x ?? auto[e.id]?.x ?? 0, y: e.y ?? auto[e.id]?.y ?? 0 }, draggable: !readOnly,
   }));
+  const at = Object.fromEntries(nodes.map((n) => [n.id, n.position]));
   const edges: Edge[] = m.relations.map((r) => ({
-    id: r.id, source: r.source, target: r.target, type: "smoothstep",
+    id: r.id, source: r.source, target: r.target, type: "smoothstep", ...sides(at[r.source], at[r.target]),
     label: `${r.card}${r.label ? `  ${r.label}` : ""}`,
     markerEnd: r.card.endsWith("N") || r.card.endsWith("M") ? { type: MarkerType.ArrowClosed, color: "#71717a" } : undefined,
     style: { stroke: sel?.kind === "rel" && sel.id === r.id ? "#6366f1" : "#71717a", strokeWidth: 1.5 },

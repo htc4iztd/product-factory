@@ -31,7 +31,10 @@ export default async function ProductPage({ params }: { params: Promise<{ id: st
         crumbs={<span>概要</span>}
         title={ov.product.name}
         sub={ov.product.idea || "意図は未記入"}
-        actions={<Link href={`/p/${id}/settings`} className="btn-secondary">ステージの設定</Link>}
+        actions={<>
+          <Link href={`/p/${id}/import`} className="btn-secondary">資料を取り込む</Link>
+          <Link href={`/p/${id}/settings`} className="btn-secondary">ステージの設定</Link>
+        </>}
       >
         {ov.product.status === "stopped" && (
           <div className="mt-4 rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-[13px] text-rose-700">このプロダクトは中止されました。</div>

@@ -162,3 +162,11 @@ export function layered(ids: string[], edges: { source: string; target: string }
   for (const [r, list] of Object.entries(cols)) list.forEach((id, i) => { out[id] = { x: Number(r) * gx, y: i * gy }; });
   return out;
 }
+
+// 2つの箱の位置から、矢印をどの辺から出してどの辺に入れるかを決める（左右に離れていれば左右、上下なら上下）
+export function sides(a: { x: number; y: number } | undefined, b: { x: number; y: number } | undefined) {
+  if (!a || !b) return { sourceHandle: "r", targetHandle: "l" };
+  const dx = b.x - a.x, dy = b.y - a.y;
+  if (Math.abs(dx) >= Math.abs(dy) * 0.8) return dx >= 0 ? { sourceHandle: "r", targetHandle: "l" } : { sourceHandle: "l", targetHandle: "r" };
+  return dy >= 0 ? { sourceHandle: "b", targetHandle: "t" } : { sourceHandle: "t", targetHandle: "b" };
+}
