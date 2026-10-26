@@ -8,7 +8,7 @@ from fastapi.responses import JSONResponse, Response
 from pydantic import BaseModel, Field
 from sqlalchemy import select
 
-from . import autodev, canvasjob, collab, ghsync, imports, jobs, llm, llmconf, ontology, research
+from . import autodev, canvasjob, collab, ghsync, imports, jobs, llm, llmconf, ontology, reports, research
 from .api_collab import router as collab_router
 from .api_jobs import router as jobs_router
 from .api_knowledge import router as knowledge_router
@@ -51,6 +51,11 @@ async def _autodev_error(_, exc: autodev.AutodevError):
 
 @app.exception_handler(imports.ImportsError)
 async def _imports_error(_, exc: imports.ImportsError):
+    return JSONResponse(status_code=exc.status, content={"detail": exc.message})
+
+
+@app.exception_handler(reports.ReportError)
+async def _report_error(_, exc: reports.ReportError):
     return JSONResponse(status_code=exc.status, content={"detail": exc.message})
 
 

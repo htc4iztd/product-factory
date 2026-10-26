@@ -5,7 +5,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import Response
 from pydantic import BaseModel, Field
 
-from . import autodev, imports, jobs
+from . import autodev, imports, jobs, reports
 from .api_collab import _p
 from .authz import Caller, caller
 from .stages import STAGE_BY_ID
@@ -34,6 +34,57 @@ def list_imports(product_id: str, c: Caller = Depends(caller)):
 @router.get(P + "/imports/{doc_id}")
 def get_import(product_id: str, doc_id: int, c: Caller = Depends(caller)):
     return imports.get(_p(c, product_id), doc_id)
+
+
+class ReportBody(BaseModel):
+    title: str = Field(min_length=1, max_length=300)
+    audience: str = Field(default="", max_length=300)
+    purpose: str = Field(default="", max_length=4000)
+    selection: list[dict] = Field(min_length=1, max_length=14)
+    source: str = "latest"
+    slides: int = Field(default=8, ge=3, le=30)
+
+
+class ReportEdit(BaseModel):
+    title: str | None = Field(default=None, max_length=300)
+    data: dict | None = None
+
+
+@router.get(P + "/report-sources")
+def report_sources(product_id: str, c: Caller = Depends(caller)):
+    return reports.sources(_p(c, product_id))
+
+
+@router.get(P + "/reports")
+def list_reports(product_id: str, c: Caller = Depends(caller)):
+    return reports.list_reports(_p(c, product_id))
+
+
+@router.post(P + "/reports")
+def create_report(product_id: str, body: ReportBody, c: Caller = Depends(caller)):
+    return reports.create(_p(c, product_id, True), c.user, body.title, body.audience, body.purpose, body.selection,
+                          body.source, body.slides)
+
+
+@router.get(P + "/reports/{number}")
+def get_report(product_id: str, number: int, c: Caller = Depends(caller)):
+    return reports.get(_p(c, product_id), number)
+
+
+@router.put(P + "/reports/{number}")
+def edit_report(product_id: str, number: int, body: ReportEdit, c: Caller = Depends(caller)):
+    return reports.update(_p(c, product_id, True), number, body.title, body.data)
+
+
+@router.post(P + "/reports/{number}/regenerate")
+def regenerate_report(product_id: str, number: int, c: Caller = Depends(caller)):
+    return reports.regenerate(_p(c, product_id, True), c.user, number)
+
+
+@router.delete(P + "/reports/{number}")
+def delete_report(product_id: str, number: int, c: Caller = Depends(caller)):
+    reports.delete(_p(c, product_id, True), number)
+    return {"ok": True}
 
 
 class AutodevBody(BaseModel):

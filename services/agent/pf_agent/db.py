@@ -509,6 +509,28 @@ class ImportDoc(Base):
     created_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), default=_now)
 
 
+class ProductReport(Base):
+    """報告資料（RP-n）：工程の企画情報から範囲を選んで、AI がスライドの構成にまとめたもの。"""
+    __tablename__ = "product_reports"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    tenant_id: Mapped[str] = mapped_column(String(64), index=True)
+    product_id: Mapped[str] = mapped_column(String(32), index=True)
+    number: Mapped[int] = mapped_column(Integer)
+    title: Mapped[str] = mapped_column(String(300))
+    audience: Mapped[str] = mapped_column(String(300), default="")
+    purpose: Mapped[str] = mapped_column(Text, default="")
+    selection: Mapped[list] = mapped_column(JSON)                       # [{stage, fields: [key]}]
+    source: Mapped[str] = mapped_column(String(10), default="latest")   # latest（最新版、なければ下書き）| draft
+    slides_hint: Mapped[int] = mapped_column(Integer, default=8)
+    status: Mapped[str] = mapped_column(String(12), default="queued")   # queued | running | done | failed
+    data: Mapped[dict | None] = mapped_column(JSON, nullable=True)      # {summary, slides: [...], basis: {stage: 版}}
+    error: Mapped[str] = mapped_column(String(500), default="")
+    job_id: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    created_by: Mapped[str] = mapped_column(String(200))
+    created_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), default=_now)
+    updated_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), default=_now, onupdate=_now)
+
+
 class TenantSecret(Base):
     """テナントの秘密情報（GitHub のトークンなど）。値は暗号化して置く。"""
     __tablename__ = "tenant_secrets"

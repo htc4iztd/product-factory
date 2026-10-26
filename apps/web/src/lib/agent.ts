@@ -98,6 +98,22 @@ export type CanvasInfo = {
   facts: { stage: string; label: string; value: string; source: string }[]; images: CanvasImage[];
 };
 export type Overview = { product: Product; phases: Phase[]; stages: StageSummary[] };
+// 報告資料（RP-n）
+export type ReportSlide = {
+  kind: "content" | "table"; title: string; message: string; bullets: string[]; sources: string[]; notes: string;
+  table?: { head: string[]; rows: string[][] };
+};
+export type ProductReport = {
+  number: number; key: string; title: string; audience: string; purpose: string;
+  selection: { stage: string; fields: string[] }[]; source: "latest" | "draft"; slides_hint: number;
+  status: "queued" | "running" | "done" | "failed"; error: string; job_id: string | null;
+  data: { summary: string; slides: ReportSlide[]; basis?: Record<string, string>; model?: string } | null;
+  created_by: string; created_at: string; updated_at: string;
+};
+export type ReportSource = {
+  id: string; no: string; name: string; phase: string; enabled: boolean; version: number | null;
+  fields: { key: string; label: string; kind: string; filled: boolean }[];
+};
 // 取り込んだ資料と、工程の項目への割り当ての結果
 export type ImportResult = { stage: string; field: string; label: string; action: "filled" | "proposed" | "dropped"; reason: string };
 export type ImportDoc = {
