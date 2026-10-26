@@ -283,7 +283,7 @@ class JobRun(Base):
     progress: Mapped[dict | None] = mapped_column(JSON, nullable=True)  # {done, total, step}
     log: Mapped[list | None] = mapped_column(JSON, nullable=True)       # [{at, step}]
     usage: Mapped[dict | None] = mapped_column(JSON, nullable=True)     # {calls, input_tokens, output_tokens, by_model}
-    runner: Mapped[str] = mapped_column(String(12), default="thread")   # cloud-run-job | thread
+    runner: Mapped[str] = mapped_column(String(20), default="thread")   # cloud-run-job | thread
     execution: Mapped[str | None] = mapped_column(String(300), nullable=True)  # Cloud Run Jobs の実行名
     error: Mapped[str | None] = mapped_column(Text, nullable=True)
     model: Mapped[str] = mapped_column(String(120), default="")
@@ -512,6 +512,7 @@ def init_db(url: str | None = None):
     _engine = create_engine(sync_url(url), future=True, **pool_kwargs())
     Base.metadata.create_all(_engine)
     _add_missing_columns(_engine)
+    _widen_columns(_engine)
     _Session = sessionmaker(_engine, expire_on_commit=False, future=True)
     return _engine
 
@@ -527,6 +528,21 @@ _ADDED_COLUMNS = {
     "chat_messages": {"session_id": "VARCHAR(32)"},
     "llm_settings": {"platform_granted": "BOOLEAN DEFAULT {false}"},
 }
+
+
+# create_all は既存の列の型を変えないので、後から広げた文字列の列だけここで広げる（SQLite は長さを見ないので不要）
+_WIDENED = {("job_runs", "runner"): 20}
+
+
+def _widen_columns(engine) -> None:
+    if engine.dialect.name == "sqlite":
+        return
+    insp = inspect(engine)
+    with engine.begin() as conn:
+        for (table, name), length in _WIDENED.items():
+            col = next((c for c in insp.get_columns(table) if c["name"] == name), None)
+            if col is not None and (getattr(col["type"], "length", None) or length) < length:
+                conn.execute(text(f"ALTER TABLE {table} ALTER COLUMN {name} TYPE VARCHAR({length})"))
 
 
 def _add_missing_columns(engine) -> None:

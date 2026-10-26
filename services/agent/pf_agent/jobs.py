@@ -144,9 +144,9 @@ def _job_url(suffix: str = "") -> str:
 
 def _start_cloud_run_job(job_id: str) -> None:
     body = {"overrides": {"containerOverrides": [{"args": ["-m", "pf_agent.worker", job_id]}]}}
-    headers = {"Authorization": f"Bearer {_gcp_token()}", "Content-Type": "application/json"}
-    req = urllib.request.Request(_job_url(":run"), data=json.dumps(body).encode(), method="POST", headers=headers)
     try:
+        headers = {"Authorization": f"Bearer {_gcp_token()}", "Content-Type": "application/json"}
+        req = urllib.request.Request(_job_url(":run"), data=json.dumps(body).encode(), method="POST", headers=headers)
         op = json.loads(urllib.request.urlopen(req, timeout=20).read())
     except Exception as e:  # noqa: BLE001  起動できなければ失敗にして画面に出す
         finish(job_id, "failed", f"Cloud Run Jobs を起動できません：{e}")
