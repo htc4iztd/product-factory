@@ -1,7 +1,7 @@
 "use client";
 import { useState, useTransition } from "react";
 import { Pencil, Plus, Sparkles, Trash2 } from "lucide-react";
-import type { FieldSpec, FieldValue, Flow, Row } from "@/lib/agent";
+import type { ArchGraph, ErModel, FieldSpec, FieldValue, Flow, ProcSpec, Row, StateMachine } from "@/lib/agent";
 import { tableFilled } from "./table";
 import { setField } from "@/app/(app)/p/[id]/s/[stage]/actions";
 
@@ -35,6 +35,11 @@ export function FieldView({ field, value, compact }: { field: FieldSpec; value: 
         ))}
       </ul>
     );
+  }
+  if (field.kind === "er" || field.kind === "states" || field.kind === "specs" || field.kind === "graph") {
+    let v: unknown = value;
+    if (typeof v === "string") { try { v = JSON.parse(v); } catch { v = null; } }
+    return <DesignSummary kind={field.kind} value={v} empty={empty} />;
   }
   if (field.kind === "flows") {
     const flows = (value as Flow[] | undefined) ?? [];
@@ -70,6 +75,28 @@ export function FieldView({ field, value, compact }: { field: FieldSpec; value: 
       </table>
     </div>
   );
+}
+
+// 図の項目（ER図・状態遷移・処理仕様・構成図）は、AI の案などでは中身の一覧だけ見せる
+function DesignSummary({ kind, value, empty }: { kind: string; value: unknown; empty: React.ReactNode }) {
+  const chip = (t: string, i: number) => <span key={i} className="rounded bg-zinc-100 px-1.5 py-0.5 text-[11px]">{t}</span>;
+  const wrap = (head: string, items: string[]) => items.length
+    ? <div className="space-y-1"><div className="text-zinc-500">{head}</div><div className="flex flex-wrap gap-1">{items.slice(0, 30).map(chip)}</div></div>
+    : empty;
+  if (kind === "er") {
+    const m = (value ?? {}) as ErModel;
+    return wrap(`エンティティ ${m.entities?.length ?? 0}・リレーション ${m.relations?.length ?? 0}`, (m.entities ?? []).map((e) => `${e.name}（属性${e.attrs?.length ?? 0}）`));
+  }
+  if (kind === "states") {
+    const ms = (value ?? []) as StateMachine[];
+    return wrap(`状態遷移 ${ms.length}`, ms.map((m) => `${m.target}：${(m.states ?? []).map((x) => x.name).join(" → ")}`));
+  }
+  if (kind === "specs") {
+    const ps = (value ?? []) as ProcSpec[];
+    return wrap(`処理 ${ps.length}`, ps.map((p) => `${p.id ?? ""} ${p.name}（${p.kind}）`));
+  }
+  const g = (value ?? {}) as ArchGraph;
+  return wrap(`リソース ${g.nodes?.length ?? 0}・通信 ${g.edges?.length ?? 0}`, (g.nodes ?? []).map((n) => `${n.label}${n.zone ? `［${n.zone}］` : ""}`));
 }
 
 function TableInput({ field, rows, onChange }: { field: FieldSpec; rows: Row[]; onChange: (r: Row[]) => void }) {
@@ -128,6 +155,9 @@ function TableInput({ field, rows, onChange }: { field: FieldSpec; rows: Row[]; 
   );
 }
 
+// ここで編集できる型（フローや図は専用のエディタで編集する）
+const EDITABLE: FieldSpec["kind"][] = ["text", "list", "table"];
+
 export function FieldEditor({ pid, sid, field, value, readOnly, hasProposal, compact, hideLabel }: Props) {
   // 空の表は「編集」を押さなくても、最初から入力できる行を出しておく
   const blankTable = !readOnly && field.kind === "table" && !tableFilled(field, value);
@@ -142,7 +172,7 @@ export function FieldEditor({ pid, sid, field, value, readOnly, hasProposal, com
   const [pending, start] = useTransition();
 
   function open() {
-    if (readOnly || field.kind === "flows") return;
+    if (readOnly || !EDITABLE.includes(field.kind)) return;
     setError(null);
     if (field.kind === "table") setRows(startRows(field, value));
     else setText(field.kind === "list" ? ((value as string[]) ?? []).join("\n") : String(value ?? ""));
@@ -172,7 +202,7 @@ export function FieldEditor({ pid, sid, field, value, readOnly, hasProposal, com
           {hasProposal && (compact
             ? <span title="AIの案があります"><Sparkles size={11} className="shrink-0 text-brand-600" /></span>
             : <span className="flex items-center gap-0.5 rounded bg-brand-50 px-1 text-[10px] font-medium text-brand-700"><Sparkles size={10} />AI案</span>)}
-          {!readOnly && !editing && field.kind !== "flows" && (
+          {!readOnly && !editing && EDITABLE.includes(field.kind) && (
             <button onClick={open} className={`btn-ghost btn-sm h-6 px-1.5 opacity-40 transition group-hover/field:opacity-100 focus:opacity-100 ${compact ? "absolute -right-1 -top-1" : "ml-auto"}`} aria-label={`${field.label}を編集`}>
               <Pencil size={12} />
             </button>

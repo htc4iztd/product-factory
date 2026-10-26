@@ -101,14 +101,32 @@ export type Overview = { product: Product; phases: Phase[]; stages: StageSummary
 
 export type Column = { key: string; label: string; kind: "text" | "number"; options: string[] };
 export type FieldSpec = {
-  key: string; label: string; kind: "text" | "list" | "table" | "flows"; hint: string; required: boolean;
+  key: string; label: string; kind: "text" | "list" | "table" | "flows" | "er" | "states" | "specs" | "graph"; hint: string; required: boolean;
   columns: Column[]; rows: string[]; id_prefix: string;
 };
 export type Row = Record<string, string | number>;
 export type FlowNode = { id: string; type: "start" | "task" | "decision" | "system" | "end"; label: string; lane: number; x: number };
 export type FlowEdge = { id: string; source: string; target: string; label: string; sourceHandle?: string; targetHandle?: string };
 export type Flow = { business: string; lanes: string[]; nodes: FlowNode[]; edges: FlowEdge[] };
-export type FieldValue = string | string[] | Row[] | Flow[];
+// ⑨⑩の設計書の構造（designs.py と同じ形）
+export type ErAttr = { name: string; physical: string; type: string; pk: boolean; fk: string; required: boolean; note: string };
+export type ErEntity = { id: string; name: string; physical: string; note: string; attrs: ErAttr[]; x?: number; y?: number };
+export type ErRelation = { id: string; source: string; target: string; card: "1:1" | "1:N" | "N:1" | "N:M"; label: string };
+export type ErModel = { entities: ErEntity[]; relations: ErRelation[] };
+export type SmState = { id: string; name: string; kind: "initial" | "normal" | "final"; note: string; x?: number; y?: number };
+export type SmTransition = { id: string; source: string; target: string; event: string; guard: string; action: string };
+export type StateMachine = { target: string; states: SmState[]; transitions: SmTransition[] };
+export type SpecIo = { dir: string; kind: string; name: string; crud: string; format: string; note: string };
+export type SpecParam = { dir: string; name: string; label: string; type: string; required: string; note: string };
+export type SpecCall = { name: string; cls: string; method: string; args: string };
+export type ProcSpec = {
+  id: string; name: string; kind: string; component: string; trigger: string; fr: string; summary: string;
+  steps: string[]; constraints: string; io: SpecIo[]; params: SpecParam[]; calls: SpecCall[]; settings: { key: string; note: string }[];
+};
+export type ArchNode = { id: string; label: string; kind: string; zone: string; note: string; x?: number; y?: number };
+export type ArchEdge = { id: string; source: string; target: string; label: string };
+export type ArchGraph = { nodes: ArchNode[]; edges: ArchEdge[] };
+export type FieldValue = string | string[] | Row[] | Flow[] | ErModel | StateMachine[] | ProcSpec[] | ArchGraph;
 export type Draft = Record<string, FieldValue>;
 export type Proposal = { id: string; field: string; value: FieldValue; reason: string; status: "pending" | "accepted" | "rejected" };
 export type ChatMsg = { id: number; session_id: string | null; role: "user" | "assistant" | "feedback"; actor: string; text: string; proposals: Proposal[]; at: string };

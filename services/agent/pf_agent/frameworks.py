@@ -5,6 +5,7 @@
 - list：箇条書き（文字列の配列）
 - table：表（列が決まった行の配列）。rows を決めた表は行の見出しが固定
 - flows：スイムレーン型の業務フロー（業務ごとに、レーン・ノード・矢印）
+- er / states / specs / graph：設計書の構造（designs.py）。ER図・状態遷移・処理仕様・構成図
 
 版の Markdown（下流ステージとLLMへの入力、監査ログのハッシュ）はここで作る。
 """
@@ -13,6 +14,7 @@ from __future__ import annotations
 import json
 from dataclasses import dataclass, field
 
+from . import designs as dz
 from .stages import STAGES, Stage
 
 
@@ -49,6 +51,7 @@ class Framework:
 
 
 T, L, TB, FL = "text", "list", "table", "flows"
+ER, ST, SP, GR = dz.ER, dz.ST, dz.SP, dz.GR
 # フローのノードの種類
 NODE_TYPES = {"start": "開始", "task": "作業", "decision": "判断", "system": "システム処理", "end": "終了"}
 REVIEW = Field("review_condition", "見直し条件", T, "どの前提が崩れたらこの分析をやり直すか")
@@ -203,6 +206,102 @@ FRAMEWORKS: dict[str, Framework] = {
         ),
         ("受入テストで特に確認したい基準は？",),
     ),
+    "s09": Framework(
+        "app_design", "アプリケーション設計（データモデル・処理仕様・状態遷移）",
+        "⑧の機能要求を、どの部品が・どのデータを・どう処理するかまで落とす",
+        (
+            Field("overview", "設計方針", T, "アーキテクチャの型、言語・フレームワーク、層の分け方"),
+            Field("components", "コンポーネント", TB, "画面・API・バッチ・共通部品など、処理を担う単位",
+                  columns=(Column("id", "ID"), Column("name", "名前"),
+                           Column("kind", "種類", options=("画面", "API", "バッチ", "常駐", "共通部品", "外部連携")),
+                           Column("module", "クラス・モジュール"), Column("responsibility", "責務"),
+                           Column("fr", "機能要求ID")),
+                  id_prefix="CP"),
+            Field("data_model", "概念データモデル", ER, "エンティティ・属性（PK/FK）・リレーション"),
+            Field("specs", "処理仕様", SP,
+                  "処理ごとに概要・主な処理・入出力（テーブルは CRUD）・パラメータ・呼び出す部品。"
+                  "CRUD マトリクスとデータフロー図はここから作る"),
+            Field("states", "状態遷移", ST, "状態を持つもの（注文・申込など）ごとの状態とイベント", required=False),
+            Field("apis", "API契約", TB, "外部・画面から呼ばれる API", required=False,
+                  columns=(Column("id", "ID"),
+                           Column("method", "メソッド", options=("GET", "POST", "PUT", "PATCH", "DELETE")),
+                           Column("path", "パス"), Column("summary", "内容"), Column("request", "リクエスト"),
+                           Column("response", "レスポンス"), Column("auth", "認可")),
+                  id_prefix="API"),
+            Field("units", "ユニット分割", TB, "⑫で1つずつ作る単位。コンポーネント・処理の ID で範囲を書く",
+                  columns=(Column("id", "ID"), Column("name", "ユニット"), Column("scope", "範囲（CP/PR）"),
+                           Column("depends", "依存するユニット"), Column("done", "完成の条件")),
+                  id_prefix="UN"),
+        ),
+        ("使いたい言語・フレームワークは？", "状態を持つデータ（注文・申込など）はありますか？"),
+    ),
+    "s10": Framework(
+        "infra_design", "インフラ設計（構成図・リソース・環境・コスト）",
+        "どこに、何を、どうつないで置くかとその費用を決める",
+        (
+            Field("overview", "設計方針", T, "クラウド、リージョン、可用性とコストの考え方"),
+            Field("architecture", "構成図", GR, "利用者から外部システムまで、リソースと通信を置き場所（ゾーン）ごとに"),
+            Field("resources", "リソース", TB, "構成図のリソースのサービス・性能・冗長化",
+                  columns=(Column("id", "ID"), Column("name", "リソース"), Column("service", "サービス"),
+                           Column("spec", "性能・サイズ"), Column("env", "環境"), Column("redundancy", "冗長化"),
+                           Column("note", "備考")),
+                  id_prefix="RS"),
+            Field("environments", "環境", TB, "環境ごとの目的と違い",
+                  columns=(Column("env", "環境"), Column("purpose", "目的"), Column("place", "アカウント・URL"),
+                           Column("difference", "本番との違い")),
+                  rows=("開発", "検証", "本番")),
+            Field("network", "通信要件", TB, "どこからどこへ、何で通信するか", required=False,
+                  columns=(Column("source", "通信元"), Column("target", "通信先"), Column("protocol", "プロトコル"),
+                           Column("port", "ポート"), Column("purpose", "用途"))),
+            Field("iac", "IaC方針", T, "構成をコードで持つ方法と、変更の流れ"),
+            Field("cost", "月額コスト見積", TB, "合計は自動で計算する",
+                  columns=(Column("item", "項目"), Column("service", "サービス"), Column("basis", "算定の前提"),
+                           Column("monthly", "月額（円）", "number"))),
+        ),
+        ("配置するクラウドとリージョンは？", "止まってよい時間（可用性の目標）は？"),
+    ),
+    "s11": Framework(
+        "ops_design", "運用方式設計（監視・SLO・障害対応・定常運用）", "動かし続けるための監視・対応・定常作業を決める",
+        (
+            Field("overview", "運用方針・体制", T, "運用の時間帯、体制、役割、エスカレーションの考え方"),
+            Field("schedule", "運用スケジュール", TB, "業務と運用・基盤の処理がいつ動くか", required=False,
+                  columns=(Column("name", "処理"), Column("kind", "区分", options=("業務", "運用・基盤")),
+                           Column("timing", "タイミング"), Column("window", "時間帯"), Column("owner", "担当"))),
+            Field("startstop", "起動・停止", TB, "起動・停止のきっかけと手順", required=False,
+                  columns=(Column("target", "対象"), Column("trigger", "きっかけ"), Column("method", "方法"),
+                           Column("order", "順序"), Column("note", "備考"))),
+            Field("monitoring", "監視項目", TB, "何を、どの閾値で、誰に知らせるか",
+                  columns=(Column("category", "分類",
+                                  options=("ハードウェア", "ソフトウェア", "業務", "サービス", "性能", "データベース",
+                                           "セキュリティ", "ネットワーク", "AI")),
+                           Column("target", "対象"), Column("metric", "監視内容"), Column("threshold", "閾値"),
+                           Column("interval", "間隔"), Column("notify", "通知先"), Column("action", "対応"))),
+            Field("slo", "SLO", TB, "利用者から見た品質の目標",
+                  columns=(Column("service", "対象"), Column("sli", "指標（SLI）"), Column("target", "目標"),
+                           Column("window", "期間"), Column("budget", "エラーバジェットの使い方"))),
+            Field("incident", "障害対応", TB, "重大度ごとの定義・連絡・初動",
+                  columns=(Column("level", "重大度"), Column("definition", "定義"), Column("notify", "連絡先"),
+                           Column("response", "初動の目標時間"), Column("escalation", "エスカレーション")),
+                  rows=("S1（全面停止）", "S2（一部停止）", "S3（軽微）")),
+            Field("backup", "バックアップ・リカバリ", TB, "何を、どの頻度で、どこまで戻せるか", required=False,
+                  columns=(Column("target", "対象"), Column("method", "方式"), Column("frequency", "頻度"),
+                           Column("retention", "保管期間"), Column("rpo", "RPO"), Column("rto", "RTO"),
+                           Column("restore", "復旧手順"))),
+            Field("batch", "バッチ運用", TB, "定時に動く処理と失敗時の扱い", required=False,
+                  columns=(Column("job", "ジョブ"), Column("schedule", "スケジュール"), Column("depends", "前提"),
+                           Column("on_failure", "失敗時"), Column("rerun", "再実行"))),
+            Field("logs", "ログ運用", TB, "ログの種類・保管・使い道", required=False,
+                  columns=(Column("kind", "ログ"), Column("place", "保管場所"), Column("retention", "保管期間"),
+                           Column("rotation", "ローテーション"), Column("use", "使い道"))),
+            Field("security_ops", "セキュリティ運用", TB, "定期的なセキュリティ作業", required=False,
+                  columns=(Column("item", "作業"), Column("frequency", "頻度"), Column("method", "方法"),
+                           Column("owner", "担当"))),
+            Field("cicd", "CI/CD", T, "ビルド・テスト・デプロイの流れと承認"),
+            Field("ai_eval", "AI機能の評価方式", T, "AI 機能の品質をどう測り続けるか（AI 機能がなければ「なし」）",
+                  required=False),
+        ),
+        ("障害時に誰へ通知しますか？", "運用する時間帯（24時間か、業務時間だけか）は？"),
+    ),
     "s05": Framework(
         "business_plan", "事業計画（KPIツリー・収益モデル・PL）", "事業として成り立つかを数字で確かめる",
         (
@@ -241,6 +340,8 @@ FRAMEWORK_BY_STAGE = {s.id: framework(s) for s in STAGES}
 
 # ---------------- 値の扱い ----------------
 def empty_value(f: Field):
+    if f.kind in dz.KINDS:
+        return dz.empty(f.kind)
     if f.kind == FL:
         return []
     if f.kind == L:
@@ -261,6 +362,8 @@ def is_filled(f: Field, value) -> bool:
         return any(str(v).strip() for v in (value or []))
     if f.kind == FL:
         return any(fl.get("nodes") for fl in (value or []))
+    if f.kind in dz.KINDS:
+        return dz.filled(f.kind, value)
     # 表：行見出し以外のどこかに値がある行が1つ以上
     data_cols = [c.key for c in f.columns[1:]] if f.rows else [c.key for c in f.columns]
     return any(any(str(r.get(k, "")).strip() for k in data_cols) for r in (value or []))
@@ -286,6 +389,8 @@ def coerce(f: Field, value):
         return [str(v).strip() for v in value if str(v).strip()]
     if f.kind == FL:
         return _coerce_flows(value)
+    if f.kind in dz.KINDS:
+        return dz.COERCE[f.kind](value)
     # table
     if isinstance(value, str):
         value = json.loads(value)
@@ -425,8 +530,45 @@ def pl_rows(rows: list[dict]) -> list[dict]:
     return out + [gross, op]
 
 
+def cost_rows(rows: list[dict]) -> list[dict]:
+    """月額コストに合計を足した表示用の行。"""
+    return list(rows or []) + [{"item": "合計", "monthly": round(sum(_num(r.get("monthly")) for r in rows or []))}]
+
+
+# 文章の見出しだけで作っていた頃の項目（sec1, sec2 …）の名前。型を持たせた後も、書いた中身は設計方針に引き継ぐ
+LEGACY_SECTIONS = {
+    "s09": ("コンポーネント", "ドメインモデル", "API契約", "ユニット分割"),
+    "s10": ("構成", "環境", "IaC方針", "月額コスト見積"),
+    "s11": ("CI/CD", "監視項目", "SLO", "障害対応", "AI機能の評価方式"),
+}
+
+
+def upgrade(stage_id: str, draft: dict | None) -> dict:
+    """古い形の下書きを今の項目にそろえる（足りない項目は空で足し、昔の見出しの文章は先頭の文章項目へ）。"""
+    fw = FRAMEWORK_BY_STAGE[stage_id]
+    d = dict(draft or {})
+    old = [(k, v) for k, v in d.items() if fw.get(k) is None and k.startswith("sec") and str(v or "").strip()]
+    if old and stage_id in LEGACY_SECTIONS:
+        names = LEGACY_SECTIONS[stage_id]
+        head = next((f for f in fw.fields if f.kind == T), None)
+        if head is not None and not str(d.get(head.key) or "").strip():
+            parts = []
+            for k, v in sorted(old, key=lambda kv: int(kv[0][3:]) if kv[0][3:].isdigit() else 99):
+                i = int(k[3:]) - 1 if k[3:].isdigit() else -1
+                parts.append(f"### {names[i] if 0 <= i < len(names) else k}\n{str(v).strip()}")
+            d[head.key] = "\n\n".join(parts)
+    for k in [k for k in d if fw.get(k) is None and k.startswith("sec")]:
+        d.pop(k)
+    for f in fw.fields:
+        if f.key not in d:
+            d[f.key] = empty_value(f)
+    return d
+
+
 def to_markdown(stage: Stage, fw: Framework, draft: dict) -> str:
     lines = [f"# {stage.no} {stage.name}（{fw.title}）", ""]
+    if stage.id in LEGACY_SECTIONS:
+        draft = upgrade(stage.id, draft)
     for f in fw.fields:
         v = (draft or {}).get(f.key)
         lines.append(f"## {f.label}")
@@ -436,8 +578,11 @@ def to_markdown(stage: Stage, fw: Framework, draft: dict) -> str:
             lines += [f"- {x}" for x in v or []] or ["（未記入）"]
         elif f.kind == FL:
             lines += flows_mermaid(v or []) or ["（未記入）"]
+        elif f.kind in dz.KINDS:
+            lines += dz.markdown(f.kind, v, draft) or ["（未記入）"]
         else:
-            rows = pl_rows(v) if (stage.id == "s05" and f.key == "pl") else (v or [])
+            rows = (pl_rows(v) if (stage.id == "s05" and f.key == "pl")
+                    else cost_rows(v) if (stage.id == "s10" and f.key == "cost" and v) else (v or []))
             if not rows:
                 lines.append("（未記入）")
             else:
@@ -490,8 +635,9 @@ def from_markdown(fw: Framework, markdown: str) -> tuple[dict, list[str]]:
         if f is None:
             notes.append(f"見出し「{label}」は項目にないため反映しませんでした")
             continue
-        if f.kind == FL:
-            notes.append(f"「{label}」は文書からは変えられません（キャンバスのフローエディタで編集してください）")
+        if f.kind == FL or f.kind in dz.KINDS:
+            where = "フローエディタ" if f.kind == FL else "図のエディタ"
+            notes.append(f"「{label}」は文書からは変えられません（キャンバスの{where}で編集してください）")
             continue
         body = sections[label]
         text = "\n".join(body).strip()
@@ -508,7 +654,7 @@ def from_markdown(fw: Framework, markdown: str) -> tuple[dict, list[str]]:
         except (ValueError, TypeError) as e:
             notes.append(f"「{label}」を読めませんでした（{e}）")
     for f in fw.fields:
-        if f.label not in sections and f.kind != FL:
+        if f.label not in sections and f.kind != FL and f.kind not in dz.KINDS:
             notes.append(f"見出し「{f.label}」がないため、その項目は変えていません")
     return values, notes
 

@@ -19,6 +19,7 @@ from urllib.parse import urlparse
 
 from pydantic import BaseModel
 
+from . import designs
 from .frameworks import Framework, empty_draft, is_filled, spec
 from .llmconf import Conn
 from .stages import Stage
@@ -110,7 +111,10 @@ def _prompt(stage: Stage, fw: Framework, idea: str, draft: dict, upstream: dict[
         "- proposals の value は、text はそのまま、list は1行1要素の改行区切り、"
         "table は columns の key を持つオブジェクトの JSON 配列（rows がある表は先頭列にその見出し）、"
         "flows は [{business: 業務名, lanes: [担当名...], nodes: [{id, type: start|task|decision|system|end, "
-        "label, lane: レーンの番号, x: 左からの位置(px)}], edges: [{source, target, label}]}] の JSON。\n\n"
+        "label, lane: レーンの番号, x: 左からの位置(px)}], edges: [{source, target, label}]}] の JSON。\n"
+        + "".join(f"- kind が {k} の項目の value は {designs.FORMATS[k]} の JSON。\n"
+                  for k in designs.KINDS if any(f.kind == k for f in fw.fields))
+        + "\n"
         f"## 項目の定義\n{json.dumps(spec(fw), ensure_ascii=False)}\n\n"
         f"## 現在の値\n{json.dumps(draft, ensure_ascii=False)}\n\n"
         f"## プロダクトの意図\n{idea or '（なし）'}\n\n"
@@ -133,6 +137,8 @@ def _stub_value(f, idea: str):
                                       {"source": "n3", "target": "n4", "label": "はい"},
                                       {"source": "n3", "target": "n5", "label": "いいえ"},
                                       {"source": "n4", "target": "n2"}]}], ensure_ascii=False)
+    if f.kind in designs.KINDS:
+        return json.dumps(designs.stub(f.kind), ensure_ascii=False)
     if f.kind == "text":
         return f"{base}の{f.label}（仮）"
     if f.kind == "list":

@@ -6,6 +6,11 @@ import type { Flow, Trace } from "@/lib/agent";
 import { ImportAcButton } from "./StageActions";
 import { tableFilled } from "./table";
 import { Circles, PositionMap } from "./Maps";
+import type { ArchGraph, ErModel, ProcSpec, StateMachine } from "@/lib/agent";
+import { ErEditor } from "@/components/design/ErEditor";
+import { StateEditor } from "@/components/design/StateEditor";
+import { ArchEditor } from "@/components/design/ArchEditor";
+import { SpecEditor } from "@/components/design/SpecEditor";
 
 type Ctx = { pid: string; st: StageDetail; readOnly: boolean; proposed: Set<string> };
 
@@ -479,6 +484,114 @@ function TestReport({ c }: { c: Ctx }) {
   );
 }
 
+// ---------- ⑨ アプリケーション設計 ----------
+function AppDesign({ c }: { c: Ctx }) {
+  const d = c.st.draft;
+  return (
+    <div className="space-y-4">
+      <Panel><F c={c} k="overview" /></Panel>
+      <Panel><F c={c} k="components" /></Panel>
+      <Panel>
+        <Title c={c} k="data_model" label="概念データモデル（ER図）" note="エンティティ・属性（PK/FK）・リレーション。ドラッグで配置を整えられます" />
+        <ErEditor pid={c.pid} sid={c.st.id} fieldKey="data_model" value={d.data_model as ErModel | undefined} readOnly={c.readOnly} />
+      </Panel>
+      <Panel>
+        <Title c={c} k="specs" label="処理仕様" note="処理ごとの概要・手順・入出力（CRUD）・パラメータ・呼び出す部品。CRUD マトリクスとデータフローはここから作ります" />
+        <SpecEditor pid={c.pid} sid={c.st.id} fieldKey="specs" value={d.specs as ProcSpec[] | undefined} er={d.data_model as ErModel | undefined}
+          components={(d.components as Row[]) ?? []} readOnly={c.readOnly} />
+      </Panel>
+      <Panel>
+        <Title c={c} k="states" label="状態遷移" note="状態を持つもの（注文・申込など）ごとに、状態とイベント・条件・処理" />
+        <StateEditor pid={c.pid} sid={c.st.id} fieldKey="states" value={d.states as StateMachine[] | undefined} readOnly={c.readOnly} />
+      </Panel>
+      <Panel><F c={c} k="apis" /></Panel>
+      <Panel><F c={c} k="units" /></Panel>
+    </div>
+  );
+}
+
+// ---------- ⑩ インフラ設計 ----------
+function InfraDesign({ c }: { c: Ctx }) {
+  const cost = (c.st.draft.cost as Row[]) ?? [];
+  const total = cost.reduce((a, r) => a + (Number(String(r.monthly ?? "").replace(/,/g, "")) || 0), 0);
+  return (
+    <div className="space-y-4">
+      <Panel><F c={c} k="overview" /></Panel>
+      <Panel>
+        <Title c={c} k="architecture" label="構成図" note="リソースを置き場所（ゾーン）ごとに並べ、通信でつなぎます" />
+        <ArchEditor pid={c.pid} sid={c.st.id} fieldKey="architecture" value={c.st.draft.architecture as ArchGraph | undefined} readOnly={c.readOnly} />
+      </Panel>
+      <Panel><F c={c} k="resources" /></Panel>
+      <div className="grid gap-4 xl:grid-cols-2">
+        <Panel><F c={c} k="environments" /></Panel>
+        <Panel><F c={c} k="network" /></Panel>
+      </div>
+      <Panel><F c={c} k="iac" /></Panel>
+      <Panel>
+        <F c={c} k="cost" />
+        {cost.length > 0 && (
+          <div className="mt-3 flex items-baseline justify-end gap-2 border-t border-zinc-100 pt-2">
+            <span className="text-[12px] text-zinc-500">月額の合計</span>
+            <span className="text-lg font-semibold tabular-nums">{total.toLocaleString()} 円</span>
+            <span className="text-[11px] text-zinc-400">（年 {(total * 12).toLocaleString()} 円）</span>
+          </div>
+        )}
+      </Panel>
+    </div>
+  );
+}
+
+// ---------- ⑪ 運用方式設計 ----------
+function OpsDesign({ c }: { c: Ctx }) {
+  const mon = (c.st.draft.monitoring as Row[]) ?? [];
+  const cats = mon.reduce<Record<string, number>>((a, r) => { const k = String(r.category ?? "") || "未分類"; a[k] = (a[k] ?? 0) + 1; return a; }, {});
+  const slo = ((c.st.draft.slo as Row[]) ?? []).filter((r) => String(r.service ?? "").trim());
+  return (
+    <div className="space-y-4">
+      <Panel><F c={c} k="overview" /></Panel>
+      <Panel>
+        {Object.keys(cats).length > 0 && (
+          <div className="mb-3 flex flex-wrap gap-1.5">
+            {Object.entries(cats).map(([k, n]) => <span key={k} className="rounded-full bg-zinc-100 px-2 py-0.5 text-[11px] text-zinc-600">{k} {n}</span>)}
+          </div>
+        )}
+        <F c={c} k="monitoring" />
+      </Panel>
+      <div className="grid gap-4 xl:grid-cols-2">
+        <Panel>
+          {slo.length > 0 && (
+            <div className="mb-3 grid gap-2 sm:grid-cols-2">
+              {slo.map((r, i) => (
+                <div key={i} className="rounded-xl border border-zinc-200 p-2.5">
+                  <div className="text-[11px] text-zinc-500">{String(r.service)}・{String(r.sli ?? "")}</div>
+                  <div className="text-lg font-semibold">{String(r.target ?? "") || "—"}</div>
+                  {String(r.window ?? "") && <div className="text-[11px] text-zinc-400">{String(r.window)}</div>}
+                </div>
+              ))}
+            </div>
+          )}
+          <F c={c} k="slo" />
+        </Panel>
+        <Panel><F c={c} k="incident" /></Panel>
+      </div>
+      <div className="grid gap-4 xl:grid-cols-2">
+        <Panel><F c={c} k="schedule" /></Panel>
+        <Panel><F c={c} k="startstop" /></Panel>
+      </div>
+      <Panel><F c={c} k="backup" /></Panel>
+      <div className="grid gap-4 xl:grid-cols-2">
+        <Panel><F c={c} k="batch" /></Panel>
+        <Panel><F c={c} k="logs" /></Panel>
+      </div>
+      <Panel><F c={c} k="security_ops" /></Panel>
+      <div className="grid gap-4 xl:grid-cols-2">
+        <Panel><F c={c} k="cicd" /></Panel>
+        <Panel><F c={c} k="ai_eval" /></Panel>
+      </div>
+    </div>
+  );
+}
+
 // ---------- ⑥以降：見出しごとの文書 ----------
 function DocumentView({ c }: { c: Ctx }) {
   return (
@@ -491,6 +604,7 @@ function DocumentView({ c }: { c: Ctx }) {
 const VIEWS: Record<string, (p: { c: Ctx }) => React.ReactNode> = {
   lean_canvas: LeanCanvas, market: Market, competitors: Competitors, vpc: Vpc, business_plan: BusinessPlan,
   business_req: BusinessReq, product_spec: ProductSpec, system_req: SystemReq, test_report: TestReport, document: DocumentView,
+  app_design: AppDesign, infra_design: InfraDesign, ops_design: OpsDesign,
 };
 
 export function Canvas({ pid, st, readOnly }: { pid: string; st: StageDetail; readOnly: boolean }) {

@@ -121,10 +121,15 @@ def _initial_draft(s, r: StageRun) -> dict:
     return draft
 
 
+def _current(s, r: StageRun) -> dict:
+    d = copy.deepcopy(r.draft) if r.draft is not None else _initial_draft(s, r)
+    return fx.upgrade(r.stage_id, d) if r.stage_id in fx.LEGACY_SECTIONS else d
+
+
 def draft(product_id: str, stage_id: str) -> dict:
     with session() as s:
         r = _run(s, product_id, stage_id)
-        return copy.deepcopy(r.draft) if r.draft is not None else _initial_draft(s, r)
+        return _current(s, r)
 
 
 def _touch(r: StageRun) -> str | None:
@@ -145,7 +150,7 @@ def set_field(product_id: str, stage_id: str, key: str, value, actor: str, sourc
     value = fx.coerce(f, value)
     with session() as s:
         r = _run(s, product_id, stage_id)
-        d = copy.deepcopy(r.draft) if r.draft is not None else _initial_draft(s, r)
+        d = _current(s, r)
         d[key] = value
         r.draft = d
         old = _touch(r)
@@ -162,7 +167,7 @@ def set_fields(product_id: str, stage_id: str, values: dict, actor: str, source:
     fw = fx.FRAMEWORK_BY_STAGE[stage_id]
     with session() as s:
         r = _run(s, product_id, stage_id)
-        d = copy.deepcopy(r.draft) if r.draft is not None else _initial_draft(s, r)
+        d = _current(s, r)
         changed = [k for k, v in values.items() if fw.get(k) is not None and d.get(k) != v]
         if not changed:
             return []

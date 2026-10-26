@@ -99,7 +99,7 @@ class SessionBody(BaseModel):
 
 class FieldValue(BaseModel):
     field: str
-    value: str | list | None = None
+    value: str | list | dict | None = None
 
 
 class MarkdownBody(BaseModel):
