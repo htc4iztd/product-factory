@@ -103,6 +103,7 @@ function ArticleCard({ n, a, M, d, la, sel, onSel, canEdit, onFacts }: {
         <span className={`chip ${a.jp ? "border-rose-200 bg-rose-50 text-rose-700" : ""}`}>{a.jp ? "国内" : a.country || "海外"}</span>
         <span className="chip">{d.options.categories[a.category] ?? a.category}</span>
         {a.publisher && <span className="font-medium text-zinc-700">{a.publisher}</span>}
+        {!a.checked && <span className="chip border-amber-200 text-amber-700" title="本文を開けなかったため、検索結果の文章から要約した。数字はリンク先で確かめてほしい">本文未確認</span>}
         <span className="ml-auto font-mono">{a.key}</span>
       </div>
       <h3 className="text-[15px] font-semibold leading-snug">

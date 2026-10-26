@@ -245,3 +245,58 @@ def test_research_players_facts_questions_reports(client, monkeypatch):
     # 他のテナント・閲覧のみ
     assert c.get("/research/1/data", headers=OTHER).status_code == 404
     assert c.post("/research/articles/1/questions", headers=VIEWER, json={"question": "x"}).status_code == 403
+
+
+def test_research_search_many_queries_snippet_fallback_and_period(client, monkeypatch):
+    """検索は問いを分けて何度も投げる。本文が開けない記事は検索結果の文章から作り（本文未確認）、
+    期間の始まりは最新の記事があっても守る。"""
+    c = client
+    from pf_agent import research
+
+    c.post(
+        "/research",
+        headers=H,
+        json={"name": "家計管理", "issues": ["締め処理", "利用実態"], "entities": ["調査会社"], "since": "2025-01-01"},
+    )
+    lib = research.libraries("tenant-a")[0]
+    from pf_agent.db import ResearchLibrary, session
+
+    with session() as s:
+        qs = research.search_queries(s.get(ResearchLibrary, lib["id"]), "2025-01-01", today="2026-10-26")
+    wins = [w for q, w in qs if q.startswith("家計管理：") and "締め処理" not in q and "利用実態" not in q]
+    assert len(wins) == 4 and wins[0].endswith("2026-10-26") and wins[-1].startswith("2025-01-01")
+    assert any("締め処理" in q for q, _ in qs) and any(q.startswith("調査会社") for q, _ in qs)
+    # 最新の記事（2026-10-20）があっても、期間の始まり（2025-01-01）から探す
+    c.post("/research/1/articles", headers=H, json={"url": "https://manual.example/1", "text": ARTICLE})
+    seen = {}
+
+    def fake_search(conn, lib, since, on_query=None):
+        seen["since"] = since
+        return [
+            {
+                "url": "https://news.example/blocked",
+                "site": "news.example",
+                "date": "2025-09-01",
+                "snippet": "2025-09-01｜家計ニュース｜家計簿アプリの利用が増えた｜"
+                "共働き世帯の30%が使っている。締め処理が課題。",
+            },
+            {
+                "url": "https://news.example/old",
+                "site": "news.example",
+                "snippet": "2024-03-01｜家計ニュース｜昔の記事｜古い話。",
+            },
+            {"url": "https://news.example/nosnippet", "site": "news.example", "snippet": ""},
+        ]
+
+    monkeypatch.setattr(research, "search", fake_search)
+    monkeypatch.setattr(research, "fetch", lambda url: (_ for _ in ()).throw(OSError("403 Forbidden")))
+    j = wait(c, c.post("/research/1/update", headers=H).json()["id"])
+    assert j["status"] == "done", j
+    assert seen["since"] == "2025-01-01"
+    read = next(t for t in j["tasks"] if t["id"] == "read")
+    assert "新しい記事 1件（うち検索結果から 1件）" in read["detail"] and "期間より前 1件" in read["detail"]
+    assert "読めない 1件" in read["detail"]
+    d = c.get("/research/1/data", headers=H).json()
+    new = next(a for a in d["items"] if a["url"] == "https://news.example/blocked")
+    assert new["checked"] is False and new["published"] == "2025-09-01" and new["origin"] == "search"
+    assert all(not f["verified"] for f in d["facts"] if f["article"] == new["key"])

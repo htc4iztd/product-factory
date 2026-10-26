@@ -21,6 +21,7 @@ import io
 import ipaddress
 import re
 import socket
+import urllib.error
 import urllib.request
 import xml.etree.ElementTree as ET
 from collections import Counter
@@ -72,7 +73,8 @@ DEFAULT_LAYERS = [
     "規制当局・公的機関",
     "調査・投資家",
 ]
-MAX_NEW = 25  # 1回の更新で読む記事の上限
+MAX_NEW = 60  # 1回の更新で読む記事の上限
+MAX_QUERIES = 24  # 1回の更新で AI の検索に投げる問いの上限
 MAX_BYTES = 3_000_000
 REWRITE_AFTER = 3  # 論点のまとめを書き直す、新しい記事の数
 
@@ -387,17 +389,53 @@ def _public(url: str) -> None:
             raise ResearchError(422, f"内部ネットワークのアドレスは読めません：{url}")
 
 
+class _CheckedRedirect(urllib.request.HTTPRedirectHandler):
+    """転送先も公開アドレスか確かめてから進む（転送で内部のアドレスに入らないように）。"""
+
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        _public(newurl)
+        return super().redirect_request(req, fp, code, msg, headers, newurl)
+
+
+_opener = urllib.request.build_opener(_CheckedRedirect)
+
+
+class _NoRedirect(urllib.request.HTTPRedirectHandler):
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        return None
+
+
+def resolve(url: str) -> str:
+    """検索結果の転送用 URL（grounding-api-redirect など）を、転送先の URL にする。分からなければそのまま。"""
+    if "grounding-api-redirect" not in url:
+        return url
+    try:
+        _public(url)
+        req = urllib.request.Request(url, method="HEAD", headers={"User-Agent": UA})
+        urllib.request.build_opener(_NoRedirect).open(req, timeout=10)  # noqa: S310
+    except urllib.error.HTTPError as e:
+        loc = e.headers.get("Location")
+        if loc and loc.startswith("http"):
+            return loc
+    except Exception:  # noqa: BLE001,S110  分からなければ元の URL を使う
+        pass
+    return url
+
+
+UA = "Mozilla/5.0 (compatible; ProductFactory-Research/1.0)"
+
+
 def fetch(url: str) -> tuple[str, str, str]:
-    """(最後の URL, content-type, 本文のテキスト)。公開アドレスだけ。"""
+    """(最後の URL, content-type, 本文のテキスト)。公開アドレスだけ（転送先も確かめる）。"""
     _public(url)
     req = urllib.request.Request(
         url,
         headers={
-            "User-Agent": "Mozilla/5.0 (compatible; ProductFactory-Research/1.0)",
+            "User-Agent": UA,
             "Accept-Language": "ja,en;q=0.8",
         },
     )
-    with urllib.request.urlopen(req, timeout=20) as r:  # noqa: S310 - 公開アドレスだけ（上で検査）
+    with _opener.open(req, timeout=20) as r:  # noqa: S310 - 公開アドレスだけ（上と転送ごとに検査）
         final = r.geturl()
         _public(final)
         ctype = r.headers.get("content-type", "")
@@ -459,34 +497,79 @@ def _date(s: str) -> str | None:
         return None
 
 
-def search(conn: Conn, lib: ResearchLibrary, since: str | None) -> list[dict]:
-    """Gemini の Google 検索（Grounding）で、期間内の記事を探す。Gemini 以外の接続では使えない。"""
-    if conn.provider not in ("gemini", "vertex") or conn.chat_model.startswith("claude"):
+def search_queries(lib: ResearchLibrary, since: str | None, today: str | None = None) -> list[tuple[str, str]]:
+    """AI の検索に投げる問い（問い, 期間）。1回の検索で返る出典は数件なので、
+    テーマ・論点・企業ごとと、期間を半年ずつに分けて投げる。"""
+    today = today or dt.date.today().isoformat()
+    topic = lib.instructions or lib.description or lib.name
+    # 期間を半年ずつ（新しい順）に分ける。期間の指定がなければ直近の半年
+    start = since or (dt.date.fromisoformat(today) - dt.timedelta(days=183)).isoformat()
+    wins, end = [], dt.date.fromisoformat(today)
+    while end.isoformat() > start and len(wins) < 8:
+        b = max(dt.date.fromisoformat(start), end - dt.timedelta(days=182))
+        wins.append(f"{b.isoformat()}〜{end.isoformat()}")
+        end = b - dt.timedelta(days=1)
+    wins = wins or [f"{start}〜{today}"]
+    whole = f"{start}〜{today}"
+    qs = [(f"{lib.name}：{topic}", w) for w in wins]
+    qs += [(f"{lib.name}：{i}（{(lib.issue_defs or {}).get(i, '')}）", whole) for i in lib.issues or []]
+    qs += [(f"{e} と {lib.name}", whole) for e in (lib.entities or [])[:8]]
+    return qs[:MAX_QUERIES]
+
+
+def search(conn: Conn, lib: ResearchLibrary, since: str | None, on_query=None) -> list[dict]:
+    """Gemini の Google 検索（Grounding）で期間内の記事を探す。問いを分けて何度も投げ、出典を集める。
+    出典ごとに、検索結果の文章（見出し・公開日・要点）も持っておく（本文が開けないときに使う）。"""
+    if not can_search(conn):
         return []
     from google.genai import types
 
     client = llm._genai(conn)
-    since_txt = f"{since} より後に公開された" if since else "最近公開された"
-    prompt = (
-        f"「{lib.name}」について、{since_txt}ニュース記事・プレスリリース・技術仕様・公的資料を探して、"
-        f"見つけたものを1行に1件、見出しと公開日で挙げてください。\n集める範囲：{lib.instructions or lib.description}\n"
-        + (f"論点：{'、'.join(lib.issues or [])}\n" if lib.issues else "")
-        + (f"注目する企業・団体：{'、'.join(lib.entities or [])}\n" if lib.entities else "")
-    )
-    resp = client.models.generate_content(
-        model=conn.chat_model,
-        contents=prompt,
-        config=types.GenerateContentConfig(tools=[types.Tool(google_search=types.GoogleSearch())]),
-    )
-    llm._record_gemini(conn.chat_model, resp)
-    out = []
-    for cand in resp.candidates or []:
-        gm = getattr(cand, "grounding_metadata", None)
-        for ch in getattr(gm, "grounding_chunks", None) or []:
-            web = getattr(ch, "web", None)
-            if web is not None and web.uri:
-                out.append({"url": web.uri, "title": web.title or ""})
-    return out
+    out: dict[str, dict] = {}
+    for q, win in search_queries(lib, since):
+        prompt = (
+            f"次のテーマについて、{win} に公開されたニュース記事・プレスリリース・技術仕様・公的資料を"
+            "できるだけ多く（10件以上）探してください。見つけたものを1件ずつ"
+            "「公開日（YYYY-MM-DD）｜発信元｜見出し｜要点（1〜2文）」の形で1行に書いてください。\n"
+            f"テーマ：{q}\n" + (f"注目する企業・団体：{'、'.join(lib.entities or [])}\n" if lib.entities else "")
+        )
+        try:
+            resp = client.models.generate_content(
+                model=conn.chat_model,
+                contents=prompt,
+                config=types.GenerateContentConfig(tools=[types.Tool(google_search=types.GoogleSearch())]),
+            )
+        except Exception as e:  # noqa: BLE001  1つの問いの失敗で止めない
+            if on_query:
+                on_query(q, win, -1, str(e)[:120])
+            continue
+        llm._record_gemini(conn.chat_model, resp)
+        got = 0
+        for cand in resp.candidates or []:
+            gm = getattr(cand, "grounding_metadata", None)
+            chunks = getattr(gm, "grounding_chunks", None) or []
+            snip: dict[int, list[str]] = {}
+            for sp in getattr(gm, "grounding_supports", None) or []:
+                text = getattr(getattr(sp, "segment", None), "text", "") or ""
+                for i in getattr(sp, "grounding_chunk_indices", None) or []:
+                    snip.setdefault(i, []).append(text)
+            for i, ch in enumerate(chunks):
+                web = getattr(ch, "web", None)
+                if web is None or not web.uri:
+                    continue
+                key = web.uri
+                if key not in out:
+                    got += 1
+                    out[key] = {"url": web.uri, "title": "", "site": web.title or "", "snippet": ""}
+                more = "\n".join(snip.get(i, []))
+                if more and more not in out[key]["snippet"]:
+                    out[key]["snippet"] = (out[key]["snippet"] + "\n" + more).strip()[:3000]
+                    d = _date(more)
+                    if d and not out[key].get("date"):
+                        out[key]["date"] = d
+        if on_query:
+            on_query(q, win, got, "")
+    return list(out.values())
 
 
 def grounded(conn: Conn, prompt: str) -> tuple[str, list[dict]]:
@@ -604,8 +687,12 @@ def add_article(
     origin: str,
     hint_date: str | None = None,
     checked: bool = True,
-) -> ResearchArticle:
+    since: str | None = None,
+) -> ResearchArticle | None:
     ex = analyze(conn, lib, url, title, text)
+    published = _date(ex.published) or hint_date
+    if since and published and published < since:
+        return None  # 期間より前の記事は入れない
     a = ResearchArticle(
         tenant_id=lib.tenant_id,
         library_id=lib.id,
@@ -645,7 +732,8 @@ def add_article(
                 scope=f.scope[:300],
                 source=f.source[:300],
                 quote=f.quote[:2000],
-                verified=bool(f.quote) and re.sub(r"\s+", "", f.quote) in norm,
+                # 本文を読んでいない記事（検索結果の文章から作ったもの）のファクトは、原文未確認のまま
+                verified=checked and bool(f.quote) and re.sub(r"\s+", "", f.quote) in norm,
                 added_by=f"ai ({user})",
             )
         )
@@ -696,7 +784,8 @@ def run_update(job_id: str) -> None:
         lib = s.get(ResearchLibrary, j.params["library"])
         user = j.created_by
     conn = llmconf.resolve(lib.tenant_id)
-    since = lib.latest or lib.since
+    # 期間の始まりを決めていればそこから（集めた記事は URL で重ねない）、なければ最新の記事の日付から
+    since = lib.since or lib.latest
     with session() as s:
         known = {
             a.url for a in s.execute(select(ResearchArticle).where(ResearchArticle.library_id == lib.id)).scalars()
@@ -716,9 +805,15 @@ def run_update(job_id: str) -> None:
         else:
             try:
                 with jobs.task(job_id, "search"):
-                    found = search(conn, lib, since)
+
+                    def on_query(q: str, win: str, got: int, err: str) -> None:
+                        msg = f"検索「{q[:40]}」{win}：" + (f"失敗（{err}）" if got < 0 else f"{got}件")
+                        jobs.step(job_id, msg, advance=False)
+
+                    found = search(conn, lib, since, on_query)
                     cands += [{**x, "origin": "search"} for x in found]
-                    jobs.set_task(job_id, "search", detail=f"{len(found)}件")
+                    n_q = len(search_queries(lib, since))
+                    jobs.set_task(job_id, "search", detail=f"{n_q}回の検索で {len(found)}件")
                 jobs.step(job_id, f"検索：{len(found)}件")
             except jobs.Cancelled:
                 raise
@@ -745,22 +840,37 @@ def run_update(job_id: str) -> None:
             jobs.set_task(job_id, "feeds", detail=f"RSS {got}件・ページ {len(lib.sites or [])}件")
     jobs.step(job_id, f"候補 {len(cands)}件を読みます")
     with jobs.task(job_id, "read"):
-        added, issues_touched = 0, Counter()
+        added, from_snip, old, failed = 0, 0, 0, 0
         seen = set()
         for c in cands:
             if added >= MAX_NEW:
                 break
-            if c["url"] in seen or (c["origin"] != "site" and c["url"] in known):
+            url = resolve(c["url"]) if c["origin"] == "search" else c["url"]
+            if url in seen or (c["origin"] != "site" and url in known):
                 continue
-            seen.add(c["url"])
+            seen.add(url)
             try:
-                final, ctype, page = fetch(c["url"])
+                checked = True
+                try:
+                    final, ctype, page = fetch(url)
+                    title, text = html_text(page) if "html" in ctype or "<html" in page[:500].lower() else ("", page)
+                except jobs.Cancelled:
+                    raise
+                except Exception as e:  # noqa: BLE001  開けない（ボット除け・有料記事など）
+                    final, title, text = url, "", ""
+                    err = str(e)[:120]
+                else:
+                    err = "本文が短い"
                 if c["origin"] != "site" and final in known:
                     continue
-                title, text = html_text(page) if "html" in ctype or "<html" in page[:500].lower() else ("", page)
                 if len(text) < 200:
-                    jobs.step(job_id, f"本文が短いので飛ばしました：{final}", advance=False)
-                    continue
+                    # 検索で見つけた記事は、検索結果の文章（見出し・公開日・要点）から作る。本文は未確認の印を付ける
+                    if c["origin"] == "search" and c.get("snippet"):
+                        text, checked = f"{c.get('site', '')}\n{c['snippet']}", False
+                    else:
+                        failed += 1
+                        jobs.step(job_id, f"読めません：{url[:120]}（{err}）", advance=False)
+                        continue
                 digest = hashlib.sha256(text.encode()).hexdigest()
                 if c["origin"] == "site" and hashes.get(c["url"]) == digest:
                     continue
@@ -777,16 +887,24 @@ def run_update(job_id: str) -> None:
                         text,
                         c["origin"],
                         hint_date=c.get("date"),
+                        checked=checked,
+                        since=since if c["origin"] != "site" else None,
                     )
+                    if a is None:
+                        old += 1
+                        s.rollback()
+                        continue
                     s.commit()
-                    issues_touched.update(a.issues or [])
                     known.add(final)
                     added += 1
-                    jobs.step(job_id, f"RA-{a.number} {a.title[:60]}")
+                    from_snip += 0 if checked else 1
+                    mark = "" if checked else "（検索結果から・本文未確認）"
+                    jobs.step(job_id, f"RA-{a.number} {a.title[:60]}{mark}")
             except jobs.Cancelled:
                 raise
             except Exception as e:  # noqa: BLE001  1件の失敗で止めない
-                jobs.step(job_id, f"読めません：{c['url'][:120]}（{str(e)[:120]}）", advance=False)
+                failed += 1
+                jobs.step(job_id, f"読めません：{url[:120]}（{str(e)[:120]}）", advance=False)
         with session() as s:
             lib2 = s.get(ResearchLibrary, lib.id)
             latest = s.execute(
@@ -794,7 +912,12 @@ def run_update(job_id: str) -> None:
             ).scalar()
             lib2.latest, lib2.updated_at = latest or lib2.latest, dt.datetime.now(dt.UTC)
             s.commit()
-        jobs.set_task(job_id, "read", detail=f"候補 {len(cands)}件・新しい記事 {added}件")
+        jobs.set_task(
+            job_id,
+            "read",
+            detail=f"候補 {len(cands)}件・新しい記事 {added}件（うち検索結果から {from_snip}件）"
+            f"・期間より前 {old}件・読めない {failed}件",
+        )
     jobs.step(job_id, f"新しい記事 {added}件")
     with jobs.task(job_id, "issues"):
         rewritten = refresh_issue_notes(lib.tenant_id, lib.id, user, force=False)

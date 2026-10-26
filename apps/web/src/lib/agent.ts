@@ -254,7 +254,7 @@ export type ResearchLibrary = {
 };
 export type ResearchArticle = {
   id: number; number: number; key: string; url: string; title: string; publisher: string; published: string | null;
-  region: string; category: string; summary: string; issues: string[]; entities: string[]; checked: string | null;
+  region: string; category: string; summary: string; issues: string[]; entities: string[]; checked: boolean;
   title_ja: string; country: string;
   origin: string; memo: string; added_at: string;
 };
