@@ -518,10 +518,13 @@ def search_queries(lib: ResearchLibrary, since: str | None, today: str | None = 
 
 
 def search(conn: Conn, lib: ResearchLibrary, since: str | None, on_query=None) -> list[dict]:
-    """Gemini の Google 検索（Grounding）で期間内の記事を探す。問いを分けて何度も投げ、出典を集める。
+    """期間内の記事を探す。Claude の接続なら Claude が Web 検索を繰り返すエージェントとして集め（claude_search）、
+    Gemini の接続なら Google 検索（Grounding）に問いを分けて何度も投げる。
     出典ごとに、検索結果の文章（見出し・公開日・要点）も持っておく（本文が開けないときに使う）。"""
     if not can_search(conn):
         return []
+    if llm._is_claude(conn, conn.chat_model):
+        return claude_search(conn, lib, since, on_query)
     from google.genai import types
 
     client = llm._genai(conn)
@@ -573,7 +576,11 @@ def search(conn: Conn, lib: ResearchLibrary, since: str | None, on_query=None) -
 
 
 def grounded(conn: Conn, prompt: str) -> tuple[str, list[dict]]:
-    """Gemini の Google 検索つきで答えさせ、本文と出典（URL・題名）を返す。Gemini 以外では使えない。"""
+    """Web 検索つきで答えさせ、本文と出典（URL・題名）を返す。Claude の接続なら Claude の Web 検索、
+    Gemini の接続なら Google 検索（Grounding）。"""
+    if llm._is_claude(conn, conn.chat_model):
+        text, results = _claude_web(conn, prompt, max_uses=10)
+        return text, [{"u": r["url"], "t": r["title"]} for r in results]
     from google.genai import types
 
     client = llm._genai(conn)
@@ -595,7 +602,141 @@ def grounded(conn: Conn, prompt: str) -> tuple[str, list[dict]]:
 
 
 def can_search(conn: Conn) -> bool:
-    return conn.provider in ("gemini", "vertex") and not conn.chat_model.startswith("claude")
+    """AI の Web 検索が使える接続か（Claude：Anthropic API / Vertex AI、Gemini：Gemini API / Vertex AI）。"""
+    return conn.provider in ("gemini", "vertex", "anthropic")
+
+
+# ---------------- Claude の Web 検索（エージェント） ----------------
+MAX_WINDOWS = 12  # 期間をいくつに区切って探すか（長い期間は区切りを広げる）
+MAX_ROUNDS = 2  # 同じ区切りで「まだ見つけていない記事」を探し直す回数
+SEARCHES_PER_ROUND = 8  # 1回に Claude が使える Web 検索の回数
+
+
+def _web_tool(conn: Conn, max_uses: int) -> dict:
+    # Vertex AI の Claude は基本の Web 検索だけ（結果の絞り込みつきの版と Web 取得はない）
+    kind = "web_search_20250305" if conn.provider == "vertex" else "web_search_20260209"
+    return {"type": kind, "name": "web_search", "max_uses": max_uses}
+
+
+def _claude_web(conn: Conn, prompt: str, max_uses: int) -> tuple[str, list[dict]]:
+    """Claude に Web 検索を使わせて答えさせる。返り値は（最後の文章, 検索で見た結果 [{url, title, age}]）。
+    サーバー側の検索が長くなると pause_turn で止まるので、そのまま送り返して続けさせる。"""
+    client = llm._anthropic(conn)
+    model = conn.chat_model
+    messages: list[dict] = [{"role": "user", "content": prompt}]
+    results: dict[str, dict] = {}
+    text = ""
+    for _ in range(5):
+        resp = client.messages.create(
+            model=model, max_tokens=16000, messages=messages, tools=[_web_tool(conn, max_uses)]
+        )
+        llm._record_claude(model, resp)
+        llm._claude_check(resp)
+        for b in resp.content:
+            if b.type == "web_search_tool_result" and isinstance(b.content, list):
+                for r in b.content:
+                    url = getattr(r, "url", "")
+                    if url and url not in results:
+                        results[url] = {
+                            "url": url,
+                            "title": getattr(r, "title", "") or "",
+                            "age": getattr(r, "page_age", "") or "",
+                        }
+            elif b.type == "text":
+                text += b.text
+        if resp.stop_reason != "pause_turn":
+            break
+        messages = [{"role": "user", "content": prompt}, {"role": "assistant", "content": resp.content}]
+    return text.strip(), list(results.values())
+
+
+def claude_windows(since: str | None, today: str | None = None) -> list[tuple[str, str]]:
+    """期間を、新しい順の区切り（開始, 終了）に分ける。最大 MAX_WINDOWS 個（長い期間は1区切りを広げる）。"""
+    end = dt.date.fromisoformat(today or dt.date.today().isoformat())
+    start = dt.date.fromisoformat(since) if since else end - dt.timedelta(days=31)
+    days = max(1, (end - start).days + 1)
+    step = max(31, -(-days // MAX_WINDOWS))
+    out, hi = [], end
+    while hi >= start and len(out) < MAX_WINDOWS:
+        lo = max(start, hi - dt.timedelta(days=step - 1))
+        out.append((lo.isoformat(), hi.isoformat()))
+        hi = lo - dt.timedelta(days=1)
+    return out
+
+
+def _json_list(text: str) -> list[dict]:
+    m = re.search(r"```(?:json)?\s*(\[.*?\])\s*```", text, re.S) or re.search(r"(\[\s*\{.*\}\s*\])", text, re.S)
+    if not m:
+        return []
+    try:
+        import json
+
+        data = json.loads(m.group(1))
+    except ValueError:
+        return []
+    return [x for x in data if isinstance(x, dict)]
+
+
+def claude_search(conn: Conn, lib: ResearchLibrary, since: str | None, on_query=None) -> list[dict]:
+    """Claude を、期間の区切りごとに Web 検索を繰り返すエージェントとして動かし、記事を集める。
+    区切りごとに、見つけた記事を伝えて「まだ見つけていない記事」を探し直す（新しく見つからなくなったら次へ）。"""
+    found: dict[str, dict] = {}
+    topic = lib.instructions or lib.description or lib.name
+    issues = "、".join(
+        f"{i}（{(lib.issue_defs or {}).get(i)}）" if (lib.issue_defs or {}).get(i) else i for i in lib.issues or []
+    )
+    for lo, hi in claude_windows(since):
+        for rnd in range(MAX_ROUNDS):
+            mine = [f for f in found.values() if lo <= (f.get("date") or "") <= hi]
+            prompt = (
+                "あなたは調査担当の司書です。Web 検索を何度も使って、次のテーマについて"
+                f" {lo} から {hi} の間に公開されたニュース記事・プレスリリース・技術仕様・公的資料を、"
+                "漏れなく集めてください。\n"
+                f"テーマ：{lib.name}\n集める範囲：{topic}\n"
+                + (f"論点：{issues}\n" if issues else "")
+                + (f"注目する企業・団体：{'、'.join(lib.entities or [])}\n" if lib.entities else "")
+                + "- 日本語と英語の両方で、論点ごと・企業ごとに問いを変えて検索する。期間外の記事は入れない。\n"
+                "- 集約サイトより一次情報（各社の発表・報道機関・公的機関）を優先する。\n"
+                + (
+                    "- 次の記事は見つけ済みなので、これ以外を探す：\n"
+                    + "\n".join(f"  - {f['title']}（{f['url']}）" for f in mine[:60])
+                    + "\n"
+                    if mine
+                    else ""
+                )
+                + "最後に、見つけた記事を次の形の JSON の配列だけで、```json のコードブロックに書いてください。"
+                '[{"url": "...", "title": "見出し", "published": "YYYY-MM-DD", "publisher": "発信元", '
+                '"summary": "要点を1〜2文"}]'
+            )
+            try:
+                text, results = _claude_web(conn, prompt, max_uses=SEARCHES_PER_ROUND)
+            except Exception as e:  # noqa: BLE001  1つの区切りの失敗で止めない
+                if on_query:
+                    on_query(f"{lo}〜{hi}", f"{rnd + 1}回目", -1, str(e)[:120])
+                break
+            new = 0
+            seen_in_results = {r["url"]: r for r in results}
+            for x in _json_list(text):
+                url = str(x.get("url") or "").strip()
+                if not url.startswith("http") or url in found:
+                    continue
+                d = _date(str(x.get("published") or "")) or _date(seen_in_results.get(url, {}).get("age", ""))
+                if d and not (lo <= d <= hi):
+                    continue
+                summary = str(x.get("summary") or "")
+                found[url] = {
+                    "url": url,
+                    "title": str(x.get("title") or "")[:300],
+                    "site": str(x.get("publisher") or ""),
+                    "date": d,
+                    "snippet": f"{d or ''}｜{x.get('publisher') or ''}｜{x.get('title') or ''}｜{summary}"[:3000],
+                }
+                new += 1
+            if on_query:
+                on_query(f"{lo}〜{hi}", f"{rnd + 1}回目", new, "")
+            if new < 3:  # ほとんど新しく見つからなければ、この区切りは十分
+                break
+    return list(found.values())
 
 
 # ---------------- 記事を読む ----------------
@@ -799,9 +940,9 @@ def run_update(job_id: str) -> None:
     cands: list[dict] = []
     if lib.use_search:
         jobs.step(job_id, "AI の検索で記事を探しています", advance=False)
-        if conn.provider not in ("gemini", "vertex", "stub"):
-            jobs.skip_task(job_id, "search", "この接続（Gemini / Vertex AI 以外）では使えません")
-            jobs.step(job_id, "検索：この接続（Gemini 以外）では使えないため飛ばしました")
+        if conn.provider != "stub" and not can_search(conn):
+            jobs.skip_task(job_id, "search", "この接続（OpenAI 互換）では Web 検索を使えません")
+            jobs.step(job_id, "検索：この接続では使えないため飛ばしました")
         else:
             try:
                 with jobs.task(job_id, "search"):
@@ -812,8 +953,12 @@ def run_update(job_id: str) -> None:
 
                     found = search(conn, lib, since, on_query)
                     cands += [{**x, "origin": "search"} for x in found]
-                    n_q = len(search_queries(lib, since))
-                    jobs.set_task(job_id, "search", detail=f"{n_q}回の検索で {len(found)}件")
+                    how = (
+                        f"Claude の Web 検索（{len(claude_windows(since))}の期間に区切って）"
+                        if llm._is_claude(conn, conn.chat_model)
+                        else f"Google 検索 {len(search_queries(lib, since))}回"
+                    )
+                    jobs.set_task(job_id, "search", detail=f"{how}で {len(found)}件")
                 jobs.step(job_id, f"検索：{len(found)}件")
             except jobs.Cancelled:
                 raise

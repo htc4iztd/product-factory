@@ -45,7 +45,7 @@ export function LibraryForm({ action, lib, submit }: { action: (prev: Result, f:
           <input type="date" name="since" defaultValue={lib?.since ?? ""} className="input" />
         </label>
         <label className="flex items-center gap-2 self-end pb-2 text-[12px] text-zinc-600">
-          <input type="checkbox" name="use_search" defaultChecked={lib?.use_search ?? true} />AI の検索で探す（Gemini / Vertex AI の接続のときだけ）
+          <input type="checkbox" name="use_search" defaultChecked={lib?.use_search ?? true} />AI の検索で探す（Claude・Gemini の接続のとき。Claude はエージェントとして期間を区切って検索を繰り返す）
         </label>
       </div>
     </ActionForm>

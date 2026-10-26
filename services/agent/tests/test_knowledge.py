@@ -300,3 +300,81 @@ def test_research_search_many_queries_snippet_fallback_and_period(client, monkey
     new = next(a for a in d["items"] if a["url"] == "https://news.example/blocked")
     assert new["checked"] is False and new["published"] == "2025-09-01" and new["origin"] == "search"
     assert all(not f["verified"] for f in d["facts"] if f["article"] == new["key"])
+
+
+def test_claude_web_search_agent(client, monkeypatch):
+    """Claude の接続では、Claude が Web 検索を繰り返すエージェントとして、期間の区切りごとに記事を集める。
+    Vertex AI では基本の Web 検索ツール（web_search_20250305）を使い、pause_turn は送り返して続けさせる。"""
+    from types import SimpleNamespace as NS
+
+    from pf_agent import llm, research
+    from pf_agent.llmconf import Conn
+
+    wins = research.claude_windows("2025-01-01", today="2026-10-26")
+    assert len(wins) == 12 and wins[0][1] == "2026-10-26" and wins[-1][0] == "2025-01-01"
+    assert all(wins[i][0] > wins[i + 1][1] for i in range(len(wins) - 1))  # 重ならない
+
+    calls = []
+
+    class Msgs:
+        def create(self, **kw):
+            calls.append(kw)
+            lo, hi = (
+                __import__("re")
+                .search(r"(\d{4}-\d{2}-\d{2}) から (\d{4}-\d{2}-\d{2})", kw["messages"][0]["content"])
+                .groups()
+            )
+            if len(kw["messages"]) == 1 and len(calls) == 1:  # 最初は検索の途中で止まる
+                return NS(stop_reason="pause_turn", usage=None, content=[NS(type="server_tool_use")])
+            mid = lo
+            body = (
+                '```json\n[{"url": "https://news.example/'
+                + lo
+                + '", "title": "記事 '
+                + lo
+                + '", "published": "'
+                + mid
+                + '", "publisher": "報道", "summary": "要点。"},'
+                ' {"url": "https://news.example/out", "title": "期間外", "published": "2020-01-01"}]\n```'
+            )
+            return NS(
+                stop_reason="end_turn",
+                usage=None,
+                content=[
+                    NS(
+                        type="web_search_tool_result",
+                        content=[NS(url=f"https://news.example/{lo}", title="t", page_age="")],
+                    ),
+                    NS(type="text", text=body),
+                ],
+            )
+
+    monkeypatch.setattr(llm, "_anthropic", lambda conn: NS(messages=Msgs()))
+    conn = Conn(
+        provider="vertex",
+        chat_model="claude-opus-5-5",
+        summary_model="claude-opus-5-5",
+        image_model="",
+        api_key=None,
+        base_url=None,
+        project="p",
+        location="global",
+        source="app",
+    )
+    lib = NS(
+        name="家計管理",
+        instructions="",
+        description="家計簿",
+        issues=["締め処理"],
+        issue_defs={},
+        entities=["調査会社"],
+    )
+    log = []
+    out = research.search(conn, lib, "2025-01-01", lambda q, w, n, e: log.append((q, w, n)))
+    assert calls[0]["tools"] == [{"type": "web_search_20250305", "name": "web_search", "max_uses": 8}]
+    assert calls[1]["messages"][1]["role"] == "assistant"  # pause_turn の続き
+    assert len(out) == 12 and all(x["url"] != "https://news.example/out" for x in out)  # 期間外は入れない
+    assert all(x["date"] and x["snippet"] for x in out) and len(log) == 12  # 新しいのが3件未満なので区切りごとに1回
+    conn1p = Conn(**{**conn.__dict__, "provider": "anthropic", "api_key": "k"})
+    assert research._web_tool(conn1p, 3)["type"] == "web_search_20260209"
+    assert research.can_search(conn1p) and not research.can_search(Conn(**{**conn.__dict__, "provider": "openai"}))

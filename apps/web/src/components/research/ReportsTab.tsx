@@ -270,7 +270,7 @@ export function ReportsTab({ n, d, kind, label, canEdit }: { n: number; d: Resea
         <div className="card space-y-2 p-4">
           <input className="input" value={title} onChange={(e) => setTitle(e.target.value)} placeholder={PLACE[kind]} aria-label="レポートの題" />
           <textarea className="input min-h-20 text-[12px]" value={instr} onChange={(e) => setInstr(e.target.value)} placeholder="何を調べるか（任意）：対象・観点・必ず入れたい規格や業界など" aria-label="指示" />
-          <p className="text-[11px] text-zinc-500">AI が公開資料を（Gemini / Vertex AI の接続なら検索して）読み、形にまとめます。数分〜十数分かかります（ジョブで動きます）。</p>
+          <p className="text-[11px] text-zinc-500">AI が公開資料を（Claude・Gemini の接続なら Web 検索して）読み、形にまとめます。数分〜十数分かかります（ジョブで動きます）。</p>
           <div className="flex gap-2">
             <button disabled={pending} className="btn-primary btn-sm" onClick={() => start(async () => { const r = await createReport(n, kind, title, instr); if (r.error) setError(r.error); else { setForm(false); setTitle(""); setInstr(""); setSel(null); } })}>作る</button>
             <button className="btn-ghost btn-sm" onClick={() => setForm(false)}>取り消す</button>
