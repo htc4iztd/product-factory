@@ -30,19 +30,48 @@ from pydantic import BaseModel
 from sqlalchemy import func, select
 
 from . import jobs, llm, llmconf, repo
-from .db import JobRun, ResearchArticle, ResearchFact, ResearchLibrary, ResearchNote, session
+from .db import (
+    JobRun,
+    ResearchArticle,
+    ResearchFact,
+    ResearchLibrary,
+    ResearchNote,
+    ResearchPlayer,
+    ResearchQuestion,
+    ResearchReport,
+    session,
+)
 from .llmconf import Conn
 
 REGIONS = {"domestic": "国内", "overseas": "海外", "unknown": "不明"}
 CATEGORIES = {"news": "ニュース", "press": "プレス", "spec": "技術仕様", "public": "公的資料", "other": "その他"}
 FACT_KINDS = {
     "survey": "調査結果",
-    "market": "市場規模",
-    "usage": "利用実績",
+    "market": "市場規模・予測",
+    "usage": "利用・取引の実績",
+    "company": "企業の数値",
     "price": "価格・料金",
+    "rule": "制度・規格",
     "spec": "仕様・数値",
     "other": "その他",
 }
+DEFAULT_TOPICS = [
+    "利用者の受容・信頼",
+    "利用・取引の量",
+    "事業者の対応",
+    "市場規模",
+    "価格・収益",
+    "規制・制度",
+    "その他",
+]
+DEFAULT_LAYERS = [
+    "サービス提供者",
+    "プラットフォーム・基盤",
+    "決済・金融",
+    "規格・標準化団体",
+    "規制当局・公的機関",
+    "調査・投資家",
+]
 MAX_NEW = 25  # 1回の更新で読む記事の上限
 MAX_BYTES = 3_000_000
 REWRITE_AFTER = 3  # 論点のまとめを書き直す、新しい記事の数
@@ -84,6 +113,9 @@ def library_dict(lib: ResearchLibrary, counts: dict | None = None) -> dict:
         "feeds": lib.feeds or [],
         "sites": lib.sites or [],
         "issues": lib.issues or [],
+        "issue_defs": lib.issue_defs or {},
+        "layers": lib.layers or DEFAULT_LAYERS,
+        "topics": lib.topics or DEFAULT_TOPICS,
         "entities": lib.entities or [],
         "since": lib.since,
         "latest": lib.latest,
@@ -148,9 +180,12 @@ def save_library(tenant: str, user: str, body: dict, number: int | None = None) 
         for k in ("description", "instructions"):
             if k in body and body[k] is not None:
                 setattr(lib, k, str(body[k])[:5000])
-        for k in ("feeds", "sites", "issues", "entities"):
+        for k in ("feeds", "sites", "issues", "entities", "layers", "topics"):
             if k in body and body[k] is not None:
                 setattr(lib, k, _lines(body[k])[:100])
+        if body.get("issue_defs") is not None:
+            defs = dict(body["issue_defs"])
+            lib.issue_defs = {str(k)[:100]: str(v)[:500] for k, v in defs.items() if str(k).strip()}
         if "use_search" in body and body["use_search"] is not None:
             lib.use_search = bool(body["use_search"])
         if "since" in body:
@@ -171,6 +206,8 @@ def article_dict(a: ResearchArticle) -> dict:
         "key": f"RA-{a.number}",
         "url": a.url,
         "title": a.title,
+        "title_ja": a.title_ja or "",
+        "country": a.country or "",
         "publisher": a.publisher,
         "published": a.published,
         "region": a.region,
@@ -261,7 +298,12 @@ def library(tenant: str, number: int, flt: dict | None = None) -> dict:
     issue_notes = {}
     for n in notes:
         if n.kind == "issue" and n.title not in issue_notes:
-            issue_notes[n.title] = {"body": n.body, "articles": n.articles, "created_at": n.created_at.isoformat()}
+            issue_notes[n.title] = {
+                "body": n.body,
+                "data": n.data,
+                "articles": n.articles,
+                "created_at": n.created_at.isoformat(),
+            }
     return {
         **out,
         "items": [article_dict(a) for a in arts],
@@ -447,10 +489,36 @@ def search(conn: Conn, lib: ResearchLibrary, since: str | None) -> list[dict]:
     return out
 
 
+def grounded(conn: Conn, prompt: str) -> tuple[str, list[dict]]:
+    """Gemini の Google 検索つきで答えさせ、本文と出典（URL・題名）を返す。Gemini 以外では使えない。"""
+    from google.genai import types
+
+    client = llm._genai(conn)
+    resp = client.models.generate_content(
+        model=conn.chat_model,
+        contents=prompt,
+        config=types.GenerateContentConfig(tools=[types.Tool(google_search=types.GoogleSearch())]),
+    )
+    llm._record_gemini(conn.chat_model, resp)
+    srcs, seen = [], set()
+    for cand in resp.candidates or []:
+        gm = getattr(cand, "grounding_metadata", None)
+        for ch in getattr(gm, "grounding_chunks", None) or []:
+            web = getattr(ch, "web", None)
+            if web is not None and web.uri and web.uri not in seen:
+                seen.add(web.uri)
+                srcs.append({"u": web.uri, "t": web.title or ""})
+    return (resp.text or "").strip(), srcs
+
+
+def can_search(conn: Conn) -> bool:
+    return conn.provider in ("gemini", "vertex") and not conn.chat_model.startswith("claude")
+
+
 # ---------------- 記事を読む ----------------
 class ExFact(BaseModel):
-    kind: str  # survey | market | usage | price | spec | other
-    theme: str  # テーマ（短く）
+    kind: str  # FACT_KINDS のキー
+    theme: str  # ライブラリのテーマから1つ
     metric: str  # 何の数字か
     value: str  # 値（単位つき）
     scope: str  # 対象・範囲
@@ -461,9 +529,11 @@ class ExFact(BaseModel):
 
 class ExArticle(BaseModel):
     title: str
+    title_ja: str  # 日本語の見出し（原題が日本語ならそのまま）
     publisher: str
     published: str  # YYYY-MM-DD か空
     region: str  # domestic | overseas | unknown
+    country: str  # ISO の2文字（JP・US・GB・CN など。分からなければ空）
     category: str  # news | press | spec | public | other
     summary: str  # 3〜5文の要約
     issues: list[str]  # ライブラリの論点から最大3つ
@@ -482,7 +552,10 @@ def analyze(conn: Conn, lib: ResearchLibrary, url: str, title: str, text: str) -
         f"{'、'.join(lib.issues or []) or '（論点なし）'}\n"
         "- entities は本文に名前が出た企業・団体（正式名を優先）。"
         + (f"次の名前に当たるものはこの表記にそろえる：{'、'.join(lib.entities or [])}\n" if lib.entities else "\n")
-        + "- facts は、調査結果・市場規模・利用実績・価格・仕様などの数字や確定した事実を1件ずつ。"
+        + "- title_ja は日本語の見出し（原題が外国語なら訳す）。country は話の舞台の国（ISO 2文字）。\n"
+        "- facts は、調査結果・市場規模・利用実績・価格・仕様などの数字や確定した事実を1件ずつ。"
+        f"kind は {list(FACT_KINDS)} のどれか。theme は次から1つ：{'、'.join(lib.topics or DEFAULT_TOPICS)}。"
+        "metric には主語を入れる（例：AIに買い物を任せることに不安な消費者の割合）。"
         "quote には、その根拠になる一文を本文からそのまま写す（言い換えない）。本文にない数字は書かない。\n"
         f"- region は日本国内の話なら domestic、海外なら overseas。category は {list(CATEGORIES)} のどれか。\n\n"
         f"## URL\n{url}\n## 見出し\n{title}\n## 本文\n{text[:40000]}\n"
@@ -504,11 +577,14 @@ def _stub_analyze(lib: ResearchLibrary, title: str, text: str) -> ExArticle:
                 )
             )
     date = _date(text[:2000]) or ""
+    jp = bool(re.search(r"[ぁ-ん]", text))
     return ExArticle(
         title=title,
+        title_ja=title,
         publisher="",
         published=date,
-        region="domestic" if re.search(r"[ぁ-ん]", text) else "overseas",
+        region="domestic" if jp else "overseas",
+        country="JP" if jp else "",
         category="news",
         summary="。".join(sents[:3])[:400],
         issues=[i for i in (lib.issues or []) if i in text][:3],
@@ -536,6 +612,8 @@ def add_article(
         number=_next(s, ResearchArticle, lib.tenant_id),
         url=url[:1000],
         title=(ex.title or title or url)[:500],
+        title_ja=(ex.title_ja or "")[:500],
+        country=(ex.country or "").upper()[:8],
         publisher=ex.publisher[:200],
         published=_date(ex.published) or hint_date,
         region=ex.region if ex.region in REGIONS else "unknown",
@@ -605,6 +683,7 @@ def start_update(tenant: str, user: str, number: int) -> dict:
             {"id": "feeds", "name": "RSS・ページ", "deps": []},
             {"id": "read", "name": "記事を読む・ファクトを抜き出す", "deps": ["search", "feeds"]},
             {"id": "issues", "name": "論点のまとめ", "deps": ["read"]},
+            {"id": "players", "name": "プレーヤーの最新の動き", "deps": ["read"]},
         ],
     )
     jobs.dispatch(job_id)
@@ -721,6 +800,14 @@ def run_update(job_id: str) -> None:
         rewritten = refresh_issue_notes(lib.tenant_id, lib.id, user, force=False)
         jobs.set_task(job_id, "issues", detail="、".join(rewritten) or "書き直しなし")
     jobs.step(job_id, f"論点のまとめを書き直しました：{'、'.join(rewritten) or 'なし'}")
+    with jobs.task(job_id, "players"):
+        moved = _refresh_latest(lib.tenant_id, j_number(job_id))
+        jobs.set_task(job_id, "players", detail=f"{moved}件")
+
+
+def j_number(job_id: str) -> int:
+    with session() as s:
+        return int(s.get(JobRun, job_id).params["number"])
 
 
 def refresh_issue_notes(tenant: str, lib_id: int, user: str, force: bool) -> list[str]:
@@ -741,7 +828,7 @@ def refresh_issue_notes(tenant: str, lib_id: int, user: str, force: bool) -> lis
         mine = [a for a in arts if issue in (a.issues or [])]
         if not mine or (not force and issue in notes and len(mine) - notes[issue] < REWRITE_AFTER):
             continue
-        body = summarize_issue(conn, lib, issue, mine)
+        data = summarize_issue(conn, lib, issue, mine)
         with session() as s:
             s.add(
                 ResearchNote(
@@ -749,7 +836,8 @@ def refresh_issue_notes(tenant: str, lib_id: int, user: str, force: bool) -> lis
                     library_id=lib_id,
                     kind="issue",
                     title=issue,
-                    body=body,
+                    body=issue_markdown(data),
+                    data=data,
                     articles=len(mine),
                     created_by=f"ai ({user})",
                 )
@@ -766,16 +854,70 @@ def _digest(arts: list[ResearchArticle], limit: int = 150) -> str:
     )
 
 
-def summarize_issue(conn: Conn, lib: ResearchLibrary, issue: str, arts: list[ResearchArticle]) -> str:
+class Claim(BaseModel):
+    text: str  # 記事群が主張・報告していること（1文）
+    stance: str  # 推進 | 慎重 | 中立
+    refs: list[int]  # 根拠の記事番号（RA-12 なら 12）
+
+
+class IssueSummary(BaseModel):
+    headline: str  # この論点で記事群が言っていることの要点（1〜2文）
+    claims: list[Claim]  # 5〜8項目
+    counter: str  # 反対・慎重な見方、反証（なければ空）
+    counter_refs: list[int]
+    domestic: str  # 国内の記事が言っていること（なければ空）
+    domestic_refs: list[int]
+    shift: str  # 時期による変化（読み取れなければ空）
+
+
+def summarize_issue(conn: Conn, lib: ResearchLibrary, issue: str, arts: list[ResearchArticle]) -> dict:
+    """論点のまとめ：要点・主張（立場と根拠）・反対の見方・国内の記事・時期による変化。記事の要約だけを根拠にする。"""
+    nums = {a.number for a in arts}
     if conn.provider == "stub":
-        return "\n".join(f"- {a.title}［RA-{a.number}］" for a in arts[:10])
-    prompt = (
-        f"リサーチライブラリ「{lib.name}」の論点「{issue}」について、下の記事の要約だけを根拠に、"
-        "記事群が主に何を主張・報告しているかを日本語で箇条書きにしてください（5〜8項目）。"
-        "各項目の終わりに根拠の記事番号を［RA-12］のように付ける。要約にないことは書かない。\n\n"
-        f"{_digest(arts)}"
-    )
-    return llm._text(conn, conn.summary_model, prompt).strip()
+        top = sorted(arts, key=lambda a: a.published or "", reverse=True)[:6]
+        data = IssueSummary(
+            headline=f"「{issue}」について{len(arts)}件の記事がある（スタブ）。",
+            claims=[Claim(text=a.title_ja or a.title, stance="中立", refs=[a.number]) for a in top],
+            counter="",
+            counter_refs=[],
+            domestic="；".join(a.title for a in top if a.region == "domestic")[:300],
+            domestic_refs=[a.number for a in top if a.region == "domestic"],
+            shift="",
+        )
+    else:
+        q = (lib.issue_defs or {}).get(issue, "")
+        prompt = (
+            f"リサーチライブラリ「{lib.name}」の論点「{issue}」"
+            + (f"（問い：{q}）" if q else "")
+            + "について、下の記事の要約だけを根拠に、記事群が主に何を主張・報告しているかをまとめてください。\n"
+            "- headline は要点を1〜2文。claims は5〜8項目で、各項目の stance は 推進・慎重・中立 のどれか、"
+            "refs に根拠の記事番号（RA-12 なら 12）を入れる。\n"
+            "- counter は反対・慎重な見方や反証。domestic は国内（日本）の記事が言っていること。"
+            "shift は時期による変化（読み取れなければ空）。\n- 要約にないことは書かない。\n\n"
+            f"{_digest(arts)}"
+        )
+        data = llm._json(conn, conn.summary_model, prompt, IssueSummary)
+    d = data.model_dump()
+    for c in d["claims"]:  # 実在しない記事番号は落とす
+        c["refs"] = [n for n in c["refs"] if n in nums]
+    for k in ("counter_refs", "domestic_refs"):
+        d[k] = [n for n in d[k] if n in nums]
+    return d
+
+
+def issue_markdown(d: dict) -> str:
+    def refs(ns: list[int]) -> str:
+        return "".join(f"［RA-{n}］" for n in ns)
+
+    out = [d.get("headline", "")]
+    out += [f"- （{c['stance']}）{c['text']}{refs(c['refs'])}" for c in d.get("claims", [])]
+    if d.get("counter"):
+        out.append(f"- 反対・慎重な見方：{d['counter']}{refs(d.get('counter_refs', []))}")
+    if d.get("domestic"):
+        out.append(f"- 国内：{d['domestic']}{refs(d.get('domestic_refs', []))}")
+    if d.get("shift"):
+        out.append(f"- 時期による変化：{d['shift']}")
+    return "\n".join(x for x in out if x)
 
 
 def analyze_selection(tenant: str, user: str, number: int, flt: dict, question: str) -> dict:
@@ -860,6 +1002,7 @@ def add_manual(tenant: str, user: str, number: int, url: str, text: str, title: 
         s.commit()
         out, lib_id = article_dict(a), lib.id
     refresh_issue_notes(tenant, lib_id, user, force=False)
+    _refresh_latest(tenant, number)
     return out
 
 
@@ -880,6 +1023,271 @@ def brief(tenant: str, number: int, flt: dict, limit: int = 40) -> str:
             f" {f['article']} {mark}"
         )
     return "\n".join(lines)
+
+
+# ---------------- 画面にまとめて渡す ----------------
+def dataset(tenant: str, number: int) -> dict:
+    """ライブラリの画面が使うものを一度に返す。絞り込み・集計・分析は画面の側で行う。"""
+    base = library(tenant, number)
+    with session() as s:
+        lib = _lib(s, tenant, number)
+        players = list(
+            s.execute(
+                select(ResearchPlayer).where(ResearchPlayer.library_id == lib.id).order_by(ResearchPlayer.name)
+            ).scalars()
+        )
+        qs = list(
+            s.execute(
+                select(ResearchQuestion).where(ResearchQuestion.library_id == lib.id).order_by(ResearchQuestion.id)
+            ).scalars()
+        )
+        reports = list(
+            s.execute(
+                select(ResearchReport).where(ResearchReport.library_id == lib.id).order_by(ResearchReport.number.desc())
+            ).scalars()
+        )
+        anum = dict(
+            s.execute(
+                select(ResearchArticle.id, ResearchArticle.number).where(ResearchArticle.library_id == lib.id)
+            ).all()
+        )
+    questions: dict[str, list] = {}
+    for q in qs:
+        questions.setdefault(f"RA-{anum.get(q.article_id)}", []).append(question_dict(q))
+    return {
+        **base,
+        "players": [player_dict(p) for p in players],
+        "questions": questions,
+        "reports": [report_dict(r) for r in reports],
+    }
+
+
+# ---------------- プレーヤー ----------------
+def player_dict(p: ResearchPlayer) -> dict:
+    return {
+        "id": p.id,
+        "name": p.name,
+        "aliases": p.aliases or [],
+        "layer": p.layer,
+        "region": p.region,
+        "role": p.role,
+        "detail": p.detail,
+        "stance": p.stance,
+        "tags": p.tags or [],
+        "latest": p.latest,
+        "updated_by": p.updated_by,
+    }
+
+
+def save_player(tenant: str, user: str, number: int, body: dict, player_id: int | None = None) -> dict:
+    name = str(body.get("name") or "").strip()
+    if not name:
+        raise ResearchError(422, "名前を入れてください")
+    with session() as s:
+        lib = _lib(s, tenant, number)
+        dup = s.execute(
+            select(ResearchPlayer).where(ResearchPlayer.library_id == lib.id, ResearchPlayer.name == name)
+        ).scalar_one_or_none()
+        if dup is not None and dup.id != player_id:
+            raise ResearchError(409, f"「{name}」は既にあります")
+        if player_id is None:
+            p = ResearchPlayer(tenant_id=tenant, library_id=lib.id, name=name[:200])
+            s.add(p)
+        else:
+            p = s.get(ResearchPlayer, player_id)
+            if p is None or p.library_id != lib.id:
+                raise ResearchError(404, "ありません")
+            p.name = name[:200]
+        p.aliases = _lines(body.get("aliases"))[:20]
+        p.tags = _lines(body.get("tags"))[:20]
+        for k, n in (("layer", 100), ("region", 8), ("role", 300), ("stance", 100)):
+            setattr(p, k, str(body.get(k) or "")[:n])
+        p.detail = str(body.get("detail") or "")[:5000]
+        p.updated_by = user
+        s.commit()
+        pid = p.id
+    _refresh_latest(tenant, number)
+    with session() as s:
+        return player_dict(s.get(ResearchPlayer, pid))
+
+
+def delete_player(tenant: str, number: int, player_id: int) -> None:
+    with session() as s:
+        lib = _lib(s, tenant, number)
+        p = s.get(ResearchPlayer, player_id)
+        if p is None or p.library_id != lib.id:
+            raise ResearchError(404, "ありません")
+        s.delete(p)
+        s.commit()
+
+
+def _player_rx(p: ResearchPlayer) -> re.Pattern:
+    parts = []
+    for a in [p.name, *(p.aliases or [])]:
+        e = re.escape(a)
+        # 英数字だけの名前は語の途中に当たらないようにする（Apple が Pineapple に当たらない）
+        parts.append(rf"(?<![A-Za-z0-9]){e}(?![A-Za-z0-9])" if re.fullmatch(r"[\x00-\x7f]+", a) else e)
+    return re.compile("|".join(parts))
+
+
+def _refresh_latest(tenant: str, number: int) -> int:
+    """プレーヤーの最新の動きを、記事集でいちばん新しい登場記事にする（AI は使わない）。"""
+    with session() as s:
+        lib = _lib(s, tenant, number)
+        arts = sorted(
+            s.execute(select(ResearchArticle).where(ResearchArticle.library_id == lib.id)).scalars(),
+            key=lambda a: (a.published or "", a.number),
+            reverse=True,
+        )
+        n = 0
+        for p in s.execute(select(ResearchPlayer).where(ResearchPlayer.library_id == lib.id)).scalars():
+            rx = _player_rx(p)
+            hit = next(
+                (a for a in arts if rx.search(f"{a.publisher} {a.title} {a.title_ja}") or p.name in (a.entities or [])),
+                None,
+            )
+            if hit is not None:
+                first = re.split(r"(?<=。)", hit.summary or "")[0]
+                p.latest = {
+                    "d": hit.published or "",
+                    "text": f"{hit.title_ja or hit.title}：{first}"[:400],
+                    "u": hit.url,
+                    "article": f"RA-{hit.number}",
+                }
+                n += 1
+        s.commit()
+    return n
+
+
+class ExPlayer(BaseModel):
+    name: str
+    aliases: list[str]
+    layer: str  # ライブラリの層から1つ
+    region: str  # ISO 2文字
+    role: str  # 役割（1行）
+    stance: str  # 推進・様子見・慎重・拒否 など（記事から読めなければ空）
+
+
+class ExPlayers(BaseModel):
+    players: list[ExPlayer]
+
+
+def suggest_players(tenant: str, user: str, number: int) -> list[dict]:
+    """記事によく出る企業・団体のうち、まだ登録していないものを、層と役割つきで足す。"""
+    with session() as s:
+        lib = _lib(s, tenant, number)
+        have = {p.name for p in s.execute(select(ResearchPlayer).where(ResearchPlayer.library_id == lib.id)).scalars()}
+        arts = list(s.execute(select(ResearchArticle).where(ResearchArticle.library_id == lib.id)).scalars())
+        layers, name = lib.layers or DEFAULT_LAYERS, lib.name
+    cnt = Counter(e for a in arts for e in (a.entities or []) if e not in have)
+    top = [e for e, n in cnt.most_common(40) if n >= 1][:25]
+    if not top:
+        return []
+    conn = llmconf.resolve(tenant)
+    if conn.provider == "stub":
+        found = [ExPlayer(name=e, aliases=[], layer=layers[0], region="", role="", stance="") for e in top]
+    else:
+        ctx = "\n".join(
+            f"- {e}：" + "／".join((a.title_ja or a.title) for a in arts if e in (a.entities or []))[:300] for e in top
+        )
+        prompt = (
+            f"リサーチライブラリ「{name}」の記事によく出る企業・団体です。それぞれに、記事中での別の呼び方（aliases）、"
+            f"層（次から1つ：{'、'.join(layers)}）、国（ISO 2文字）、役割（1行）、"
+            "姿勢（記事から読めれば）を付けてください。"
+            "企業・団体でないもの（製品名・一般名詞）は外す。\n\n" + ctx
+        )
+        found = llm._json(conn, conn.summary_model, prompt, ExPlayers).players
+    out = []
+    for p in found:
+        if p.name in have or not p.name.strip():
+            continue
+        body = p.model_dump()
+        body["layer"] = p.layer if p.layer in layers else layers[-1]
+        try:
+            out.append(save_player(tenant, f"ai ({user})", number, body))
+            have.add(p.name)
+        except ResearchError:
+            continue
+    return out
+
+
+# ---------------- ファクトを手で足す・消す ----------------
+def add_fact(tenant: str, user: str, article_number: int, body: dict) -> dict:
+    metric, value = str(body.get("metric") or "").strip(), str(body.get("value") or "").strip()
+    if not metric or not value:
+        raise ResearchError(422, "「何の数字か」と「値」を入れてください")
+    with session() as s:
+        a = s.execute(
+            select(ResearchArticle).where(ResearchArticle.tenant_id == tenant, ResearchArticle.number == article_number)
+        ).scalar_one_or_none()
+        if a is None:
+            raise ResearchError(404, f"RA-{article_number} はありません")
+        f = ResearchFact(
+            tenant_id=tenant,
+            library_id=a.library_id,
+            article_id=a.id,
+            number=_next(s, ResearchFact, tenant),
+            date=_date(str(body.get("date") or "")) or a.published,
+            kind=body.get("kind") if body.get("kind") in FACT_KINDS else "other",
+            theme=str(body.get("theme") or "")[:100],
+            metric=metric[:300],
+            value=value[:100],
+            scope=str(body.get("scope") or "")[:300],
+            source=str(body.get("source") or "")[:300],
+            quote="",
+            verified=False,
+            added_by=user,
+        )
+        s.add(f)
+        s.commit()
+        return fact_dict(f, a)
+
+
+def delete_fact(tenant: str, fact_number: int) -> None:
+    with session() as s:
+        f = s.execute(
+            select(ResearchFact).where(ResearchFact.tenant_id == tenant, ResearchFact.number == fact_number)
+        ).scalar_one_or_none()
+        if f is None:
+            raise ResearchError(404, f"RF-{fact_number} はありません")
+        s.delete(f)
+        s.commit()
+
+
+def question_dict(q: ResearchQuestion) -> dict:
+    return {
+        "id": q.id,
+        "question": q.question,
+        "state": q.state,
+        "answer": q.answer,
+        "basis": q.basis,
+        "sources": q.sources or [],
+        "message": q.message,
+        "job_id": q.job_id,
+        "asked_by": q.asked_by,
+        "asked_at": q.asked_at.isoformat(),
+        "answered_at": q.answered_at.isoformat() if q.answered_at else None,
+    }
+
+
+def report_dict(r: ResearchReport) -> dict:
+    return {
+        "id": r.id,
+        "number": r.number,
+        "key": f"RR-{r.number}",
+        "kind": r.kind,
+        "title": r.title,
+        "instructions": r.instructions,
+        "status": r.status,
+        "data": r.data,
+        "sources": r.sources or [],
+        "basis": r.basis,
+        "error": r.error,
+        "checked": r.checked,
+        "job_id": r.job_id,
+        "created_by": r.created_by,
+        "created_at": r.created_at.isoformat(),
+    }
 
 
 jobs.HANDLERS["research"] = run_update

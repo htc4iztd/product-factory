@@ -131,7 +131,7 @@ def test_research_library_flow(client, monkeypatch):
     d = c.get("/research/1", headers=H).json()
     vals = {f["value"]: f for f in d["facts"]}
     assert {"48%", "1200億円"} <= set(vals) and vals["48%"]["verified"] and vals["48%"]["article"] == "RA-1"
-    assert d["issue_notes"]["締め処理"]["body"].count("RA-1") == 1
+    assert d["issue_notes"]["締め処理"]["data"]["claims"][0]["refs"] == [1]
     assert (
         c.post("/research/1/articles", headers=H, json={"url": "https://manual.example/1", "text": ARTICLE}).status_code
         == 409
@@ -152,7 +152,7 @@ def test_research_library_flow(client, monkeypatch):
     assert any("RA-2" in s for s in steps) and not any("old" in s for s in steps)
     assert c.get("/jobs", headers=H).json()["runs"][0]["kind"] == "research"
     ts = {t["id"]: t["status"] for t in j["tasks"]}
-    assert ts == {"search": "done", "feeds": "done", "read": "done", "issues": "done"}
+    assert ts == {"search": "done", "feeds": "done", "read": "done", "issues": "done", "players": "done"}
     d = c.get("/research/1", headers=H).json()
     assert d["articles"] == 2 and d["latest"] == "2026-10-20"
     # 絞り込み・集計・分析・CSV・ステージへの要約
@@ -180,3 +180,68 @@ def test_intake_creates_canvas_cover_in_background(client):
     assert wait(c, runs[0]["id"])["status"] == "done"
     cv = c.get(f"/products/{p['id']}/canvas", headers=H).json()
     assert len(cv["images"]) == 1 and cv["product"]["cover_image_id"] == cv["images"][0]["id"]
+
+
+def test_research_players_facts_questions_reports(client, monkeypatch):
+    c = client
+    from pf_agent import research
+
+    c.post(
+        "/research",
+        headers=H,
+        json={
+            "name": "家計管理",
+            "issues": ["締め処理"],
+            "entities": ["調査会社"],
+            "issue_defs": {"締め処理": "締めの手間は減っているか"},
+            "layers": ["サービス", "調査"],
+            "topics": ["利用", "市場規模"],
+        },
+    )
+    c.post("/research/1/articles", headers=H, json={"url": "https://manual.example/1", "text": ARTICLE})
+    # プレーヤー：記事の企業から候補を出す → 最新の動きは登場記事から
+    ps = c.post("/research/1/players/suggest", headers=H).json()["players"]
+    assert [p["name"] for p in ps] == ["調査会社"] and ps[0]["layer"] == "サービス"
+    assert ps[0]["latest"]["article"] == "RA-1"
+    assert c.post("/research/1/players", headers=H, json={"name": "調査会社"}).status_code == 409
+    pid = c.post("/research/1/players", headers=H, json={"name": "Apple", "aliases": ["アップル"]}).json()["id"]
+    c.put(f"/research/1/players/{pid}", headers=H, json={"name": "Apple", "layer": "調査", "stance": "推進"})
+    # ファクトを手で足す・消す
+    f = c.post(
+        "/research/articles/1/facts", headers=H, json={"metric": "利用者数", "value": "300万人", "kind": "usage"}
+    )
+    assert f.status_code == 200 and f.json()["article"] == "RA-1" and not f.json()["verified"]
+    assert c.post("/research/articles/1/facts", headers=H, json={"metric": "", "value": "1"}).status_code == 422
+    # 記事への質問：ジョブで答える（本文が開けないので要約から、印は none）
+    monkeypatch.setattr(research, "fetch", lambda url: (_ for _ in ()).throw(OSError("blocked")))
+    from pf_agent import research_jobs
+
+    monkeypatch.setattr(research_jobs, "fetch", research.fetch)
+    q = c.post("/research/articles/1/questions", headers=H, json={"question": "誰が調べた？"}).json()
+    j = wait(c, q["job_id"])
+    assert j["status"] == "done" and j["kind"] == "research-qa", j
+    # 調査レポート：3種類
+    for kind in ("tech", "industry", "public"):
+        r = c.post("/research/1/reports", headers=H, json={"kind": kind, "title": f"{kind} の調査"}).json()
+        assert wait(c, r["job_id"])["status"] == "done"
+    assert c.post("/research/1/reports", headers=H, json={"kind": "x"}).status_code == 422
+    d = c.get("/research/1/data", headers=H).json()
+    assert d["issue_defs"] == {"締め処理": "締めの手間は減っているか"} and d["topics"] == ["利用", "市場規模"]
+    qa = d["questions"]["RA-1"][0]
+    assert qa["state"] == "answered" and qa["basis"] == "none" and "誰が調べた" in qa["answer"]
+    assert [r["kind"] for r in d["reports"]] == ["public", "industry", "tech"] and all(
+        r["status"] == "done" for r in d["reports"]
+    )
+    assert d["reports"][2]["data"]["docs"][0]["flow"][0]["src"] == "u" and d["reports"][0]["key"] == "RR-3"
+    assert {p["name"] for p in d["players"]} == {"Apple", "調査会社"}
+    fact = next(x for x in d["facts"] if x["value"] == "300万人")
+    c.delete(f"/research/facts/{fact['number']}", headers=H)
+    c.delete(f"/research/questions/{qa['id']}", headers=H)
+    c.delete(f"/research/reports/{d['reports'][0]['id']}", headers=H)
+    c.delete(f"/research/1/players/{pid}", headers=H)
+    d = c.get("/research/1/data", headers=H).json()
+    assert len(d["reports"]) == 2 and d["questions"] == {} and len(d["players"]) == 1
+    assert all(x["value"] != "300万人" for x in d["facts"])
+    # 他のテナント・閲覧のみ
+    assert c.get("/research/1/data", headers=OTHER).status_code == 404
+    assert c.post("/research/articles/1/questions", headers=VIEWER, json={"question": "x"}).status_code == 403

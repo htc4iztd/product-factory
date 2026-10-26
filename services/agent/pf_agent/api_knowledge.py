@@ -9,7 +9,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import Response
 from pydantic import BaseModel, Field
 
-from . import ontology, research
+from . import ontology, research, research_jobs
 from .authz import BASE_ORDER, Caller, caller
 
 router = APIRouter()
@@ -113,6 +113,9 @@ class LibraryBody(BaseModel):
     feeds: list[str] | None = None
     sites: list[str] | None = None
     issues: list[str] | None = None
+    issue_defs: dict[str, str] | None = None
+    layers: list[str] | None = None
+    topics: list[str] | None = None
     entities: list[str] | None = None
     since: str | None = None
 
@@ -255,3 +258,120 @@ def facts_csv(
 @router.get("/research/{number}/brief")
 def brief(number: int, issue: str | None = None, region: str | None = None, c: Caller = Depends(caller)):
     return {"brief": research.brief(c.tenant, number, {"issue": issue, "region": region})}
+
+
+@router.get("/research/{number}/data")
+def library_data(number: int, c: Caller = Depends(caller)):
+    """画面用：記事・ファクト・論点・プレーヤー・質問・調査レポートを一度に返す。"""
+    return research.dataset(c.tenant, number)
+
+
+# ---------------- プレーヤー ----------------
+class PlayerBody(BaseModel):
+    name: str = Field(max_length=200)
+    aliases: list[str] = Field(default_factory=list, max_length=20)
+    layer: str = Field(default="", max_length=100)
+    region: str = Field(default="", max_length=8)
+    role: str = Field(default="", max_length=300)
+    detail: str = Field(default="", max_length=5000)
+    stance: str = Field(default="", max_length=100)
+    tags: list[str] = Field(default_factory=list, max_length=20)
+
+
+@router.post("/research/{number}/players")
+def post_player(number: int, body: PlayerBody, c: Caller = Depends(caller)):
+    _w(c)
+    return research.save_player(c.tenant, c.user, number, body.model_dump())
+
+
+@router.put("/research/{number}/players/{player_id}")
+def put_player(number: int, player_id: int, body: PlayerBody, c: Caller = Depends(caller)):
+    _w(c)
+    return research.save_player(c.tenant, c.user, number, body.model_dump(), player_id)
+
+
+@router.delete("/research/{number}/players/{player_id}")
+def del_player(number: int, player_id: int, c: Caller = Depends(caller)):
+    _w(c)
+    research.delete_player(c.tenant, number, player_id)
+    return {"ok": True}
+
+
+@router.post("/research/{number}/players/suggest")
+def suggest_players(number: int, c: Caller = Depends(caller)):
+    _w(c)
+    return {"players": research.suggest_players(c.tenant, c.user, number)}
+
+
+# ---------------- ファクト ----------------
+class FactBody(BaseModel):
+    kind: str = "other"
+    theme: str = Field(default="", max_length=100)
+    metric: str = Field(max_length=300)
+    value: str = Field(max_length=100)
+    scope: str = Field(default="", max_length=300)
+    source: str = Field(default="", max_length=300)
+    date: str = Field(default="", max_length=10)
+
+
+@router.post("/research/articles/{article_number}/facts")
+def post_fact(article_number: int, body: FactBody, c: Caller = Depends(caller)):
+    _w(c)
+    return research.add_fact(c.tenant, c.user, article_number, body.model_dump())
+
+
+@router.delete("/research/facts/{fact_number}")
+def del_fact(fact_number: int, c: Caller = Depends(caller)):
+    _w(c)
+    research.delete_fact(c.tenant, fact_number)
+    return {"ok": True}
+
+
+# ---------------- 記事への質問 ----------------
+class QuestionBody(BaseModel):
+    question: str = Field(max_length=500)
+
+
+@router.post("/research/articles/{article_number}/questions")
+def post_question(article_number: int, body: QuestionBody, c: Caller = Depends(caller)):
+    _w(c)
+    return research_jobs.ask(c.tenant, c.user, article_number, body.question)
+
+
+@router.post("/research/questions/{qid}/retry")
+def retry_question(qid: int, c: Caller = Depends(caller)):
+    _w(c)
+    return research_jobs.retry_question(c.tenant, c.user, qid)
+
+
+@router.delete("/research/questions/{qid}")
+def del_question(qid: int, c: Caller = Depends(caller)):
+    _w(c)
+    research_jobs.delete_question(c.tenant, qid)
+    return {"ok": True}
+
+
+# ---------------- 調査レポート ----------------
+class ReportBody(BaseModel):
+    kind: str
+    title: str = Field(default="", max_length=300)
+    instructions: str = Field(default="", max_length=5000)
+
+
+@router.post("/research/{number}/reports")
+def post_report(number: int, body: ReportBody, c: Caller = Depends(caller)):
+    _w(c)
+    return research_jobs.create_report(c.tenant, c.user, number, body.kind, body.title, body.instructions)
+
+
+@router.post("/research/reports/{rid}/retry")
+def retry_report(rid: int, c: Caller = Depends(caller)):
+    _w(c)
+    return research_jobs.retry_report(c.tenant, c.user, rid)
+
+
+@router.delete("/research/reports/{rid}")
+def del_report(rid: int, c: Caller = Depends(caller)):
+    _w(c)
+    research_jobs.delete_report(c.tenant, rid)
+    return {"ok": True}

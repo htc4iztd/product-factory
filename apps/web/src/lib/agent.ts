@@ -249,11 +249,13 @@ export type Ontology = { concepts: Concept[]; relations: ConceptRelation[]; kind
 export type ResearchLibrary = {
   id: number; number: number; key: string; name: string; description: string; instructions: string; use_search: boolean;
   feeds: string[]; sites: string[]; issues: string[]; entities: string[]; since: string | null; latest: string | null;
+  issue_defs: Record<string, string>; layers: string[]; topics: string[];
   updated_at: string | null; created_by: string; articles?: number; facts?: number;
 };
 export type ResearchArticle = {
   id: number; number: number; key: string; url: string; title: string; publisher: string; published: string | null;
   region: string; category: string; summary: string; issues: string[]; entities: string[]; checked: string | null;
+  title_ja: string; country: string;
   origin: string; memo: string; added_at: string;
 };
 export type ResearchFact = {
@@ -263,11 +265,34 @@ export type ResearchFact = {
 export type ResearchNote = { id: number; title: string; body: string; filters: Record<string, string>; created_by: string; created_at: string };
 export type ResearchDetail = ResearchLibrary & {
   items: ResearchArticle[]; facts: ResearchFact[];
-  issue_notes: Record<string, { body: string; articles: number; created_at: string }>;
+  issue_notes: Record<string, { body: string; data: IssueData | null; articles: number; created_at: string }>;
   analyses: ResearchNote[];
   stats: {
     articles: number; facts: number; by_month: [string, number][]; by_issue: [string, number][]; by_entity: [string, number][];
     by_category: [string, number][]; by_region: [string, number][]; by_fact_kind: [string, number][];
   };
   options: { regions: Record<string, string>; categories: Record<string, string>; fact_kinds: Record<string, string> };
+};
+
+export type IssueData = {
+  headline: string; claims: { text: string; stance: string; refs: number[] }[];
+  counter: string; counter_refs: number[]; domestic: string; domestic_refs: number[]; shift: string;
+};
+export type ResearchPlayer = {
+  id: number; name: string; aliases: string[]; layer: string; region: string; role: string; detail: string; stance: string;
+  tags: string[]; latest: { d: string; text: string; u: string; article?: string } | null; updated_by: string;
+};
+export type ResearchQuestion = {
+  id: number; question: string; state: "pending" | "running" | "answered" | "error"; answer: string;
+  basis: "" | "article" | "search" | "none"; sources: { u: string; t: string }[]; message: string; job_id: string | null;
+  asked_by: string; asked_at: string; answered_at: string | null;
+};
+export type ResearchReport = {
+  id: number; number: number; key: string; kind: "tech" | "industry" | "public"; title: string; instructions: string;
+  status: "queued" | "running" | "done" | "failed"; data: Record<string, unknown> | null; sources: { u: string; t: string }[];
+  basis: "" | "search" | "knowledge" | "stub"; error: string; checked: string | null; job_id: string | null;
+  created_by: string; created_at: string;
+};
+export type ResearchData = ResearchDetail & {
+  players: ResearchPlayer[]; questions: Record<string, ResearchQuestion[]>; reports: ResearchReport[];
 };

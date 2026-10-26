@@ -19,8 +19,8 @@ export function LibraryForm({ action, lib, submit }: { action: (prev: Result, f:
         <label className="space-y-1 text-[12px] text-zinc-600 md:col-span-2">AI への指示（任意）
           <textarea name="instructions" defaultValue={lib?.instructions} className="input min-h-12" placeholder="例：一次情報（調査会社・公的統計・各社の発表）を優先する" />
         </label>
-        <label className="space-y-1 text-[12px] text-zinc-600">論点（1行に1つ）
-          <textarea name="issues" defaultValue={lib?.issues.join("\n")} className={area} />
+        <label className="space-y-1 text-[12px] text-zinc-600">論点（1行に1つ。「論点名｜その論点で問うこと」とも書ける）
+          <textarea name="issues" defaultValue={lib?.issues.map((x) => (lib.issue_defs?.[x] ? `${x}｜${lib.issue_defs[x]}` : x)).join("\n")} className={area} placeholder="例：利用の広がり｜どの層がどれくらい使っているか" />
         </label>
         <label className="space-y-1 text-[12px] text-zinc-600">追う企業・団体（1行に1つ）
           <textarea name="entities" defaultValue={lib?.entities.join("\n")} className={area} />
@@ -31,6 +31,16 @@ export function LibraryForm({ action, lib, submit }: { action: (prev: Result, f:
         <label className="space-y-1 text-[12px] text-zinc-600">見に行くページの URL（1行に1つ）
           <textarea name="sites" defaultValue={lib?.sites.join("\n")} className={area} placeholder="https://example.com/news" />
         </label>
+        {lib && (
+          <>
+            <label className="space-y-1 text-[12px] text-zinc-600">プレーヤーの層（1行に1つ。マップの段）
+              <textarea name="layers" defaultValue={lib.layers.join("\n")} className={area} />
+            </label>
+            <label className="space-y-1 text-[12px] text-zinc-600">ファクトのテーマ（1行に1つ）
+              <textarea name="topics" defaultValue={lib.topics.join("\n")} className={area} />
+            </label>
+          </>
+        )}
         <label className="space-y-1 text-[12px] text-zinc-600">期間の始まり（空なら、最新の記事の日付から）
           <input type="date" name="since" defaultValue={lib?.since ?? ""} className="input" />
         </label>

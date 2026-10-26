@@ -73,38 +73,90 @@ const [ttl] = await Promise.all([page.waitForEvent("download"), page.getByRole("
 const text = fs.readFileSync(await ttl.path(), "utf8");
 if (!text.includes("skos:prefLabel") || !text.includes("月次締め")) throw new Error("Turtle の書き出しがおかしい");
 
-// リサーチライブラリ：作る → 本文を貼って記事を足す
+// リサーチライブラリ：作る → 本文を貼って記事を足す（参考の資料室と同じ作り：ニュース・論点・調査・プレーヤー・ファクトDB・データ分析）
+const tab = (name) => page.getByRole("tab", { name: new RegExp(`^${name}`) });
 await page.goto(`${BASE}/research`);
 await page.locator("input[name=name]").fill("家計管理アプリの動向");
 await page.locator("textarea[name=description]").fill("家計簿・家計管理サービスの利用実態");
-await page.locator("textarea[name=issues]").fill("利用実態\n締め処理");
+await page.locator("textarea[name=issues]").fill("利用実態｜どの世帯がどれくらい使っているか\n締め処理");
 await page.locator("textarea[name=entities]").fill("調査会社");
 await btn("作る").click();
 await page.waitForURL(/\/research\/\d+\?tab=settings/);
 const lib = page.url().match(/research\/(\d+)/)[1];
-await page.getByRole("link", { name: "記事を足す" }).click();
-await page.waitForURL(/tab=add/);
+await tab("記事を足す").click();
 await page.getByLabel("URL", { exact: true }).fill("https://manual.example/kakeibo");
 await page.getByLabel("題名", { exact: true }).fill("家計簿アプリの利用調査");
 await page.getByLabel("本文", { exact: true }).fill("2026-10-20 調査会社による調査。共働き世帯の48%が家計簿アプリを使っている。市場規模は1200億円に達した。締め処理の手間が課題として挙がった。" + "本文。".repeat(60));
 await btn("足す").click();
 await page.getByText("読んでいます…").waitFor({ state: "detached" });
-await page.getByRole("link", { name: "記事", exact: true }).click();
+await tab("ニュース").click();
 await page.getByRole("heading", { name: "家計簿アプリの利用調査" }).waitFor();
-await shot("k3-articles", true);
-await page.getByRole("link", { name: "論点", exact: true }).click();
+// メモ・質問（ジョブで答える）・ファクトの追加
+await btn("メモを追加").click();
+await page.getByLabel("メモ", { exact: true }).fill("②市場分析の根拠に使う");
+await btn("保存", true).click();
+await page.getByText("②市場分析の根拠に使う").waitFor();
+await btn("この記事に質問する").click();
+await page.getByLabel("この記事への質問").fill("誰が調べた？");
+await btn("質問を送る").click();
+await page.getByText(/（スタブ）「誰が調べた？」への答え/).waitFor({ timeout: 40000 });
+await btn("ファクトを追加").click();
+await page.getByPlaceholder("例：53%").fill("300万人");
+await page.getByPlaceholder("例：サービスを週1回以上使う人の割合").fill("家計簿アプリの利用者数");
+await btn("追加", true).click();
+await page.getByText("300万人").first().waitFor();
+await shot("k3-news", true);
+await tab("論点").click();
 await page.getByRole("heading", { name: "締め処理" }).waitFor();
+await page.getByText("どの世帯がどれくらい使っているか").waitFor();
 await shot("k4-issues", true);
-await page.getByRole("link", { name: "ファクトDB" }).click();
+await tab("ファクトDB").click();
 await page.getByRole("cell", { name: "48%" }).waitFor();
-const [csv] = await Promise.all([page.waitForEvent("download"), page.getByRole("link", { name: "CSVで保存" }).click()]);
+const [csv] = await Promise.all([page.waitForEvent("download"), btn("CSVで保存").click()]);
 if (!fs.readFileSync(await csv.path(), "utf8").includes("48%")) throw new Error("CSV にファクトがない");
 await shot("k5-facts", true);
-await page.getByRole("link", { name: "データ分析" }).click();
+await tab("プレーヤー").click();
+await btn("記事によく出る企業から足す").click();
+await page.getByText("1件を足しました").waitFor();
+await page.getByRole("button", { name: /調査会社/ }).first().click();
+await page.getByText("記事集での登場 1件").waitFor();
+await shot("k5b-players", true);
+// 調査レポート：技術調査・業界調査・公的データ（スタブで形を確かめる）
+for (const [t, check] of [["技術調査", "技術要素の全体像"], ["業界調査", "手続き・取引の流れ"], ["公的データ", "見本の統計"]]) {
+  await tab(t).click();
+  await btn(`${t}のレポートを作る`).click();
+  await page.getByLabel("レポートの題").fill(`${t}の見本`);
+  await btn("作る", true).click();
+  await page.getByText(check).first().waitFor({ timeout: 40000 });
+  await shot(`k5c-${t}`, true);
+}
+await page.getByText("サンプル規格").first().waitFor({ state: "detached" }).catch(() => {});
+await tab("技術調査").click();
+await page.getByRole("button", { name: "サンプル規格" }).first().click().catch(async () => { await page.locator("th", { hasText: "サンプル規格" }).first().click(); });
+await page.getByText("主な処理の流れ").waitFor();
+await shot("k5d-tech-doc", true);
+// データ分析：概要・自由集計（セルから記事へ）・推移と増減・企業・AI の分析
+await tab("データ分析").click();
+await page.getByText("論点のランキング").waitFor();
+await shot("k6-ana-sum", true);
+await btn("自由集計").click();
+await page.locator("td[title^='締め処理']").first().click();
+await page.locator("#drill").getByText("家計簿アプリの利用調査").waitFor();
+await shot("k6b-ana-pivot", true);
+await btn("推移と増減").click();
+await page.getByText("増えた・減った").waitFor();
+await btn("企業・プレーヤー").click();
+await page.getByText("一緒に出ることが多い企業・団体").waitFor();
+await btn("AI に分析を頼む").click();
 await page.getByLabel("問い").fill("利用は広がっているか");
 await btn("分析する").click();
 await page.getByRole("heading", { name: "利用は広がっているか", level: 3 }).waitFor();
-await shot("k6-analysis", true);
+await shot("k6c-ana-ask", true);
+// 記事を選んで PowerPoint に
+await tab("ニュース").click();
+await page.getByLabel("この記事を選択").first().check();
+const [deck] = await Promise.all([page.waitForEvent("download"), btn("PowerPointに出力").click()]);
+if (fs.statSync(await deck.path()).size < 10000) throw new Error("PowerPoint が小さすぎる");
 
 // ②の対話にリサーチを取り込む
 await page.goto(`${BASE}/p/${pid}/s/s02`);

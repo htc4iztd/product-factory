@@ -357,6 +357,9 @@ class ResearchLibrary(Base):
     sites: Mapped[list | None] = mapped_column(JSON, nullable=True)    # 変わったら取り込むページ（仕様・料金など）
     issues: Mapped[list | None] = mapped_column(JSON, nullable=True)   # 論点
     entities: Mapped[list | None] = mapped_column(JSON, nullable=True)  # 企業・団体（プレーヤー）
+    issue_defs: Mapped[dict | None] = mapped_column(JSON, nullable=True)  # 論点 → その論点で問うこと
+    layers: Mapped[list | None] = mapped_column(JSON, nullable=True)    # プレーヤーの層（マップの段）
+    topics: Mapped[list | None] = mapped_column(JSON, nullable=True)    # ファクトのテーマ
     since: Mapped[str | None] = mapped_column(String(10), nullable=True)   # 集める期間の始まり
     latest: Mapped[str | None] = mapped_column(String(10), nullable=True)  # 集めた記事の最新の日付
     updated_at: Mapped[dt.datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
@@ -372,9 +375,11 @@ class ResearchArticle(Base):
     number: Mapped[int] = mapped_column(Integer)                        # RA-n（テナントの中で振る）
     url: Mapped[str] = mapped_column(String(1000))
     title: Mapped[str] = mapped_column(String(500))
+    title_ja: Mapped[str] = mapped_column(String(500), default="")      # 日本語の見出し（原題が外国語のとき）
     publisher: Mapped[str] = mapped_column(String(200), default="")
     published: Mapped[str | None] = mapped_column(String(10), nullable=True)
     region: Mapped[str] = mapped_column(String(10), default="unknown")  # domestic | overseas | unknown
+    country: Mapped[str] = mapped_column(String(8), default="")         # JP・US など
     category: Mapped[str] = mapped_column(String(10), default="news")  # news | press | spec | public | other
     summary: Mapped[str] = mapped_column(Text, default="")
     issues: Mapped[list | None] = mapped_column(JSON, nullable=True)
@@ -417,7 +422,68 @@ class ResearchNote(Base):
     title: Mapped[str] = mapped_column(String(300))
     body: Mapped[str] = mapped_column(Text, default="")
     filters: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    # 論点のまとめの構造（見出し・主張と根拠・反対の見方・国内）
+    data: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     articles: Mapped[int] = mapped_column(Integer, default=0)   # まとめたときの記事数
+    created_by: Mapped[str] = mapped_column(String(200))
+    created_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), default=_now)
+
+
+class ResearchPlayer(Base):
+    """プレーヤー（企業・団体）。層ごとのマップに並べ、記事での登場と最新の動きを見る。"""
+    __tablename__ = "research_players"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    tenant_id: Mapped[str] = mapped_column(String(64), index=True)
+    library_id: Mapped[int] = mapped_column(Integer, index=True)
+    name: Mapped[str] = mapped_column(String(200))
+    aliases: Mapped[list | None] = mapped_column(JSON, nullable=True)   # 記事の中での呼び方
+    layer: Mapped[str] = mapped_column(String(100), default="")
+    region: Mapped[str] = mapped_column(String(8), default="")          # JP・US など
+    role: Mapped[str] = mapped_column(String(300), default="")          # 役割（1行）
+    detail: Mapped[str] = mapped_column(Text, default="")
+    stance: Mapped[str] = mapped_column(String(100), default="")        # 姿勢（推進・様子見・拒否 など）
+    tags: Mapped[list | None] = mapped_column(JSON, nullable=True)      # 対応する規格・製品など
+    latest: Mapped[dict | None] = mapped_column(JSON, nullable=True)    # 最新の動き {d, text, u}
+    updated_by: Mapped[str] = mapped_column(String(200), default="")
+    updated_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), default=_now, onupdate=_now)
+
+
+class ResearchQuestion(Base):
+    """記事への質問。AI が元記事（読めなければ検索）を読んで答える。"""
+    __tablename__ = "research_questions"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    tenant_id: Mapped[str] = mapped_column(String(64), index=True)
+    library_id: Mapped[int] = mapped_column(Integer, index=True)
+    article_id: Mapped[int] = mapped_column(Integer, index=True)
+    question: Mapped[str] = mapped_column(Text)
+    state: Mapped[str] = mapped_column(String(10), default="pending")   # pending | running | answered | error
+    answer: Mapped[str] = mapped_column(Text, default="")
+    basis: Mapped[str] = mapped_column(String(10), default="")          # article | search | none
+    sources: Mapped[list | None] = mapped_column(JSON, nullable=True)
+    message: Mapped[str] = mapped_column(String(500), default="")
+    job_id: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    asked_by: Mapped[str] = mapped_column(String(200))
+    asked_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), default=_now)
+    answered_at: Mapped[dt.datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+class ResearchReport(Base):
+    """調査レポート（RR-n）：技術調査・業界調査・公的データ。AI が公開資料を読んで構造化してまとめる。"""
+    __tablename__ = "research_reports"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    tenant_id: Mapped[str] = mapped_column(String(64), index=True)
+    library_id: Mapped[int] = mapped_column(Integer, index=True)
+    number: Mapped[int] = mapped_column(Integer)
+    kind: Mapped[str] = mapped_column(String(10))                       # tech | industry | public
+    title: Mapped[str] = mapped_column(String(300))
+    instructions: Mapped[str] = mapped_column(Text, default="")
+    status: Mapped[str] = mapped_column(String(12), default="queued")   # queued | running | done | failed
+    data: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    sources: Mapped[list | None] = mapped_column(JSON, nullable=True)
+    basis: Mapped[str] = mapped_column(String(12), default="")          # search | knowledge | stub
+    error: Mapped[str] = mapped_column(String(500), default="")
+    checked: Mapped[str | None] = mapped_column(String(10), nullable=True)
+    job_id: Mapped[str | None] = mapped_column(String(32), nullable=True)
     created_by: Mapped[str] = mapped_column(String(200))
     created_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), default=_now)
 
@@ -530,6 +596,9 @@ _ADDED_COLUMNS = {
     "chat_messages": {"session_id": "VARCHAR(32)"},
     "llm_settings": {"platform_granted": "BOOLEAN DEFAULT {false}"},
     "job_runs": {"tasks": "JSON"},
+    "research_libraries": {"issue_defs": "JSON", "layers": "JSON", "topics": "JSON"},
+    "research_articles": {"title_ja": "VARCHAR(500) DEFAULT ''", "country": "VARCHAR(8) DEFAULT ''"},
+    "research_notes": {"data": "JSON"},
 }
 
 
