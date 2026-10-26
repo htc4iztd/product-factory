@@ -109,6 +109,9 @@ def test_cancel_and_upstream_change(client, monkeypatch):
     monkeypatch.setattr(autodev, "plan", slow_plan)
     j = c.post(base + "/stages/s09/autodev", headers=H, json={"count": 1}).json()
     wait(c, j["id"], until=("running",))
+    end = time.time() + 10  # 「パターンを決める」が動き出してから取り消す（取り消しは工程の切れ目で効く）
+    while time.time() < end and c.get(f"/jobs/{j['id']}", headers=H).json()["tasks"][0]["status"] != "running":
+        time.sleep(0.05)
     assert c.post(base + "/stages/s09/autodev", headers=H, json={}).status_code == 409  # 実行中は重ねない
     assert c.post(f"/jobs/{j['id']}/cancel", headers=H).json()["cancel_requested"] is True
     gate["go"] = True
