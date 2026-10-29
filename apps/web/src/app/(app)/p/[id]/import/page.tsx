@@ -4,6 +4,7 @@ import { agent, type ImportDoc, type Overview } from "@/lib/agent";
 import { PageHeader } from "@/components/PageHeader";
 import { AutoRefresh } from "@/components/autodev/AutoRefresh";
 import { ImportForm } from "@/components/import/ImportForm";
+import { ReadersEditor } from "@/components/import/ReadersEditor";
 
 const STATUS: Record<ImportDoc["status"], { label: string; cls: string }> = {
   queued: { label: "待機中", cls: "bg-zinc-100 text-zinc-600" }, running: { label: "割り当て中", cls: "bg-sky-100 text-sky-800" },
@@ -18,7 +19,10 @@ const ACTION = {
 export default async function ImportPage({ params, searchParams }: { params: Promise<{ id: string }>; searchParams: Promise<{ doc?: string }> }) {
   const { id } = await params;
   const { doc } = await searchParams;
-  const [ov, docs] = await Promise.all([agent<Overview>(`/products/${id}`), agent<ImportDoc[]>(`/products/${id}/imports`)]);
+  const [ov, docs, versions] = await Promise.all([
+    agent<Overview>(`/products/${id}`), agent<ImportDoc[]>(`/products/${id}/imports`),
+    agent<Record<string, string>>("/avatars").catch(() => ({} as Record<string, string>)),
+  ]);
   const selId = Number(doc) || docs[0]?.id;
   const sel = selId ? await agent<ImportDoc>(`/products/${id}/imports/${selId}`).catch(() => null) : null;
   const stageOf = Object.fromEntries(ov.stages.map((s) => [s.id, s]));
@@ -62,6 +66,9 @@ export default async function ImportPage({ params, searchParams }: { params: Pro
                 <div className="mt-3 flex flex-wrap gap-1">{sel.outline.slice(0, 40).map((h, i) => <span key={i} className="rounded bg-zinc-100 px-1.5 py-0.5 text-[11px] text-zinc-600">{h}</span>)}</div>
               )}
             </div>
+            {sel.status === "done" && (
+              <ReadersEditor key={sel.id + sel.readers.join()} pid={id} doc={sel.id} readers={sel.readers} custom={sel.readers_custom} stages={ov.stages} versions={versions} />
+            )}
             {sel.status === "done" && byStage.size === 0 && (
               <div className="card p-5 text-[13px] text-zinc-500">この資料には、工程の項目にあたる具体的な中身が見つかりませんでした。</div>
             )}

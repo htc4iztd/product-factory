@@ -4,6 +4,7 @@ import { useState, useTransition } from "react";
 import { Play, Send } from "lucide-react";
 import type { BoardPostT, DirectorView } from "@/lib/agent";
 import { Avatar } from "@/components/rail/Avatar";
+import { AttachButton, AttachChips, useAttachments } from "@/components/chat/Attachments";
 import { runTeam, talkDirector } from "@/app/(app)/p/[id]/org-actions";
 
 const time = (t: string) => new Date(t).toLocaleString("ja-JP", { timeZone: "Asia/Tokyo", month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit" });
@@ -18,9 +19,10 @@ export function DirectorChat({ pid, v, versions = {} }: { pid: string; v: Direct
   const [text, setText] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [pending, start] = useTransition();
+  const files = useAttachments(pid, "director");
   const send = () => start(async () => {
-    const r = await talkDirector(pid, text, v.thread);
-    if (r.error) setError(r.error); else { setText(""); setError(null); }
+    const r = await talkDirector(pid, text, v.thread, files.items.map((a) => a.id));
+    if (r.error) setError(r.error); else { setText(""); setError(null); files.clear(); }
   });
   return (
     <section className="card flex flex-col" aria-label="司令塔との対話">
@@ -40,11 +42,13 @@ export function DirectorChat({ pid, v, versions = {} }: { pid: string; v: Direct
         {v.posts.map((p) => <Bubble key={p.id} p={p} v={versions[p.sender]} />)}
       </ol>
       <div className="space-y-1.5 border-t border-zinc-100 p-3">
-        <textarea className="input text-[13px]" rows={2} value={text} aria-label="司令塔への発言" placeholder="例：最初は共働き世帯に絞る。MVP は締め処理だけで決定"
+        <AttachChips a={files} />
+        <textarea className="input text-[13px]" rows={2} value={text} aria-label="司令塔への発言" onPaste={files.onPaste} placeholder="例：最初は共働き世帯に絞る。MVP は締め処理だけで決定"
           onChange={(e) => setText(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter" && (e.metaKey || e.ctrlKey) && text.trim()) send(); }} />
         {error && <p className="text-[12px] text-rose-600">{error}</p>}
         <div className="flex items-center gap-2">
-          <button className="btn-primary btn-sm" disabled={pending || !text.trim()} onClick={send}><Send size={12} />{pending ? "司令塔が考えています…" : "話す"}</button>
+          <AttachButton a={files} disabled={pending} />
+          <button className="btn-primary btn-sm" disabled={pending || !text.trim() || files.busy} onClick={send}><Send size={12} />{pending ? "司令塔が考えています…" : "話す"}</button>
           {v.thread && <Link href={`/p/${pid}/board?thread=${v.thread}`} className="text-[11px] text-zinc-500 hover:underline">掲示板で見る</Link>}
         </div>
       </div>

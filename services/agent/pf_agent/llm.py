@@ -181,11 +181,11 @@ def _stub(fw: Framework, idea: str, draft: dict, message: str) -> Turn:
 
 
 def converse(conn: Conn, stage: Stage, fw: Framework, idea: str, draft: dict, upstream: dict[str, str],
-             history: list[dict], message: str) -> Turn:
+             history: list[dict], message: str, images: Images | None = None) -> Turn:
     if conn.provider == "stub":
         _record("stub", 0, 0)
         return _stub(fw, idea, draft, message)
-    return _json(conn, conn.chat_model, _prompt(stage, fw, idea, draft, upstream, history, message), Turn)
+    return _json(conn, conn.chat_model, _prompt(stage, fw, idea, draft, upstream, history, message), Turn, images)
 
 
 def summarize(conn: Conn, stage: Stage, fw: Framework, messages: list[dict],
@@ -394,8 +394,17 @@ def _anthropic(conn: Conn):
     return anthropic.Anthropic(api_key=conn.api_key)
 
 
-def _claude_kwargs(prompt: str, model: str) -> dict:
-    return {"model": model, "max_tokens": 16000, "messages": [{"role": "user", "content": prompt}]}
+Images = list[tuple[bytes, str]]   # 添えた画像（中身, MIME）
+
+
+def _claude_kwargs(prompt: str, model: str, images: Images | None = None) -> dict:
+    import base64
+    content: str | list = prompt
+    if images:
+        pics = [{"type": "image", "source": {"type": "base64", "media_type": m, "data": base64.b64encode(b).decode()}}
+                for b, m in images]
+        content = [*pics, {"type": "text", "text": prompt}]
+    return {"model": model, "max_tokens": 16000, "messages": [{"role": "user", "content": content}]}
 
 
 def _claude_check(resp) -> None:
@@ -403,29 +412,31 @@ def _claude_check(resp) -> None:
         raise LLMError("AIがこの依頼への応答を断りました。言い方を変えて送ってください")
 
 
-def _json(conn: Conn, model: str, prompt: str, schema: type[BaseModel]):
+def _json(conn: Conn, model: str, prompt: str, schema: type[BaseModel], images: Images | None = None):
+    """JSON で答えさせる。images を渡すと、画像も一緒に読ませる（画像を読める接続だけ）。"""
     if _is_claude(conn, model):
         client = _anthropic(conn)
         if conn.provider == "anthropic" and model in _FALLBACK_MODELS:
-            resp = client.beta.messages.parse(**_claude_kwargs(prompt, model), output_format=schema,
+            resp = client.beta.messages.parse(**_claude_kwargs(prompt, model, images), output_format=schema,
                                               betas=["server-side-fallback-2026-07-01"], fallbacks="default")
         else:
-            resp = client.messages.parse(**_claude_kwargs(prompt, model), output_format=schema)
+            resp = client.messages.parse(**_claude_kwargs(prompt, model, images), output_format=schema)
         _record_claude(model, resp)
         _claude_check(resp)
         return resp.parsed_output
     if conn.provider in ("gemini", "vertex"):
         from google.genai import types
         client = _genai(conn)  # 変数に持っておく。.models だけを持つと Client が回収されて接続が閉じる
+        contents = [*(types.Part.from_bytes(data=b, mime_type=m) for b, m in images or []), prompt]
         resp = client.models.generate_content(
-            model=model, contents=prompt,
+            model=model, contents=contents if images else prompt,
             config=types.GenerateContentConfig(response_mime_type="application/json", response_schema=schema))
         _record_gemini(model, resp)
         if isinstance(resp.parsed, schema):
             return resp.parsed
         return schema.model_validate_json(resp.text or "{}")
     if conn.provider == "openai":
-        return schema.model_validate_json(_strip_fence(_openai(conn, model, prompt, schema)))
+        return schema.model_validate_json(_strip_fence(_openai(conn, model, prompt, schema, images)))
     raise LLMError(f"未対応の接続方式：{conn.provider}")
 
 
@@ -468,7 +479,7 @@ def _guard_host(conn: Conn) -> None:
             raise LLMError("内部ネットワークのアドレスには接続できません")
 
 
-def _openai(conn: Conn, model: str, prompt: str, schema: type[BaseModel] | None) -> str:
+def _openai(conn: Conn, model: str, prompt: str, schema: type[BaseModel] | None, images: Images | None = None) -> str:
     """OpenAI 互換の /chat/completions（Ollama・LM Studio・vLLM など）。
 
     JSON スキーマ指定に対応しない実装には、json_object とプロンプト中のスキーマで頼み直す。
@@ -489,7 +500,12 @@ def _openai(conn: Conn, model: str, prompt: str, schema: type[BaseModel] | None)
         _record(model, u.get("prompt_tokens"), u.get("completion_tokens"))
         return data["choices"][0]["message"]["content"] or ""
 
-    messages = [{"role": "user", "content": prompt}]
+    import base64
+    content: str | list = prompt
+    if images:
+        content = [*({"type": "image_url", "image_url": {"url": f"data:{m};base64,{base64.b64encode(b).decode()}"}}
+                     for b, m in images), {"type": "text", "text": prompt}]
+    messages = [{"role": "user", "content": content}]
     if schema is None:
         return _wrap(lambda: call({"model": model, "messages": messages}))
     js = schema.model_json_schema()
@@ -502,7 +518,9 @@ def _openai(conn: Conn, model: str, prompt: str, schema: type[BaseModel] | None)
     except urllib.error.URLError as e:
         raise LLMError(f"接続できません：{e.reason}") from None
     hint = f"\n\n## 出力\n次の JSON スキーマに合う JSON だけを返す。\n{json.dumps(js, ensure_ascii=False)}"
-    return _wrap(lambda: call({"model": model, "messages": [{"role": "user", "content": prompt + hint}],
+    retry = [{"role": "user", "content": [*content[:-1], {"type": "text", "text": prompt + hint}]
+              if images else prompt + hint}]
+    return _wrap(lambda: call({"model": model, "messages": retry,
                                "response_format": {"type": "json_object"}}))
 
 

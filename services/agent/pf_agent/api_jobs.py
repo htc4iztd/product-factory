@@ -31,6 +31,15 @@ def list_imports(product_id: str, c: Caller = Depends(caller)):
     return imports.list_docs(_p(c, product_id))
 
 
+class ReadersBody(BaseModel):
+    readers: list[str] = Field(default_factory=list, max_length=20)
+
+
+@router.put(P + "/imports/{doc_id}/readers")
+def set_import_readers(product_id: str, doc_id: int, body: ReadersBody, c: Caller = Depends(caller)):
+    return imports.set_readers(_p(c, product_id, True), doc_id, body.readers)
+
+
 @router.get(P + "/imports/{doc_id}")
 def get_import(product_id: str, doc_id: int, c: Caller = Depends(caller)):
     return imports.get(_p(c, product_id), doc_id)
@@ -169,6 +178,7 @@ class BoardBody(BaseModel):
 class TalkBody(BaseModel):
     text: str = Field(min_length=1, max_length=8000)
     thread: int | None = None
+    attachments: list[int] = Field(default_factory=list, max_length=5)
 
 
 class TaskBody(BaseModel):
@@ -214,7 +224,7 @@ def director(product_id: str, c: Caller = Depends(caller)):
 
 @router.post(P + "/director/talk")
 def director_talk(product_id: str, body: TalkBody, c: Caller = Depends(caller)):
-    return team.director_talk(_p(c, product_id, True), c.user, body.text, body.thread)
+    return team.director_talk(_p(c, product_id, True), c.user, body.text, body.thread, body.attachments)
 
 
 @router.get(P + "/team/tasks")

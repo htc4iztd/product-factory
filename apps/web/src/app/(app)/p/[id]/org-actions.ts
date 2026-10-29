@@ -14,8 +14,11 @@ async function call(pid: string, path: string, method: string, body?: unknown): 
   }
 }
 
-export async function talkDirector(pid: string, text: string, thread?: number | null) {
-  return call(pid, "/director/talk", "POST", { text, thread: thread ?? null });
+export async function talkDirector(pid: string, text: string, thread?: number | null, attachments: number[] = []) {
+  return call(pid, "/director/talk", "POST", { text, thread: thread ?? null, attachments });
+}
+export async function setReaders(pid: string, doc: number, readers: string[]) {
+  return call(pid, `/imports/${doc}/readers`, "PUT", { readers });
 }
 export async function postBoard(pid: string, to: string, text: string, thread?: number | null, intent = "directive") {
   return call(pid, "/board", "POST", { to, text, thread: thread ?? null, intent });

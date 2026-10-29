@@ -9,6 +9,7 @@ import { acceptAll, decideProposal, makeReport, newSession, renameSession, sendC
 import { researchChoices, sendResearchToStage } from "@/app/(app)/research/actions";
 import { FieldView } from "./FieldEditor";
 import { Avatar } from "@/components/rail/Avatar";
+import { AttachButton, AttachChips, SentAttachments, useAttachments } from "@/components/chat/Attachments";
 
 type Choice = Awaited<ReturnType<typeof researchChoices>>[number];
 
@@ -116,6 +117,7 @@ export function ChatPanel({ pid, sid, chat, fields, prompts, disabled, onClose, 
   const [pending, start] = useTransition();
   const end = useRef<HTMLDivElement>(null);
   const byKey = Object.fromEntries(fields.map((f) => [f.key, f]));
+  const files = useAttachments(pid, sid);
 
   useEffect(() => { end.current?.scrollIntoView({ block: "end" }); }, [chat.length, sent]);
 
@@ -124,9 +126,10 @@ export function ChatPanel({ pid, sid, chat, fields, prompts, disabled, onClose, 
     setError(null);
     setSent(message);
     setText("");
+    const ids = files.items.map((a) => a.id);
     start(async () => {
-      const r = await sendChat(pid, sid, message, sessionId);
-      if (r.error) { setError(r.error); setText(message); }
+      const r = await sendChat(pid, sid, message, sessionId, ids);
+      if (r.error) { setError(r.error); setText(message); } else files.clear();
       setSent(null);
     });
   }
@@ -202,7 +205,7 @@ export function ChatPanel({ pid, sid, chat, fields, prompts, disabled, onClose, 
           if (m.role === "user") {
             return (
               <div key={m.id} className="flex justify-end">
-                <div className="max-w-[85%] whitespace-pre-wrap rounded-2xl rounded-br-md bg-zinc-900 px-3.5 py-2 text-[13px] text-white">{m.text}</div>
+                <div className="max-w-[85%] whitespace-pre-wrap rounded-2xl rounded-br-md bg-zinc-900 px-3.5 py-2 text-[13px] text-white">{m.text}<SentAttachments items={m.attachments ?? []} dark /></div>
               </div>
             );
           }
@@ -268,17 +271,20 @@ export function ChatPanel({ pid, sid, chat, fields, prompts, disabled, onClose, 
                 </button>
               ))}
             </div>
-            <div className="relative">
+            <AttachChips a={files} />
+            <div className="relative" onDragOver={(e) => e.preventDefault()} onDrop={(e) => { e.preventDefault(); if (e.dataTransfer.files.length) void files.add(e.dataTransfer.files); }}>
               <textarea
                 value={text}
+                onPaste={files.onPaste}
                 onChange={(e) => setText(e.target.value)}
                 onKeyDown={(e) => { if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) { e.preventDefault(); send(text); } }}
                 rows={3}
                 placeholder="例：対象を共働きの子育て世帯に絞りたい"
                 aria-label="AIへの発言"
-                className="input resize-none pr-12"
+                className="input resize-none pr-20"
               />
-              <button disabled={pending || !text.trim()} onClick={() => send(text)} aria-label="送信" className="btn-brand absolute bottom-2 right-2 h-8 w-8 rounded-lg p-0">
+              <span className="absolute bottom-2 right-11"><AttachButton a={files} disabled={pending} /></span>
+              <button disabled={pending || !text.trim() || files.busy} onClick={() => send(text)} aria-label="送信" className="btn-brand absolute bottom-2 right-2 h-8 w-8 rounded-lg p-0">
                 <ArrowUp size={15} />
               </button>
             </div>

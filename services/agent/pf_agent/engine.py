@@ -117,7 +117,7 @@ class Engine:
         return stage
 
     async def chat(self, product: Product, stage_id: str, user: str, message: str,
-                   session_id: str | None = None) -> str:
+                   session_id: str | None = None, attachment_ids: list[int] | None = None) -> str:
         """発言を送り、AIの返答と案を待つ。返り値は使った対話セッションの id。"""
         self._stage(product, stage_id)
         if not message.strip():
@@ -136,7 +136,12 @@ class Engine:
                 state={"pf_product_id": product.id, "pf_stage_id": stage_id, "pf_chat_session_id": session_id})
             adk_id = sess.id
             repo.set_adk_session(session_id, adk_id)
-        repo.add_chat(product.id, stage_id, "user", user, message.strip(), session_id=session_id)
+        from . import attachments
+        try:
+            files = attachments.take(product, stage_id, attachment_ids or [])
+        except attachments.AttachmentError as e:
+            raise FactoryError(e.status, e.message) from None
+        repo.add_chat(product.id, stage_id, "user", user, message.strip(), session_id=session_id, attachments=files)
         msg = types.Content(role="user", parts=[types.Part(text=message.strip())])
         async for _ in self._runner().run_async(user_id=product.id, session_id=adk_id, new_message=msg):
             pass

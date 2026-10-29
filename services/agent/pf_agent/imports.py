@@ -52,11 +52,33 @@ class Routing(BaseModel):
     stages: list[RouteItem]
 
 
+def readers_of(d: ImportDoc) -> list[str]:
+    """読んでいいエージェント。決めていなければ、割り当てた工程の担当と司令塔・PM。"""
+    if d.readers is not None:
+        return list(d.readers)
+    return ["director", "pm", *dict.fromkeys(r["stage"] for r in d.result or [])]
+
+
+def set_readers(product: Product, doc_id: int, readers: list[str]) -> dict:
+    ok = {"director", "pm", *STAGE_BY_ID}
+    bad = [r for r in readers if r not in ok]
+    if bad:
+        raise ImportsError(422, f"不明なエージェント：{', '.join(bad)}")
+    with session() as s:
+        d = s.get(ImportDoc, doc_id)
+        if d is None or d.product_id != product.id:
+            raise ImportsError(404, "取り込んだ資料が見つかりません")
+        d.readers = [k for k in ["director", "pm", *STAGE_BY_ID] if k in readers]
+        s.commit()
+    return get(product, doc_id)
+
+
 def doc_dict(d: ImportDoc, full: bool = False) -> dict:
     out = {"id": d.id, "filename": d.filename, "kind": d.kind, "kind_label": office.KINDS.get(d.kind, d.kind),
            "size": d.size, "chars": len(d.text or ""), "mode": d.mode, "stages": d.stages or [], "status": d.status,
            "result": d.result or [], "job_id": d.job_id, "created_by": d.created_by,
-           "created_at": d.created_at.isoformat(), "outline": d.outline or []}
+           "created_at": d.created_at.isoformat(), "outline": d.outline or [], "readers": readers_of(d),
+           "readers_custom": d.readers is not None}
     if full:
         out["preview"] = (d.text or "")[:6000]
     return out
@@ -295,27 +317,28 @@ def _sections(text: str) -> list[tuple[str, str]]:
 
 
 def docs_context(product_id: str, key: str, limit: int = 16000) -> str:
-    """エージェントが読む取り込んだ資料。工程の担当は、自分の工程に割り当てられた資料のうち、
-    項目名・工程名がよく出てくる章を多い順に。司令塔・PM は資料の一覧と割り当て先。"""
+    """エージェントが読む取り込んだ資料（読んでいいと決めた資料だけ）。工程の担当は、
+    項目名・工程名がよく出てくる章を多い順に。司令塔・PM は資料の一覧・割り当て先と冒頭。"""
     with session() as s:
         docs = list(s.execute(select(ImportDoc).where(ImportDoc.product_id == product_id, ImportDoc.status == "done")
                               .order_by(ImportDoc.id.desc()).limit(20)).scalars())
-        rows = [(d.id, d.filename, d.text or "", d.result or [], d.created_at) for d in docs]
+        rows = [(d.id, d.filename, d.text or "", d.result or [], d.created_at) for d in docs if key in readers_of(d)]
     if not rows:
         return ""
     if key not in STAGE_BY_ID:
         lines = []
-        for i, name, _, result, at in rows:
+        for i, name, text, result, at in rows:
             stages = sorted({r["stage"] for r in result})
             where = "、".join(f"{STAGE_BY_ID[x].no}{STAGE_BY_ID[x].name}" for x in stages if x in STAGE_BY_ID)
-            lines.append(f"- 資料{i}「{name}」（{at:%m/%d}）→ {where or '割り当てなし'}")
+            lines.append(f"- 資料{i}「{name}」（{at:%m/%d}）→ {where or '割り当てなし'}\n  冒頭：{text[:1200]}")
         return "\n".join(lines)
     st, fw = STAGE_BY_ID[key], fx.FRAMEWORK_BY_STAGE[key]
     words = [st.name, *(f.label for f in fw.fields)]
-    mine = [r for r in rows if any(x["stage"] == key for x in r[3])]
+    mine = rows
     out, used = [], 0
     for i, name, text, result, _ in mine[:3]:
         got = "、".join(f"{x['label']}（{ACTION_JA[x['action']]}）" for x in result if x["stage"] == key)
+        got = got or "読むことを許された資料"
         secs = sorted(_sections(text), key=lambda hs: -sum((hs[0] + hs[1]).count(w) for w in words))
         part = f"### 資料{i}「{name}」（この工程に：{got}）\n"
         for h, body in secs:

@@ -96,6 +96,11 @@ await page.getByLabel("取り込む資料").setInputFiles({
 await btn("取り込む").click();
 await page.getByText("完了", { exact: true }).first().waitFor({ timeout: 60000 });
 await page.getByRole("link", { name: /工程を開いて案を選ぶ/ }).first().waitFor();
+// 読んでいいエージェントを割り当てる（①の担当にも読ませる）
+await page.getByRole("region", { name: "読んでいいエージェント" }).or(page.getByLabel("読んでいいエージェント")).first().waitFor();
+await page.getByRole("button", { name: /①アイディエーション$/ }).click();
+await btn("保存", true).click();
+await page.getByText(/次に動くとき・話すときから読みます/).waitFor();
 await shot("d8-import", true);
 await page.getByRole("link", { name: /工程を開いて案を選ぶ/ }).first().click();
 await page.getByText(/資料「運用設計.md」から 1 項目の案を作りました/).waitFor();

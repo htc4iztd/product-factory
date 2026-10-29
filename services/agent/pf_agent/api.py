@@ -11,6 +11,7 @@ from sqlalchemy import select
 
 from . import (
     agents,
+    attachments,
     autodev,
     avatars,
     canvasjob,
@@ -89,6 +90,11 @@ async def _team_error(_, exc: team.TeamError):
 
 @app.exception_handler(avatars.AvatarError)
 async def _avatar_error(_, exc: avatars.AvatarError):
+    return JSONResponse(status_code=exc.status, content={"detail": exc.message})
+
+
+@app.exception_handler(attachments.AttachmentError)
+async def _attachment_error(_, exc: attachments.AttachmentError):
     return JSONResponse(status_code=exc.status, content={"detail": exc.message})
 
 
@@ -175,6 +181,12 @@ class IntakeBody(BaseModel):
 class Chat(BaseModel):
     message: str = Field(min_length=1, max_length=20000)  # リサーチの要約を貼れる長さ
     session_id: str | None = None
+    attachments: list[int] = Field(default_factory=list, max_length=5)
+
+
+class AttachBody(BaseModel):
+    filename: str = Field(min_length=1, max_length=300)
+    content_b64: str = Field(min_length=1, max_length=28_000_000)
 
 
 class SessionBody(BaseModel):
@@ -396,8 +408,14 @@ def _stage_product(c: Caller, product_id: str, stage_id: str, op: str):
 @app.post("/products/{product_id}/stages/{stage_id}/chat")
 async def chat(product_id: str, stage_id: str, body: Chat, c: Caller = Depends(caller)):
     p = _stage_product(c, product_id, stage_id, "create")
-    session_id = await engine.chat(p, stage_id, c.user, body.message, body.session_id)
+    session_id = await engine.chat(p, stage_id, c.user, body.message, body.session_id, body.attachments)
     return engine.stage_detail(p, stage_id, session_id)
+
+
+@app.post("/products/{product_id}/agents/{agent}/attachments")
+def attach(product_id: str, agent: str, body: AttachBody, c: Caller = Depends(caller)):
+    from .api_collab import _p
+    return attachments.add(_p(c, product_id, True), c.user, agent, body.filename, body.content_b64)
 
 
 @app.post("/products/{product_id}/stages/{stage_id}/sessions")

@@ -157,7 +157,7 @@ export type ImportResult = { stage: string; field: string; label: string; action
 export type ImportDoc = {
   id: number; filename: string; kind: string; kind_label: string; size: number; chars: number; mode: "propose" | "fill";
   stages: string[]; status: "queued" | "running" | "done" | "failed"; result: ImportResult[]; job_id: string | null;
-  created_by: string; created_at: string; outline: string[]; preview?: string;
+  created_by: string; created_at: string; outline: string[]; preview?: string; readers: string[]; readers_custom: boolean;
 };
 
 export type Column = { key: string; label: string; kind: "text" | "number"; options: string[] };
@@ -190,7 +190,10 @@ export type ArchGraph = { nodes: ArchNode[]; edges: ArchEdge[] };
 export type FieldValue = string | string[] | Row[] | Flow[] | ErModel | StateMachine[] | ProcSpec[] | ArchGraph;
 export type Draft = Record<string, FieldValue>;
 export type Proposal = { id: string; field: string; value: FieldValue; reason: string; status: "pending" | "accepted" | "rejected" };
-export type ChatMsg = { id: number; session_id: string | null; role: "user" | "assistant" | "feedback"; actor: string; text: string; proposals: Proposal[]; at: string };
+export type ChatMsg = {
+  id: number; session_id: string | null; role: "user" | "assistant" | "feedback"; actor: string; text: string; proposals: Proposal[]; at: string;
+  attachments?: { id: number; filename: string; kind: "doc" | "image" }[];
+};
 export type ChatSession = { id: string; title: string; created_by: string; created_at: string; messages: number };
 export type StageReport = { content: string; model: string; created_by: string; created_at: string; newer_messages: number };
 export type StageRef = { id: string; no: string; name: string; status?: string; enabled?: boolean };

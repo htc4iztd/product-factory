@@ -55,7 +55,10 @@ def converse(ctx: Context, node_input: Any):
         c["upstream"]["決定記録（確定済み）"] = "\n".join(
             f"- {d['key']} {d['title']}：{d['detail']}（理由：{d['rationale'] or '記載なし'}）" for d in ds)
     try:
-        turn = llm.converse(conn, stage, fw, c["idea"], c["draft"], c["upstream"], c["history"], c["message"])
+        from . import attachments
+        extra, images = attachments.material(c.get("attachments") or [])
+        message = c["message"] + ("\n\n" + extra if extra else "")
+        turn = llm.converse(conn, stage, fw, c["idea"], c["draft"], c["upstream"], c["history"], message, images)
     except Exception as e:  # LLM の失敗は対話の中で伝え、下書きには触れない
         why = str(e) if isinstance(e, llm.LLMError) else type(e).__name__
         return {"reply": f"AIの呼び出しに失敗しました（{why}）。もう一度送るか、設定の接続を確かめてください。",

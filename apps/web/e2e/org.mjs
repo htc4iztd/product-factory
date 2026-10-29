@@ -72,6 +72,14 @@ await page.getByLabel("対話セッション").selectOption({ label: /担当エ�
 });
 await page.getByText(/方針を教えてください/).first().waitFor();
 await shot("o5-stage-agent");
+// 担当との対話に資料・画像を添える（その発言のときだけ読む）
+await page.getByLabel("添付するファイル").setInputFiles({ name: "顧客メモ.md", mimeType: "text/markdown", buffer: Buffer.from("# 顧客\n共働きの夫婦") });
+await page.getByRole("button", { name: "顧客メモ.mdを外す" }).waitFor();
+await page.getByLabel("AIへの発言").fill("このメモを読んで顧客を見直して");
+await btn("送信", true).click();
+await page.locator("div").filter({ hasText: /^このメモを読んで顧客を見直して顧客メモ.md$/ }).first().waitFor();
+await page.getByText("考えています…").waitFor({ state: "detached" });
+await shot("o5b-attach");
 // 組織とタスク・顔を描く
 await page.goto(`${BASE}/p/${pid}/team`);
 await page.getByText("エージェントの組織").first().waitFor();

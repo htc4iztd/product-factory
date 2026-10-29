@@ -154,6 +154,24 @@ class ChatMessage(Base):
     text: Mapped[str] = mapped_column(Text, default="")
     # [{"id", "field", "value", "reason", "status": pending|accepted|rejected}]
     proposals: Mapped[list | None] = mapped_column(JSON, nullable=True)
+    # その発言だけに添えた資料・画像 [{id, filename, kind}]
+    attachments: Mapped[list | None] = mapped_column(JSON, nullable=True)
+    created_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), default=_now)
+
+
+class ChatAttachment(Base):
+    """エージェントとの対話に、その場で添える資料・画像（その発言のときだけ AI が読む）。"""
+    __tablename__ = "chat_attachments"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    tenant_id: Mapped[str] = mapped_column(String(64), index=True)
+    product_id: Mapped[str] = mapped_column(String(32), index=True)
+    agent: Mapped[str] = mapped_column(String(10))                     # sNN | director
+    filename: Mapped[str] = mapped_column(String(300))
+    kind: Mapped[str] = mapped_column(String(10))                      # doc | image
+    mime: Mapped[str] = mapped_column(String(80))
+    text: Mapped[str] = mapped_column(Text, default="")                # 資料は文章にしたもの
+    data: Mapped[bytes | None] = mapped_column(LargeBinary, nullable=True)   # 画像
+    created_by: Mapped[str] = mapped_column(String(200))
     created_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), default=_now)
 
 
@@ -502,6 +520,8 @@ class ImportDoc(Base):
     outline: Mapped[list | None] = mapped_column(JSON, nullable=True)   # 見出し（シート・スライド・章）
     mode: Mapped[str] = mapped_column(String(10), default="propose")   # propose | fill
     stages: Mapped[list | None] = mapped_column(JSON, nullable=True)    # 割り当て先を絞るとき
+    # 読んでいいエージェント（director・pm・sNN）。None は「割り当てた工程の担当と司令塔・PM」
+    readers: Mapped[list | None] = mapped_column(JSON, nullable=True)
     status: Mapped[str] = mapped_column(String(12), default="queued")   # queued | running | done | failed
     result: Mapped[list | None] = mapped_column(JSON, nullable=True)    # [{stage, field, label, action, reason}]
     job_id: Mapped[str | None] = mapped_column(String(32), nullable=True)
@@ -749,7 +769,8 @@ _ADDED_COLUMNS = {
     "products": {"cover_image_id": "VARCHAR(32)", "repo": "VARCHAR(200)", "repo_branch": "VARCHAR(100)",
                  "gh_sync": "VARCHAR(8) DEFAULT 'off'", "gh_import": "BOOLEAN DEFAULT {false}",
                  "gh_synced_at": "VARCHAR(30)"},
-    "chat_messages": {"session_id": "VARCHAR(32)"},
+    "chat_messages": {"session_id": "VARCHAR(32)", "attachments": "JSON"},
+    "import_docs": {"readers": "JSON"},
     "llm_settings": {"platform_granted": "BOOLEAN DEFAULT {false}"},
     "job_runs": {"tasks": "JSON"},
     "product_images": {"base_id": "VARCHAR(32)"},

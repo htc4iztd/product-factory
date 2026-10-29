@@ -957,7 +957,9 @@ class DirectorOut(BaseModel):
     to_pm: list[str]
 
 
-def director_talk(product: Product, user: str, text: str, thread: int | None = None) -> dict:
+def director_talk(
+    product: Product, user: str, text: str, thread: int | None = None, attachment_ids: list[int] | None = None
+) -> dict:
     """PdM が司令塔に話す。司令塔はすぐ答え、戦略が決まったら掲示板に「決定」を残して PM に伝える（PM はすぐ動く）。"""
     text = text.strip()
     if not text:
@@ -965,7 +967,15 @@ def director_talk(product: Product, user: str, text: str, thread: int | None = N
     ensure(product)
     thread = thread or _today_thread(product)
     title = "" if thread else f"{dt.datetime.now(cron.ZoneInfo('Asia/Tokyo')):%m/%d} の対話"
-    mine = post(product, "pdm", "director", "directive", text, thread, title=title, author=user)
+    from . import attachments
+
+    try:
+        files = attachments.take(product, "director", attachment_ids or [])
+    except attachments.AttachmentError as e:
+        raise TeamError(e.status, e.message) from None
+    extra, images = attachments.material([f["id"] for f in files])
+    shown = text + "".join(f"\n［添付：{f['filename']}］" for f in files)
+    mine = post(product, "pdm", "director", "directive", shown, thread, title=title, author=user)
     thread = mine["thread"]
     conn = llmconf.resolve(product.tenant_id)
     with session() as s:
@@ -994,7 +1004,7 @@ def director_talk(product: Product, user: str, text: str, thread: int | None = N
             f"## これまでの戦略\n{json.dumps(memory, ensure_ascii=False) or '（まだない）'}\n\n"
             f"## 今の状況\n{_material(product, 'director', rs)[:60000]}\n\n## 今日の対話\n{history}\n"
         )
-        out = llm._json(conn, conn.chat_model, prompt, DirectorOut)
+        out = llm._json(conn, conn.chat_model, prompt + ("\n" + extra if extra else ""), DirectorOut, images)
     reply = post(product, "director", "pdm", "answer", out.reply, thread, author=conn.chat_model)
     with session() as s:
         s.get(BoardPost, mine["id"]).read = True  # 司令塔はその場で読んで答えた

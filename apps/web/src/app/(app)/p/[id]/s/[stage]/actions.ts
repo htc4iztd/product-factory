@@ -15,8 +15,8 @@ async function call(pid: string, path: string, method: string, body?: unknown): 
   return {};
 }
 
-export async function sendChat(pid: string, sid: string, message: string, sessionId: string | null) {
-  return call(pid, `/stages/${sid}/chat`, "POST", { message, session_id: sessionId });
+export async function sendChat(pid: string, sid: string, message: string, sessionId: string | null, attachments: number[] = []) {
+  return call(pid, `/stages/${sid}/chat`, "POST", { message, session_id: sessionId, attachments });
 }
 
 export async function newSession(pid: string, sid: string, title: string): Promise<Result & { sessionId?: string }> {

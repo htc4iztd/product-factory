@@ -251,11 +251,11 @@ def set_adk_session(session_id: str, adk_session_id: str) -> None:
 
 
 def add_chat(product_id: str, stage_id: str, role: str, actor: str, text: str,
-             proposals: list | None = None, session_id: str | None = None) -> int:
+             proposals: list | None = None, session_id: str | None = None, attachments: list | None = None) -> int:
     session_id = session_id or current_session(product_id, stage_id, actor)
     with session() as s:
         m = ChatMessage(product_id=product_id, stage_id=stage_id, session_id=session_id, role=role, actor=actor,
-                        text=text, proposals=proposals or None)
+                        text=text, proposals=proposals or None, attachments=attachments or None)
         s.add(m)
         s.commit()
         mid = m.id
@@ -273,7 +273,8 @@ def chat(product_id: str, stage_id: str, session_id: str | None = None) -> list[
             q = q.where(ChatMessage.session_id == session_id)
         rows = s.execute(q.order_by(ChatMessage.id)).scalars()
         return [{"id": m.id, "session_id": m.session_id, "role": m.role, "actor": m.actor, "text": m.text,
-                 "proposals": m.proposals or [], "at": m.created_at.isoformat()} for m in rows]
+                 "proposals": m.proposals or [], "attachments": m.attachments or [], "at": m.created_at.isoformat()}
+                for m in rows]
 
 
 def chat_context(product_id: str, stage_id: str, session_id: str) -> dict:
@@ -282,11 +283,14 @@ def chat_context(product_id: str, stage_id: str, session_id: str) -> dict:
         product = s.get(Product, product_id)
         idea, tenant_id = product.idea, product.tenant_id
     history = chat(product_id, stage_id, session_id)
-    last_user = next((m["text"] for m in reversed(history) if m["role"] in ("user", "feedback")), "")
+    last = next((m for m in reversed(history) if m["role"] in ("user", "feedback")), None)
     return {"idea": idea, "tenant_id": tenant_id, "draft": draft(product_id, stage_id),
             "upstream": confirmed_artifacts(product_id, stage.inputs),
-            "history": [{"role": m["role"], "text": m["text"]} for m in history[:-1]],
-            "message": last_user}
+            "history": [{"role": m["role"], "text": m["text"] + "".join(f"［添付：{a['filename']}］"
+                                                                       for a in m.get("attachments") or [])}
+                        for m in history[:-1]],
+            "message": last["text"] if last else "",
+            "attachments": [a["id"] for a in (last or {}).get("attachments") or []]}
 
 
 # ---------------- 対話のレポート ----------------
