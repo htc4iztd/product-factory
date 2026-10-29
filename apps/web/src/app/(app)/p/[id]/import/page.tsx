@@ -30,7 +30,7 @@ export default async function ImportPage({ params, searchParams }: { params: Pro
     <>
       <AutoRefresh active={active} />
       <PageHeader
-        crumbs={<><Link href={`/p/${id}`} className="hover:text-zinc-700">概要</Link><span>/</span><span>資料の取り込み</span></>}
+        crumbs={<><Link href={`/p/${id}`} className="hover:text-zinc-700">ダッシュボード</Link><span>/</span><span>資料の取り込み</span></>}
         title="資料の取り込み"
         sub="手元の Excel・Word・PowerPoint の資料を読み、どの工程のどの項目にあたるかを AI が見分けて入れます。資料に書かれていないことは入れません。"
       />

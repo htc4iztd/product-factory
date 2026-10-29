@@ -217,7 +217,7 @@ await page.getByText("直近の記録").waitFor();
 await shot("12-gate", true);
 
 await page.goto(`${BASE}/p/${pid}`);
-await page.getByAltText(/プロダクトイメージ/).waitFor();   // 概要の上部に表紙が出る
+await page.getByRole("region", { name: "司令塔との対話" }).waitFor();   // トップはダッシュボード（表紙はプロダクト・キャンバスに）
 await shot("13-overview-after", true);
 // サイドバーを隠す → 再読み込みしても隠れたまま → 表示に戻す
 await btn("サイドバーを隠す").click();

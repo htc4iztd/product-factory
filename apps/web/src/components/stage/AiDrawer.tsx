@@ -50,7 +50,7 @@ function References({ refs, onClose }: { refs: StageDetail["references"]; onClos
 export function AiDrawer(props: {
   initial: "closed" | Tab; pid: string; sid: string; chat: ChatMsg[]; fields: FieldSpec[]; prompts: string[];
   disabled?: string | null; references: StageDetail["references"]; decisions?: StageDetail["decisions"];
-  sessions: ChatSession[]; sessionId: string | null; report: StageReport | null;
+  sessions: ChatSession[]; sessionId: string | null; report: StageReport | null; agent?: StageDetail["agent"];
 }) {
   const { initial, decisions = [], references: base, ...panel } = props;
   // 確定した決定記録（このステージ宛て・下書きの ID に触れるもの）も参照タブに並べる

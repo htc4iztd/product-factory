@@ -22,9 +22,9 @@ export default async function AgentsPage({ params }: { params: Promise<{ id: str
     <>
       <AutoRefresh active={recent} ms={4000} />
       <PageHeader
-        crumbs={<><Link href={`/p/${id}`} className="hover:text-zinc-700">概要</Link><span>/</span><span>自律エージェント</span></>}
-        title="自律エージェント"
-        sub="決めた時刻に AI が工程を見直し、リサーチを更新し、報告資料を作り直します。見つけたことは受け箱に提案として届き、採用・却下・返信で詰められます。AI が工程の値を直接書き換えることはありません。"
+        crumbs={<><Link href={`/p/${id}`} className="hover:text-zinc-700">ダッシュボード</Link><span>/</span><span>定期の仕事</span></>}
+        title="定期の仕事"
+        sub="決めた時刻に、リサーチの更新・報告資料の作り直し・決まった観点での見直しを動かします（工程ごとの日々の仕事は、エージェントの組織の各担当が行います）。見つけたことは受け箱に提案として届き、採用・却下・返信で詰められます。AI が工程の値を直接書き換えることはありません。"
       />
       <div className="grid gap-6 px-8 py-6 xl:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
         <div className="space-y-4">

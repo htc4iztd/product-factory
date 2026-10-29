@@ -574,6 +574,62 @@ class AgentFinding(Base):
     updated_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), default=_now, onupdate=_now)
 
 
+class TeamAgent(Base):
+    """プロダクトのエージェント組織：司令塔（director）・PM（pm）・各工程の担当（s01〜s14）。"""
+    __tablename__ = "team_agents"
+    __table_args__ = (UniqueConstraint("product_id", "key"),)
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    tenant_id: Mapped[str] = mapped_column(String(64), index=True)
+    product_id: Mapped[str] = mapped_column(String(32), index=True)
+    key: Mapped[str] = mapped_column(String(10))                        # director | pm | s01 …
+    mission: Mapped[str] = mapped_column(Text, default="")
+    cron: Mapped[str] = mapped_column(String(100))
+    timezone: Mapped[str] = mapped_column(String(40), default="Asia/Tokyo")
+    enabled: Mapped[bool] = mapped_column(Boolean, default=True)
+    report: Mapped[dict | None] = mapped_column(JSON, nullable=True)    # {health, progress, summary, blockers, next}
+    memory: Mapped[dict | None] = mapped_column(JSON, nullable=True)    # 司令塔：{strategy, priorities, decided_at}
+    next_run_at: Mapped[dt.datetime | None] = mapped_column(DateTime(timezone=True), nullable=True, index=True)
+    last_run_at: Mapped[dt.datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    last_job_id: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    runs: Mapped[int] = mapped_column(Integer, default=0)
+    created_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), default=_now)
+
+
+class AgentTask(Base):
+    """エージェントが洗い出し、進み具合を最新にするタスク（TS-n）。人（PdM）が持つタスクもある。"""
+    __tablename__ = "agent_tasks"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    product_id: Mapped[str] = mapped_column(String(32), index=True)
+    number: Mapped[int] = mapped_column(Integer)
+    agent: Mapped[str] = mapped_column(String(10))                      # 持っているエージェント
+    title: Mapped[str] = mapped_column(String(300))
+    detail: Mapped[str] = mapped_column(Text, default="")
+    status: Mapped[str] = mapped_column(String(10), default="todo")     # todo | doing | blocked | done
+    owner: Mapped[str] = mapped_column(String(10), default="agent")     # agent | pdm
+    created_by: Mapped[str] = mapped_column(String(200))
+    created_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), default=_now)
+    updated_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), default=_now, onupdate=_now)
+
+
+class BoardPost(Base):
+    """掲示板：エージェント同士・PdM とのやり取りを全部残す（A2A のメッセージと同じ形）。
+    thread は最初の投稿の id（最初の投稿は自分の id）。"""
+    __tablename__ = "board_posts"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    tenant_id: Mapped[str] = mapped_column(String(64), index=True)
+    product_id: Mapped[str] = mapped_column(String(32), index=True)
+    thread: Mapped[int | None] = mapped_column(Integer, index=True, nullable=True)
+    title: Mapped[str] = mapped_column(String(300), default="")
+    sender: Mapped[str] = mapped_column(String(10))                     # director | pm | sNN | pdm
+    recipient: Mapped[str] = mapped_column(String(10))                  # 同上 | all
+    intent: Mapped[str] = mapped_column(String(12))                     # 報告・依頼・回答・決定・指示・質問
+    text: Mapped[str] = mapped_column(Text)
+    author: Mapped[str] = mapped_column(String(200), default="")        # PdM の投稿は人のメール、AI はモデル名
+    read: Mapped[bool] = mapped_column(Boolean, default=False)          # 宛先が読んだか
+    job_id: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    created_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), default=_now, index=True)
+
+
 class TenantSecret(Base):
     """テナントの秘密情報（GitHub のトークンなど）。値は暗号化して置く。"""
     __tablename__ = "tenant_secrets"

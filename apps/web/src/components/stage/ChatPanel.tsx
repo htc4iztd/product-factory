@@ -4,7 +4,7 @@ import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import Markdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { ArrowUp, Check, CheckCheck, FileText, Library, MessageSquareWarning, PanelRightClose, Pencil, Plus, Sparkles, X } from "lucide-react";
-import type { ChatMsg, ChatSession, FieldSpec, Proposal, StageReport } from "@/lib/agent";
+import type { ChatMsg, ChatSession, FieldSpec, Proposal, StageReport, TeamMember } from "@/lib/agent";
 import { acceptAll, decideProposal, makeReport, newSession, renameSession, sendChat } from "@/app/(app)/p/[id]/s/[stage]/actions";
 import { researchChoices, sendResearchToStage } from "@/app/(app)/research/actions";
 import { FieldView } from "./FieldEditor";
@@ -46,7 +46,7 @@ function ResearchImport({ busy, onSend, onClose }: { busy: boolean; onSend: (n: 
 
 type Props = {
   pid: string; sid: string; chat: ChatMsg[]; fields: FieldSpec[]; prompts: string[]; disabled?: string | null; onClose?: () => void;
-  sessions: ChatSession[]; sessionId: string | null; report: StageReport | null;
+  sessions: ChatSession[]; sessionId: string | null; report: StageReport | null; agent?: TeamMember | null;
 };
 
 function ProposalCard({ p, field, onDecide, busy }: { p: Proposal; field?: FieldSpec; onDecide: (accept: boolean) => void; busy: boolean }) {
@@ -97,7 +97,7 @@ function ReportView({ pid, sid, report, hasChat }: { pid: string; sid: string; r
   );
 }
 
-export function ChatPanel({ pid, sid, chat, fields, prompts, disabled, onClose, sessions, sessionId, report }: Props) {
+export function ChatPanel({ pid, sid, chat, fields, prompts, disabled, onClose, sessions, sessionId, report, agent: me }: Props) {
   const [view, setView] = useState<"chat" | "report">("chat");
   const router = useRouter();
   const path = usePathname();
@@ -151,8 +151,18 @@ export function ChatPanel({ pid, sid, chat, fields, prompts, disabled, onClose, 
     <div className="flex h-full flex-col">
       <div className="flex items-center gap-2 border-b border-zinc-200 px-4 py-3">
         <div className="flex h-6 w-6 items-center justify-center rounded-md bg-gradient-to-br from-brand-500 to-violet-500 text-white"><Sparkles size={13} /></div>
-        <div className="text-[13px] font-semibold">AIと詰める</div>
-        <span className="ml-auto text-[11px] text-zinc-400">案は採用するまで反映されません</span>
+        <div className="min-w-0">
+          <div className="text-[13px] font-semibold">{me ? `${me.name}と話す` : "AIと詰める"}</div>
+          {me?.report && (
+            <div className="flex items-center gap-1 text-[10px] text-zinc-500" title={me.report.summary}>
+              <span className={`h-1.5 w-1.5 rounded-full ${me.report.health === "green" ? "bg-emerald-500" : me.report.health === "red" ? "bg-rose-500" : "bg-amber-400"}`} />
+              <span className="truncate">{me.report.progress}%・{me.report.summary}</span>
+            </div>
+          )}
+        </div>
+        <span className="ml-auto shrink-0 text-[11px] text-zinc-400">
+          {me ? <a href={`/p/${pid}/board?agent=${sid}`} className="hover:underline">掲示板{me.open_tasks ? `・タスク ${me.open_tasks}` : ""}</a> : "案は採用するまで反映されません"}
+        </span>
         {onClose && (
           <button onClick={onClose} className="btn-ghost btn-sm h-7 w-7 p-0" title="AIタブを閉じる（]）" aria-label="AIタブを閉じる"><PanelRightClose size={15} /></button>
         )}

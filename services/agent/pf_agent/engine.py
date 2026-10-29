@@ -16,7 +16,7 @@ from google.adk.sessions import DatabaseSessionService
 from google.genai import types
 from sqlalchemy import select
 
-from . import autodev, code, collab, ghsync, images, llm, llmconf, repo
+from . import autodev, code, collab, ghsync, images, llm, llmconf, repo, team
 from . import frameworks as fx
 from .db import (
     PhaseReview,
@@ -445,6 +445,7 @@ class Engine:
             "autodev_targets": [STAGE_BY_ID[t].no + STAGE_BY_ID[t].name for t in autodev.targets(product.id, stage_id)],
             "variants": autodev.stage_variants(product.id, stage_id),
             "decisions": collab.stage_decisions(product.id, stage_id, fx.ids_in(json.dumps(d, ensure_ascii=False))),
+            "agent": team.member(product, stage_id),
         }
 
     @staticmethod

@@ -45,7 +45,7 @@ export default async function StagePage({ params, searchParams }: Props) {
     <div className="flex h-screen flex-col">
       <header className="shrink-0 border-b border-zinc-200 bg-white px-8 pt-4">
         <div className="mb-2 flex items-center gap-1.5 text-xs text-zinc-400">
-          <Link href={`/p/${id}`} className="hover:text-zinc-700">概要</Link><span>/</span><span>{st.phase} {PHASE_NAME[st.phase]}</span>
+          <Link href={`/p/${id}`} className="hover:text-zinc-700">ダッシュボード</Link><span>/</span><span>{st.phase} {PHASE_NAME[st.phase]}</span>
         </div>
         <div className="flex flex-wrap items-start justify-between gap-4">
           <div className="min-w-0">
@@ -120,7 +120,7 @@ export default async function StagePage({ params, searchParams }: Props) {
             )}
           </div>
         </section>
-        <AiDrawer initial={drawer} references={st.references} decisions={st.decisions} sessions={st.sessions} sessionId={st.session_id} report={st.report} pid={id} sid={stage} chat={st.chat} fields={st.framework.fields} prompts={st.framework.prompts}
+        <AiDrawer initial={drawer} agent={st.agent} references={st.references} decisions={st.decisions} sessions={st.sessions} sessionId={st.session_id} report={st.report} pid={id} sid={stage} chat={st.chat} fields={st.framework.fields} prompts={st.framework.prompts}
           disabled={pp ? `案（${pp.key}）を表示中です。対話は「本線」で行います` : !st.enabled ? "ステージを開くと対話できます" : null} />
       </div>
     </div>

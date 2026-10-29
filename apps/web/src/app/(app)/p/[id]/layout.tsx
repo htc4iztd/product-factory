@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { cookies } from "next/headers";
 import { SidebarShell } from "@/components/SidebarShell";
-import { Activity, BookText, Bot, Boxes, ChevronLeft, Code2, Diamond, FileInput, FileText, Presentation, KanbanSquare, LayoutDashboard, MessagesSquare, ScrollText, Settings2, Video } from "lucide-react";
+import { Activity, BookText, Bot, ImageIcon, Network, Boxes, ChevronLeft, Code2, Diamond, FileInput, FileText, Presentation, KanbanSquare, LayoutDashboard, MessagesSquare, ScrollText, Settings2, Video } from "lucide-react";
 import { agent, type Overview } from "@/lib/agent";
 import { NavItem } from "@/components/NavItem";
 import { StatusDot } from "@/components/StatusBadge";
@@ -32,7 +32,10 @@ export default async function ProductLayout({ children, params }: { children: Re
         </div>
         <nav className="flex-1 space-y-5 overflow-y-auto px-3 py-3">
           <div className="space-y-0.5">
-            <NavItem href={`/p/${id}`} exact><LayoutDashboard size={15} />概要</NavItem>
+            <NavItem href={`/p/${id}`} exact><LayoutDashboard size={15} />ダッシュボード</NavItem>
+            <NavItem href={`/p/${id}/board`}><MessagesSquare size={15} />掲示板</NavItem>
+            <NavItem href={`/p/${id}/team`}><Network size={15} />エージェントの組織</NavItem>
+            <NavItem href={`/p/${id}/canvas`}><ImageIcon size={15} />プロダクト・キャンバス</NavItem>
           </div>
           {GROUPS.map((g) => (
             <div key={g.title}>
@@ -78,7 +81,7 @@ export default async function ProductLayout({ children, params }: { children: Re
             <div className="space-y-0.5">
               <NavItem href={`/p/${id}/import`}><FileInput size={15} />資料の取り込み</NavItem>
               <NavItem href={`/p/${id}/reports`}><Presentation size={15} />報告資料</NavItem>
-              <NavItem href={`/p/${id}/agents`}><Bot size={15} />自律エージェント</NavItem>
+              <NavItem href={`/p/${id}/agents`}><Bot size={15} />定期の仕事</NavItem>
               <NavItem href={`/p/${id}/preproducts`}><Boxes size={15} />プリプロダクト</NavItem>
               <NavItem href={`/jobs?product=${id}`}><Activity size={15} />ジョブ</NavItem>
               <NavItem href={`/p/${id}/code`}><Code2 size={15} />コード（IDE）</NavItem>

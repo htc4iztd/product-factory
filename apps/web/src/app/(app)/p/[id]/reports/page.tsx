@@ -19,7 +19,7 @@ export default async function ReportsPage({ params }: { params: Promise<{ id: st
     <>
       <AutoRefresh active={list.some((r) => r.status === "queued" || r.status === "running")} />
       <PageHeader
-        crumbs={<><Link href={`/p/${id}`} className="hover:text-zinc-700">概要</Link><span>/</span><span>報告資料</span></>}
+        crumbs={<><Link href={`/p/${id}`} className="hover:text-zinc-700">ダッシュボード</Link><span>/</span><span>報告資料</span></>}
         title="報告資料"
         sub="各工程で決めた企画情報から範囲を選ぶと、読み手と目的に合わせて AI がスライドにまとめます。直してから PowerPoint・Markdown にできます。"
       />

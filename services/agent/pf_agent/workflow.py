@@ -41,6 +41,12 @@ def converse(ctx: Context, node_input: Any):
     onto = ontology.context_for(c["tenant_id"], " ".join(seen))
     if onto:
         c["upstream"]["社内の用語と関係"] = onto
+    from . import team
+    # PdM が工程の画面で担当と話したら、担当からの PdM 宛ては読んだことにする
+    team.mark_read_from(product_id, stage_id)
+    me = team.stage_context(product_id, stage_id)
+    if me:
+        c["upstream"]["担当エージェントとしての前提（使命・戦略・タスク・掲示板）"] = me
     if ds:
         c["upstream"]["決定記録（確定済み）"] = "\n".join(
             f"- {d['key']} {d['title']}：{d['detail']}（理由：{d['rationale'] or '記載なし'}）" for d in ds)

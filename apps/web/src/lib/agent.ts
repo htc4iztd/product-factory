@@ -98,6 +98,30 @@ export type CanvasInfo = {
   facts: { stage: string; label: string; value: string; source: string }[]; images: CanvasImage[];
 };
 export type Overview = { product: Product; phases: Phase[]; stages: StageSummary[] };
+// エージェントの組織（司令塔・PM・各工程の担当）と掲示板
+export type AgentReport = { health: "green" | "yellow" | "red"; progress: number; summary: string; blockers: string[]; next: string[]; at: string };
+export type TeamMember = {
+  key: string; name: string; role: "director" | "pm" | "stage"; mission: string; cron: string; cron_label: string; enabled: boolean;
+  report: AgentReport | null; memory: { strategy?: string; priorities?: string[]; decided_at?: string; decided_with?: string };
+  next_run_at: string | null; last_run_at: string | null; last_job_id: string | null; runs: number; open_tasks: number; unread: number;
+};
+export type BoardPostT = {
+  id: number; thread: number; title: string; sender: string; sender_name: string; recipient: string; recipient_name: string;
+  intent: "report" | "request" | "answer" | "decision" | "directive" | "question"; text: string; author: string; read: boolean;
+  job_id: string | null; created_at: string;
+};
+export type BoardThread = { thread: number; title: string; posts: BoardPostT[]; participants: string[]; last_at: string };
+export type TeamTask = {
+  number: number; key: string; agent: string; agent_name: string; title: string; detail: string;
+  status: "todo" | "doing" | "blocked" | "done"; owner: "agent" | "pdm"; created_by: string; created_at: string; updated_at: string;
+};
+export type DirectorView = { strategy: TeamMember["memory"]; thread: number | null; posts: BoardPostT[] };
+export type Dashboard = Overview & {
+  agents: TeamMember[]; pdm_unread: number; findings_open: number; running: boolean;
+  variants: { number: number; key: string; title: string; status: string; stages: string[] }[];
+  edges: { source: string; target: string; count: number; last: { intent: string; text: string; at: string; thread: number } }[];
+  to_pdm: BoardPostT[]; director: DirectorView;
+};
 // 自律エージェント（AG-n）と、その提案（受け箱）
 export type AgentSchedule = {
   number: number; key: string; name: string; task: "review" | "custom" | "research" | "report"; task_label: string;
@@ -184,6 +208,7 @@ export type StageDetail = {
   decisions: Decision[];
   autodev_targets: string[];
   variants: { number: number; key: string; title: string; status: PreProduct["status"] }[];
+  agent: TeamMember | null;
 };
 // プリプロダクト（案）の、あるステージの下書き
 export type VariantStage = {

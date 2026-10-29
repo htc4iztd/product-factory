@@ -259,7 +259,9 @@ def start_ticker(every: int = 60) -> None:
         while True:
             time.sleep(every)
             try:
+                from . import team
                 tick()
+                team.tick()
             except Exception:  # noqa: BLE001, S110  次の回で拾う
                 pass
 

@@ -5,7 +5,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import Response
 from pydantic import BaseModel, Field
 
-from . import agents, autodev, imports, jobs, reports
+from . import agents, autodev, imports, jobs, reports, team
 from .api_collab import _p
 from .authz import Caller, caller
 from .stages import STAGE_BY_ID
@@ -147,6 +147,91 @@ def decide_finding(product_id: str, fid: int, body: DecideBody, c: Caller = Depe
 @router.post(P + "/agent-findings/{fid}/reply")
 def reply_finding(product_id: str, fid: int, body: ReplyBody, c: Caller = Depends(caller)):
     return agents.reply(_p(c, product_id, True), c.user, fid, body.text)
+
+
+class TeamAgentBody(BaseModel):
+    mission: str | None = Field(default=None, max_length=4000)
+    cron: str | None = Field(default=None, max_length=100)
+    enabled: bool | None = None
+
+
+class TeamRunBody(BaseModel):
+    keys: list[str] = Field(default_factory=list, max_length=20)
+
+
+class BoardBody(BaseModel):
+    to: str = Field(min_length=1, max_length=10)
+    text: str = Field(min_length=1, max_length=8000)
+    thread: int | None = None
+    intent: str = "directive"
+
+
+class TalkBody(BaseModel):
+    text: str = Field(min_length=1, max_length=8000)
+    thread: int | None = None
+
+
+class TaskBody(BaseModel):
+    agent: str = Field(default="pm", max_length=10)
+    title: str | None = Field(default=None, max_length=300)
+    status: str | None = None
+    detail: str | None = Field(default=None, max_length=4000)
+    owner: str | None = None
+
+
+@router.get(P + "/team")
+def team_overview(product_id: str, c: Caller = Depends(caller)):
+    return team.overview(_p(c, product_id))
+
+
+@router.put(P + "/team/{key}")
+def edit_team_agent(product_id: str, key: str, body: TeamAgentBody, c: Caller = Depends(caller)):
+    return team.edit_agent(_p(c, product_id, True), key, body.mission, body.cron, body.enabled)
+
+
+@router.post(P + "/team/run")
+def run_team(product_id: str, body: TeamRunBody, c: Caller = Depends(caller)):
+    p = _p(c, product_id, True)
+    keys = body.keys or ["director", "pm", *STAGE_BY_ID]
+    return {"job_id": team.start(p, c.user, keys)}
+
+
+@router.get(P + "/board")
+def get_board(product_id: str, agent: str | None = None, intent: str | None = None, q: str | None = None,
+              thread: int | None = None, c: Caller = Depends(caller)):
+    return team.board(_p(c, product_id), agent, intent, q, thread)
+
+
+@router.post(P + "/board")
+def post_board(product_id: str, body: BoardBody, c: Caller = Depends(caller)):
+    return team.pdm_post(_p(c, product_id, True), c.user, body.to, body.text, body.thread, body.intent)
+
+
+@router.get(P + "/director")
+def director(product_id: str, c: Caller = Depends(caller)):
+    return team.director_view(_p(c, product_id))
+
+
+@router.post(P + "/director/talk")
+def director_talk(product_id: str, body: TalkBody, c: Caller = Depends(caller)):
+    return team.director_talk(_p(c, product_id, True), c.user, body.text, body.thread)
+
+
+@router.get(P + "/team/tasks")
+def team_tasks(product_id: str, agent: str | None = None, open_only: bool = False, c: Caller = Depends(caller)):
+    return team.tasks(_p(c, product_id), agent, open_only)
+
+
+@router.post(P + "/team/tasks")
+def add_team_task(product_id: str, body: TaskBody, c: Caller = Depends(caller)):
+    return team.upsert_task(_p(c, product_id, True), c.user, body.agent, None, body.title, body.status, body.detail,
+                            body.owner)
+
+
+@router.put(P + "/team/tasks/{number}")
+def edit_team_task(product_id: str, number: int, body: TaskBody, c: Caller = Depends(caller)):
+    return team.upsert_task(_p(c, product_id, True), c.user, body.agent, number, body.title, body.status, body.detail,
+                            body.owner)
 
 
 class AutodevBody(BaseModel):

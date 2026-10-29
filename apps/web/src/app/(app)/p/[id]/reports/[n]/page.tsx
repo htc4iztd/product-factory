@@ -13,7 +13,7 @@ export default async function ReportPage({ params }: { params: Promise<{ id: str
     <>
       <AutoRefresh active={busy} />
       <PageHeader
-        crumbs={<><Link href={`/p/${id}`} className="hover:text-zinc-700">概要</Link><span>/</span><Link href={`/p/${id}/reports`} className="hover:text-zinc-700">報告資料</Link><span>/</span><span>{r.key}</span></>}
+        crumbs={<><Link href={`/p/${id}`} className="hover:text-zinc-700">ダッシュボード</Link><span>/</span><Link href={`/p/${id}/reports`} className="hover:text-zinc-700">報告資料</Link><span>/</span><span>{r.key}</span></>}
         title={r.title}
         sub={[r.audience && `読み手：${r.audience}`, r.purpose && `目的：${r.purpose}`].filter(Boolean).join("　") || "読み手・目的の指定なし"}
         actions={r.job_id ? <Link href={`/jobs/${r.job_id}`} className="btn-secondary">ジョブの工程を見る</Link> : undefined}

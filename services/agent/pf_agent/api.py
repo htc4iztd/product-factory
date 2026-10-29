@@ -9,7 +9,7 @@ from fastapi.responses import JSONResponse, Response
 from pydantic import BaseModel, Field
 from sqlalchemy import select
 
-from . import agents, autodev, canvasjob, collab, ghsync, imports, jobs, llm, llmconf, ontology, reports, research
+from . import agents, autodev, canvasjob, collab, ghsync, imports, jobs, llm, llmconf, ontology, reports, research, team
 from .api_collab import router as collab_router
 from .api_jobs import router as jobs_router
 from .api_knowledge import router as knowledge_router
@@ -67,6 +67,11 @@ async def _agent_error(_, exc: agents.AgentError):
     return JSONResponse(status_code=exc.status, content={"detail": exc.message})
 
 
+@app.exception_handler(team.TeamError)
+async def _team_error(_, exc: team.TeamError):
+    return JSONResponse(status_code=exc.status, content={"detail": exc.message})
+
+
 @app.exception_handler(jobs.JobError)
 async def _job_error(_, exc: jobs.JobError):
     return JSONResponse(status_code=exc.status, content={"detail": exc.message})
@@ -82,6 +87,13 @@ async def _research_error(_, exc: research.ResearchError):
     return JSONResponse(status_code=exc.status, content={"detail": exc.message})
 
 
+@app.get("/products/{product_id}/dashboard")
+def dashboard(product_id: str, c: Caller = Depends(caller)):
+    from .api_collab import _p
+    p = _p(c, product_id)
+    return {**engine.overview(p), **team.dashboard(p)}
+
+
 @app.post("/internal/scheduler/tick")
 def scheduler_tick(x_pf_internal_token: str = Header(default="")):
     """自律エージェントの予定を動かす。Cloud Scheduler が数分ごとに呼ぶ。
@@ -89,7 +101,7 @@ def scheduler_tick(x_pf_internal_token: str = Header(default="")):
     on_cloud_run = bool(os.environ.get("K_SERVICE"))
     if not on_cloud_run and x_pf_internal_token != os.environ.get("PF_INTERNAL_TOKEN", "dev-internal-token"):
         raise HTTPException(401, "invalid internal token")
-    return {"started": agents.tick()}
+    return {"started": agents.tick() + team.tick()}
 
 
 app.include_router(collab_router)
