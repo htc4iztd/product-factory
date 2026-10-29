@@ -8,6 +8,7 @@ import type { ChatMsg, ChatSession, FieldSpec, Proposal, StageReport, TeamMember
 import { acceptAll, decideProposal, makeReport, newSession, renameSession, sendChat } from "@/app/(app)/p/[id]/s/[stage]/actions";
 import { researchChoices, sendResearchToStage } from "@/app/(app)/research/actions";
 import { FieldView } from "./FieldEditor";
+import { Avatar } from "@/components/rail/Avatar";
 
 type Choice = Awaited<ReturnType<typeof researchChoices>>[number];
 
@@ -150,7 +151,8 @@ export function ChatPanel({ pid, sid, chat, fields, prompts, disabled, onClose, 
   return (
     <div className="flex h-full flex-col">
       <div className="flex items-center gap-2 border-b border-zinc-200 px-4 py-3">
-        <div className="flex h-6 w-6 items-center justify-center rounded-md bg-gradient-to-br from-brand-500 to-violet-500 text-white"><Sparkles size={13} /></div>
+        {me ? <Avatar k={sid} v={me.avatar_v} size={30} state={me.state ?? "idle"} />
+          : <div className="flex h-6 w-6 items-center justify-center rounded-md bg-gradient-to-br from-brand-500 to-violet-500 text-white"><Sparkles size={13} /></div>}
         <div className="min-w-0">
           <div className="text-[13px] font-semibold">{me ? `${me.name}と話す` : "AIと詰める"}</div>
           {me?.report && (

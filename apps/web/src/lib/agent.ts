@@ -104,6 +104,7 @@ export type TeamMember = {
   key: string; name: string; role: "director" | "pm" | "stage"; mission: string; cron: string; cron_label: string; enabled: boolean;
   report: AgentReport | null; memory: { strategy?: string; priorities?: string[]; decided_at?: string; decided_with?: string };
   next_run_at: string | null; last_run_at: string | null; last_job_id: string | null; runs: number; open_tasks: number; unread: number;
+  state?: "working" | "waiting" | "stuck" | "idle" | "off"; avatar_v?: string;
 };
 export type BoardPostT = {
   id: number; thread: number; title: string; sender: string; sender_name: string; recipient: string; recipient_name: string;
@@ -120,7 +121,7 @@ export type Dashboard = Overview & {
   agents: TeamMember[]; pdm_unread: number; findings_open: number; running: boolean;
   variants: { number: number; key: string; title: string; status: string; stages: string[] }[];
   edges: { source: string; target: string; count: number; last: { intent: string; text: string; at: string; thread: number } }[];
-  to_pdm: BoardPostT[]; director: DirectorView;
+  to_pdm: BoardPostT[]; director: DirectorView; avatar_versions: Record<string, string>;
 };
 // 自律エージェント（AG-n）と、その提案（受け箱）
 export type AgentSchedule = {

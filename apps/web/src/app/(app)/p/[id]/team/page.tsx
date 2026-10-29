@@ -7,9 +7,10 @@ import { RunTeamButton } from "@/components/org/DirectorChat";
 
 export default async function TeamPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
-  const [team, tasks] = await Promise.all([
+  const [team, tasks, versions] = await Promise.all([
     agent<{ agents: TeamMember[] }>(`/products/${id}/team`),
     agent<TeamTask[]>(`/products/${id}/team/tasks`),
+    agent<Record<string, string>>("/avatars").catch(() => ({} as Record<string, string>)),
   ]);
   return (
     <>
@@ -21,7 +22,7 @@ export default async function TeamPage({ params }: { params: Promise<{ id: strin
         actions={<RunTeamButton pid={id} running={false} />}
       />
       <div className="space-y-6 px-8 py-6">
-        <OrgSettings pid={id} agents={team.agents} />
+        <OrgSettings pid={id} agents={team.agents} versions={versions} />
         <TaskBoard pid={id} tasks={tasks} agents={team.agents} />
       </div>
     </>

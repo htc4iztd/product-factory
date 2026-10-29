@@ -1,8 +1,9 @@
 "use client";
 import Link from "next/link";
 import { useState, useTransition } from "react";
-import { Compass, Play, Send } from "lucide-react";
+import { Play, Send } from "lucide-react";
 import type { BoardPostT, DirectorView } from "@/lib/agent";
+import { Avatar } from "@/components/rail/Avatar";
 import { runTeam, talkDirector } from "@/app/(app)/p/[id]/org-actions";
 
 const time = (t: string) => new Date(t).toLocaleString("ja-JP", { timeZone: "Asia/Tokyo", month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit" });
@@ -13,7 +14,7 @@ export const INTENT_TONE: Record<string, string> = {
 };
 
 // 司令塔との対話：PdM はいつでも話しかけられる。司令塔は毎日、議題を用意して待つ。決めたら PM に伝わる
-export function DirectorChat({ pid, v }: { pid: string; v: DirectorView }) {
+export function DirectorChat({ pid, v, versions = {} }: { pid: string; v: DirectorView; versions?: Record<string, string> }) {
   const [text, setText] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [pending, start] = useTransition();
@@ -24,7 +25,7 @@ export function DirectorChat({ pid, v }: { pid: string; v: DirectorView }) {
   return (
     <section className="card flex flex-col" aria-label="司令塔との対話">
       <div className="flex items-center gap-1.5 border-b border-zinc-100 px-4 py-2.5">
-        <Compass size={15} className="text-brand-600" /><h2 className="text-[14px] font-semibold">司令塔と話す</h2>
+        <Avatar k="director" v={versions.director} size={30} /><h2 className="text-[14px] font-semibold">司令塔と話す</h2>
         <span className="text-[11px] text-zinc-400">いつでも話しかけられます。決めたことは PM から各担当に伝わります</span>
       </div>
       {v.strategy?.strategy && (
@@ -36,7 +37,7 @@ export function DirectorChat({ pid, v }: { pid: string; v: DirectorView }) {
       )}
       <ol className="max-h-[360px] flex-1 space-y-2 overflow-y-auto px-4 py-3">
         {v.posts.length === 0 && <li className="text-[12px] text-zinc-400">今日はまだ話していません。司令塔は毎朝、今日決めたいことを用意します。</li>}
-        {v.posts.map((p) => <Bubble key={p.id} p={p} />)}
+        {v.posts.map((p) => <Bubble key={p.id} p={p} v={versions[p.sender]} />)}
       </ol>
       <div className="space-y-1.5 border-t border-zinc-100 p-3">
         <textarea className="input text-[13px]" rows={2} value={text} aria-label="司令塔への発言" placeholder="例：最初は共働き世帯に絞る。MVP は締め処理だけで決定"
@@ -51,10 +52,11 @@ export function DirectorChat({ pid, v }: { pid: string; v: DirectorView }) {
   );
 }
 
-function Bubble({ p }: { p: BoardPostT }) {
+function Bubble({ p, v }: { p: BoardPostT; v?: string }) {
   const me = p.sender === "pdm";
   return (
-    <li className={`flex ${me ? "justify-end" : ""}`}>
+    <li className={`flex items-end gap-2 ${me ? "justify-end" : ""}`}>
+      {!me && <Avatar k={p.sender} v={v} size={26} />}
       <div className={`max-w-[85%] rounded-xl px-3 py-2 text-[12px] ${me ? "bg-zinc-900 text-white" : p.intent === "decision" ? "border border-emerald-200 bg-emerald-50" : "bg-zinc-100 text-zinc-800"}`}>
         <div className={`mb-0.5 text-[10px] ${me ? "text-zinc-400" : "text-zinc-500"}`}>{p.sender_name} → {p.recipient_name}・{INTENT_LABEL[p.intent]}・{time(p.created_at)}</div>
         <div className="whitespace-pre-wrap">{p.text}</div>

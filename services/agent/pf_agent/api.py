@@ -9,7 +9,22 @@ from fastapi.responses import JSONResponse, Response
 from pydantic import BaseModel, Field
 from sqlalchemy import select
 
-from . import agents, autodev, canvasjob, collab, ghsync, imports, jobs, llm, llmconf, ontology, reports, research, team
+from . import (
+    agents,
+    autodev,
+    avatars,
+    canvasjob,
+    collab,
+    ghsync,
+    imports,
+    jobs,
+    llm,
+    llmconf,
+    ontology,
+    reports,
+    research,
+    team,
+)
 from .api_collab import router as collab_router
 from .api_jobs import router as jobs_router
 from .api_knowledge import router as knowledge_router
@@ -72,6 +87,11 @@ async def _team_error(_, exc: team.TeamError):
     return JSONResponse(status_code=exc.status, content={"detail": exc.message})
 
 
+@app.exception_handler(avatars.AvatarError)
+async def _avatar_error(_, exc: avatars.AvatarError):
+    return JSONResponse(status_code=exc.status, content={"detail": exc.message})
+
+
 @app.exception_handler(jobs.JobError)
 async def _job_error(_, exc: jobs.JobError):
     return JSONResponse(status_code=exc.status, content={"detail": exc.message})
@@ -92,6 +112,30 @@ def dashboard(product_id: str, c: Caller = Depends(caller)):
     from .api_collab import _p
     p = _p(c, product_id)
     return {**engine.overview(p), **team.dashboard(p)}
+
+
+class AvatarBody(BaseModel):
+    keys: list[str] = Field(default_factory=list, max_length=20)
+    redo: bool = False
+
+
+@app.get("/avatars")
+def avatar_versions(c: Caller = Depends(caller)):
+    return avatars.versions(c.tenant)
+
+
+@app.get("/avatars/{key}")
+def avatar(key: str, c: Caller = Depends(caller)):
+    data, mime, ver = avatars.get(c.tenant, key)
+    return Response(data, media_type=mime, headers={"x-avatar-version": ver})
+
+
+@app.post("/avatars/generate")
+def draw_avatars(body: AvatarBody, c: Caller = Depends(caller)):
+    from .authz import BASE_ORDER
+    if BASE_ORDER[c.base_role] < BASE_ORDER["MEMBER"]:
+        raise HTTPException(403, "閲覧のみの権限では描けません")
+    return avatars.start(c.tenant, c.user, body.keys, body.redo)
 
 
 @app.post("/internal/scheduler/tick")

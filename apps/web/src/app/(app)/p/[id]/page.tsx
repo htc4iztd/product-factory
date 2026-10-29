@@ -57,7 +57,7 @@ export default async function ProductPage({ params }: { params: Promise<{ id: st
         </section>
         <TeamGraph d={d} pid={id} />
         <div className="grid gap-6 xl:grid-cols-2">
-          <DirectorChat pid={id} v={d.director} />
+          <DirectorChat pid={id} v={d.director} versions={d.avatar_versions} />
           <div className="space-y-6">
             <PdmInbox pid={id} posts={d.to_pdm} findings={d.findings_open} />
             {(waiting.length > 0 || recheck.length > 0) && (

@@ -27,3 +27,13 @@ export async function editTeamAgent(pid: string, key: string, body: { mission?: 
 export async function saveTeamTask(pid: string, number: number | null, body: { agent?: string; title?: string; status?: string; owner?: string }) {
   return number ? call(pid, `/team/tasks/${number}`, "PUT", body) : call(pid, "/team/tasks", "POST", body);
 }
+
+export async function drawAvatars(keys: string[], redo: boolean): Promise<R> {
+  try {
+    await agent("/avatars/generate", { method: "POST", body: { keys, redo } });
+    return {};
+  } catch (e) {
+    if (e instanceof AgentError) return { error: e.message };
+    throw e;
+  }
+}

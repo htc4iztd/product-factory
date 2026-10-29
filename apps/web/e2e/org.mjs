@@ -72,10 +72,26 @@ await page.getByLabel("対話セッション").selectOption({ label: /担当エ�
 });
 await page.getByText(/方針を教えてください/).first().waitFor();
 await shot("o5-stage-agent");
-// 組織とタスク
+// 組織とタスク・顔を描く
 await page.goto(`${BASE}/p/${pid}/team`);
 await page.getByText("エージェントの組織").first().waitFor();
 await page.getByText(/を埋める/).first().waitFor();
+await btn(/顔を描/).click();
+await page.getByText(/顔を描いています/).waitFor();
+for (let i = 0; i < 30 && !(await page.getByText("顔 16/16").isVisible()); i++) { await page.waitForTimeout(1000); await page.reload(); }
 await shot("o6-team", true);
+// レール（人の並び）と ⌘K：行き先を探す → 担当に話しかける
+await page.getByRole("navigation", { name: "エージェント" }).getByRole("link", { name: /⑨ アプリケーション設計/ }).click();
+await page.waitForURL(/\/s\/s09$/);
+await page.keyboard.press("Control+k");
+await page.getByLabel("話しかける・移動する").last().fill("掲示板");
+await page.keyboard.press("Enter");
+await page.waitForURL(/\/board$/);
+await page.keyboard.press("Control+k");
+await page.getByLabel("話しかける・移動する").last().fill("@⑨ 状態遷移に取消を足して");
+await page.getByRole("option", { name: /⑨アプリケーション設計担当に話す/ }).click();
+await page.getByText(/送りました/).waitFor();
+await shot("o7-command");
+await page.keyboard.press("Escape");
 console.log(`ok product=${pid}`);
 await browser.close();

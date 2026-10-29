@@ -185,12 +185,38 @@ def overview(product: Product) -> dict:
                 .group_by(BoardPost.recipient)
             ).all()
         )
+        # いま動いている担当（動いている組織のジョブで running の工程）と、PdM の返事を待っている担当
+        working: set[str] = set()
+        for (tasks_,) in s.execute(
+            select(JobRun.tasks).where(
+                JobRun.product_id == product.id, JobRun.kind == "team", JobRun.status.in_(("queued", "running"))
+            )
+        ).all():
+            working |= {t["id"].split("#")[0] for t in tasks_ or [] if t.get("status") == "running"}
+        waiting = set(
+            s.execute(
+                select(BoardPost.sender).where(
+                    BoardPost.product_id == product.id, BoardPost.recipient == "pdm", BoardPost.read.is_(False)
+                )
+            ).scalars()
+        )
         order = {k: i for i, k in enumerate([*ROLES, *(x.id for x in STAGES)])}
         agents.sort(key=lambda a: order.get(a.key, 99))
-        return {
-            "agents": [agent_dict(a, opens.get(a.key, 0), unread.get(a.key, 0)) for a in agents],
-            "pdm_unread": unread.get("pdm", 0),
-        }
+        out = []
+        for a in agents:
+            d = agent_dict(a, opens.get(a.key, 0), unread.get(a.key, 0))
+            health = (a.report or {}).get("health")
+            d["state"] = (
+                "working"
+                if a.key in working
+                else "waiting"
+                if a.key in waiting
+                else "stuck"
+                if health == "red"
+                else "idle"
+            )
+            out.append(d)
+        return {"agents": out, "pdm_unread": unread.get("pdm", 0)}
 
 
 def edit_agent(product: Product, key: str, mission: str | None, cron_expr: str | None, enabled: bool | None) -> dict:
@@ -1031,6 +1057,7 @@ def stage_context(product_id: str, stage_id: str) -> str:
 
 def dashboard(product: Product) -> dict:
     """ダッシュボード：エージェントの報告・各案（PP-n）がどの工程まであるか・最近のやり取り（誰から誰へ）・PdM 宛て。"""
+    from .avatars import versions as avatar_versions
     from .db import AgentFinding, Variant
 
     ensure(product)
@@ -1086,6 +1113,7 @@ def dashboard(product: Product) -> dict:
         "findings_open": findings,
         "running": running is not None,
         "director": director_view(product),
+        "avatar_versions": avatar_versions(product.tenant_id),
     }
 
 
@@ -1103,7 +1131,10 @@ def member(product: Product, key: str) -> dict | None:
                 AgentTask.product_id == product.id, AgentTask.agent == key, AgentTask.status != "done"
             )
         ).scalar()
-        return agent_dict(a, n)
+        d = agent_dict(a, n)
+    from .avatars import versions  # 接続を1本ずつ使う（上の session を閉じてから）
+
+    return {**d, "avatar_v": versions(product.tenant_id).get(key, "0")}
 
 
 def mark_read_from(product_id: str, key: str) -> None:

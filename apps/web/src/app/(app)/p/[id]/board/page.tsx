@@ -10,9 +10,10 @@ export default async function BoardPage({ params, searchParams }: {
   const { id } = await params;
   const sp = await searchParams;
   const qs = new URLSearchParams(Object.entries(sp).filter(([, v]) => v) as [string, string][]);
-  const [b, team] = await Promise.all([
+  const [b, team, versions] = await Promise.all([
     agent<{ threads: BoardThread[] }>(`/products/${id}/board${qs.size ? `?${qs}` : ""}`),
     agent<{ agents: TeamMember[] }>(`/products/${id}/team`),
+    agent<Record<string, string>>("/avatars").catch(() => ({} as Record<string, string>)),
   ]);
   return (
     <>
@@ -26,7 +27,7 @@ export default async function BoardPage({ params, searchParams }: {
         <BoardFilter pid={id} agents={team.agents} agent={sp.agent} intent={sp.intent} q={sp.q} />
         {sp.thread && <Link href={`/p/${id}/board`} className="text-[12px] text-brand-700 hover:underline">← すべてのスレッド</Link>}
         <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_380px]">
-          <Threads pid={id} threads={b.threads} agents={team.agents} />
+          <Threads pid={id} threads={b.threads} agents={team.agents} versions={versions} />
           <div className="space-y-3">
             <Composer pid={id} agents={team.agents} />
           </div>

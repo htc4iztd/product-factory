@@ -3,14 +3,15 @@ import Link from "next/link";
 import { useState, useTransition } from "react";
 import { Compass, Play, Plus, Save, Users } from "lucide-react";
 import type { TeamMember, TeamTask } from "@/lib/agent";
-import { editTeamAgent, runTeam, saveTeamTask } from "@/app/(app)/p/[id]/org-actions";
+import { drawAvatars, editTeamAgent, runTeam, saveTeamTask } from "@/app/(app)/p/[id]/org-actions";
+import { Avatar } from "@/components/rail/Avatar";
 
 const HEALTH: Record<string, string> = { green: "bg-emerald-500", yellow: "bg-amber-400", red: "bg-rose-500" };
 const TASK: Record<TeamTask["status"], string> = { todo: "未着手", doing: "進行中", blocked: "止まっている", done: "完了" };
 const when = (t: string | null) => (t ? new Date(t).toLocaleString("ja-JP", { timeZone: "Asia/Tokyo", month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit" }) : "—");
 
 // エージェントの組織：使命・動く時刻（cron）・止める／動かす。タスクの一覧
-function MemberRow({ pid, m }: { pid: string; m: TeamMember }) {
+function MemberRow({ pid, m, v }: { pid: string; m: TeamMember; v?: string }) {
   const [mission, setMission] = useState(m.mission);
   const [cronExpr, setCron] = useState(m.cron);
   const [open, setOpen] = useState(false);
@@ -21,6 +22,7 @@ function MemberRow({ pid, m }: { pid: string; m: TeamMember }) {
   return (
     <div className={`border-b border-zinc-100 px-4 py-2.5 last:border-0 ${m.enabled ? "" : "opacity-60"}`}>
       <div className="flex flex-wrap items-center gap-2 text-[13px]">
+        <Avatar k={m.key} v={v} size={36} state={m.state ?? "idle"} />
         {Icon && <Icon size={14} className="text-brand-600" />}
         <span className="font-semibold">{m.name}</span>
         <span className={`h-2 w-2 rounded-full ${m.report ? HEALTH[m.report.health] : "bg-zinc-200"}`} />
@@ -47,14 +49,24 @@ function MemberRow({ pid, m }: { pid: string; m: TeamMember }) {
   );
 }
 
-export function OrgSettings({ pid, agents }: { pid: string; agents: TeamMember[] }) {
+export function OrgSettings({ pid, agents, versions }: { pid: string; agents: TeamMember[]; versions: Record<string, string> }) {
+  const [pending, start] = useTransition();
+  const [msg, setMsg] = useState<string | null>(null);
+  const drawn = Object.keys(versions).length;
   return (
     <section className="card">
       <div className="border-b border-zinc-100 px-4 py-2.5">
-        <h2 className="text-[14px] font-semibold">エージェントの組織</h2>
+        <div className="flex items-center gap-2">
+          <h2 className="text-[14px] font-semibold">エージェントの組織</h2>
+          <span className="ml-auto text-[11px] text-zinc-500">顔 {drawn}/{agents.length}</span>
+          <button className="btn-secondary btn-sm" disabled={pending} onClick={() => start(async () => { const r = await drawAvatars(drawn < agents.length ? [] : agents.map((a) => a.key), drawn >= agents.length); setMsg(r.error ?? "顔を描いています（ジョブ）。数分で入れ替わります"); })}>
+            {drawn < agents.length ? "顔を描く" : "顔を描き直す"}
+          </button>
+        </div>
+        {msg && <p className="mt-1 text-[11px] text-zinc-500">{msg}</p>}
         <p className="text-[11px] text-zinc-500">司令塔は PdM と戦略を決め、PM に伝える。PM は工程を横ぐしで見て担当に依頼する。各工程の担当は自分の工程を作る。進めていない工程の担当は、依頼がなければ動きません。</p>
       </div>
-      {agents.map((m) => <MemberRow key={m.key} pid={pid} m={m} />)}
+      {agents.map((m) => <MemberRow key={m.key} pid={pid} m={m} v={versions[m.key]} />)}
     </section>
   );
 }

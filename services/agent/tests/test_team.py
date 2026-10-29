@@ -114,3 +114,16 @@ def test_team_schedule_and_settings(client):
     assert len(started) == 1 and team.tick() == []  # 同じプロダクトは1つのジョブにまとめ、二重に動かさない
     job = wait_job(c, started[0])
     assert [x["id"] for x in job["tasks"]][:2] == ["director", "pm"] and job["params"]["reason"] == "予定"
+
+
+def test_avatars(client):
+    c = client
+    r = c.get("/avatars/director", headers=H)
+    assert r.headers["content-type"].startswith("image/svg") and r.headers["x-avatar-version"] == "0"
+    assert c.get("/avatars/x99", headers=H).status_code == 404
+    assert c.post("/avatars/generate", headers=VIEWER, json={}).status_code == 403
+    job = c.post("/avatars/generate", headers=H, json={"keys": ["director", "pm"]}).json()
+    assert wait_job(c, job["id"])["status"] == "done"
+    assert set(c.get("/avatars", headers=H).json()) == {"director", "pm"}
+    assert c.get("/avatars/pm", headers=H).headers["x-avatar-version"] != "0"
+    assert c.post("/avatars/generate", headers=H, json={"keys": ["pm"]}).status_code == 409

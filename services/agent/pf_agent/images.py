@@ -175,7 +175,8 @@ def _stub_svg(name: str, kind: str, facts: list[dict]) -> bytes:
 
 
 def generate(
-    conn: Conn, kind: str, prompt: str, name: str, facts: list[dict], base: tuple[bytes, str] | None = None
+    conn: Conn, kind: str, prompt: str, name: str, facts: list[dict], base: tuple[bytes, str] | None = None,
+    aspect: str = "16:9",
 ) -> tuple[bytes, str]:
     """画像を描く。base（前に描いた画像）を渡すと、その絵を元に直させる。"""
     if model_name(conn) == "stub":
@@ -187,7 +188,7 @@ def generate(
         model=model_name(conn),
         contents=[types.Part.from_bytes(data=base[0], mime_type=base[1]), prompt] if base else prompt,
         config=types.GenerateContentConfig(
-            response_modalities=["IMAGE"], image_config=types.ImageConfig(aspect_ratio="16:9")
+            response_modalities=["IMAGE"], image_config=types.ImageConfig(aspect_ratio=aspect)
         ),
     )
     llm._record_gemini(model_name(conn), resp)

@@ -7,6 +7,7 @@ import {
 } from "@xyflow/react";
 import { Compass, GitBranch, ListChecks, Mail, Network, Users } from "lucide-react";
 import type { Dashboard, StageSummary, TeamMember } from "@/lib/agent";
+import { Avatar } from "@/components/rail/Avatar";
 
 // ダッシュボードのグラフ。2つの見方：
 // - 組織と工程：司令塔・PM・各工程の担当。工程のつながり（灰色）と、最近のエージェント同士のやり取り（色つき・動く線）
@@ -21,9 +22,11 @@ const STATUS: Record<string, string> = {
 };
 const INTENT: Record<string, string> = { report: "報告", request: "依頼", answer: "回答", decision: "決定", directive: "指示", question: "質問" };
 const PHASE_ORDER = ["P1", "P2", "P3", "P4", "P5"];
+// 工程グループの色（事業・要求設計・構築・リリース）。レールと同じ
+const PHASE_COLOR: Record<string, string> = { P1: "#f59e0b", P2: "#f59e0b", P3: "#6366f1", P4: "#10b981", P5: "#f43f5e" };
 const COL = 268, ROW = 140;
 
-type AData = { m: TeamMember; stage?: StageSummary; variants: { key: string; status: string; number: number }[]; pid: string; active: boolean };
+type AData = { m: TeamMember; stage?: StageSummary; variants: { key: string; status: string; number: number }[]; pid: string; active: boolean; v?: string };
 
 function Hd() {
   const c = "!h-1.5 !w-1.5 !min-h-0 !min-w-0 !border-0 !bg-transparent";
@@ -34,15 +37,17 @@ function Hd() {
 }
 
 function AgentNode({ data }: NodeProps<Node<AData>>) {
-  const { m, stage, variants, active } = data;
+  const { m, stage, variants, active, v } = data;
   const rep = m.report;
   const lead = m.role !== "stage";
   const off = stage && !stage.enabled;
   return (
-    <div className={`w-60 rounded-xl border bg-white p-2.5 text-[11px] shadow-card transition ${active ? "border-brand-500 ring-4 ring-brand-100" : lead ? "border-zinc-800" : "border-zinc-200"} ${off ? "opacity-50" : ""}`}>
+    <div style={stage ? { borderTop: `3px solid ${PHASE_COLOR[stage.phase] ?? "#a1a1aa"}` } : undefined}
+      className={`w-60 rounded-xl border bg-white p-2.5 text-[11px] shadow-card transition ${active ? "border-brand-500 ring-4 ring-brand-100" : lead ? "border-zinc-800 bg-gradient-to-br from-white to-brand-50" : "border-zinc-200"} ${off ? "opacity-50" : ""}`}>
       <Hd />
       <div className="flex items-center gap-1.5">
-        {m.role === "director" ? <Compass size={13} className="text-brand-600" /> : m.role === "pm" ? <Users size={13} className="text-brand-600" /> : null}
+        <Avatar k={m.key} v={v} size={lead ? 34 : 28} state={off ? "off" : m.state ?? "idle"} />
+        {m.role === "director" ? <Compass size={12} className="text-brand-600" /> : m.role === "pm" ? <Users size={12} className="text-brand-600" /> : null}
         <span className="truncate text-[12px] font-semibold text-zinc-900">{m.name}</span>
         <span className={`ml-auto h-2 w-2 shrink-0 rounded-full ${rep ? HEALTH[rep.health]?.dot ?? "bg-zinc-300" : "bg-zinc-200"}`} title={rep ? HEALTH[rep.health]?.label : "まだ報告がない"} />
       </div>
@@ -98,7 +103,7 @@ function OrgGraph({ d, pid, sel, onSelect }: { d: Dashboard; pid: string; sel: s
   const vOf = (sid: string) => d.variants.filter((v) => v.stages.includes(sid)).map((v) => ({ key: v.key, status: v.status, number: v.number }));
   const nodes: Node<AData>[] = d.agents.filter((m) => pos[m.key]).map((m) => ({
     id: m.key, type: "agent", position: pos[m.key], draggable: false,
-    data: { m, stage: stages[m.key], variants: vOf(m.key), pid, active: sel === m.key },
+    data: { m, stage: stages[m.key], variants: vOf(m.key), pid, active: sel === m.key, v: d.avatar_versions?.[m.key] },
   }));
   const deps: Edge[] = [];
   for (const p of PHASE_ORDER) for (const sid of phases[p] ?? []) {

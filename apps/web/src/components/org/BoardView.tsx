@@ -6,6 +6,7 @@ import { CornerDownRight, Send } from "lucide-react";
 import type { BoardThread, TeamMember } from "@/lib/agent";
 import { postBoard } from "@/app/(app)/p/[id]/org-actions";
 import { INTENT_LABEL, INTENT_TONE } from "./DirectorChat";
+import { Avatar } from "@/components/rail/Avatar";
 
 const time = (t: string) => new Date(t).toLocaleString("ja-JP", { timeZone: "Asia/Tokyo", month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit" });
 
@@ -67,7 +68,7 @@ export function Composer({ pid, agents, thread, defaultTo }: { pid: string; agen
   );
 }
 
-export function Threads({ pid, threads, agents }: { pid: string; threads: BoardThread[]; agents: TeamMember[] }) {
+export function Threads({ pid, threads, agents, versions = {} }: { pid: string; threads: BoardThread[]; agents: TeamMember[]; versions?: Record<string, string> }) {
   if (!threads.length) return <div className="card p-8 text-center text-[13px] text-zinc-400">まだ書き込みがありません</div>;
   return (
     <div className="space-y-3">
@@ -84,6 +85,9 @@ export function Threads({ pid, threads, agents }: { pid: string; threads: BoardT
               {t.posts.map((p, i) => (
                 <li key={p.id} className={`flex gap-2 text-[12px] ${i ? "pl-4" : ""}`}>
                   {i > 0 && <CornerDownRight size={12} className="mt-1 shrink-0 text-zinc-300" />}
+                  {p.sender === "pdm"
+                    ? <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-zinc-900 text-[10px] font-bold text-white">PdM</span>
+                    : <Avatar k={p.sender} v={versions[p.sender]} size={28} />}
                   <div className="min-w-0 flex-1">
                     <div className="flex flex-wrap items-center gap-1.5 text-[11px]">
                       <span className={`rounded px-1 font-medium ${INTENT_TONE[p.intent]}`}>{INTENT_LABEL[p.intent]}</span>

@@ -630,6 +630,20 @@ class BoardPost(Base):
     created_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), default=_now, index=True)
 
 
+class AgentAvatar(Base):
+    """エージェントの顔（テナントで共通の配役）。画像生成AIで同じ画風にそろえて描く。"""
+    __tablename__ = "agent_avatars"
+    __table_args__ = (UniqueConstraint("tenant_id", "key"),)
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    tenant_id: Mapped[str] = mapped_column(String(64), index=True)
+    key: Mapped[str] = mapped_column(String(10))
+    mime: Mapped[str] = mapped_column(String(40))
+    data: Mapped[bytes] = mapped_column(LargeBinary)
+    prompt: Mapped[str] = mapped_column(Text, default="")
+    model: Mapped[str] = mapped_column(String(80), default="")
+    created_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), default=_now)
+
+
 class TenantSecret(Base):
     """テナントの秘密情報（GitHub のトークンなど）。値は暗号化して置く。"""
     __tablename__ = "tenant_secrets"
