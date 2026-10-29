@@ -3,7 +3,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import {
   Activity, BookText, Bot, Boxes, ChevronLeft, Code2, Command, Diamond, FileInput, FileText, ImageIcon, KanbanSquare,
-  LayoutDashboard, MessagesSquare, Network, Presentation, ScrollText, Settings2, Video,
+  LayoutDashboard, Megaphone, MessagesSquare, Network, Presentation, ScrollText, Settings2, Video,
 } from "lucide-react";
 import type { Phase, Product, StageSummary, TeamMember } from "@/lib/agent";
 import { GROUPS } from "@/lib/groups";
@@ -23,7 +23,7 @@ export function AgentRail({ pid, product, agents, versions, stages, phases, foot
   const ph = Object.fromEntries(phases.map((p) => [p.id, p]));
   const open = () => window.dispatchEvent(new Event("pf:command"));
   const tools: [string, string, typeof Bot][] = [
-    [`/p/${pid}`, "ダッシュボード", LayoutDashboard], [`/p/${pid}/board`, "掲示板", MessagesSquare],
+    [`/p/${pid}`, "ダッシュボード", LayoutDashboard], [`/p/${pid}/board`, "掲示板", Megaphone],
     [`/p/${pid}/team`, "エージェントの組織", Network], [`/p/${pid}/canvas`, "プロダクト・キャンバス", ImageIcon],
     [`/p/${pid}/import`, "資料の取り込み", FileInput], [`/p/${pid}/reports`, "報告資料", Presentation],
     [`/p/${pid}/agents`, "定期の仕事", Bot], [`/p/${pid}/preproducts`, "プリプロダクト", Boxes],
@@ -86,17 +86,21 @@ export function AgentRail({ pid, product, agents, versions, stages, phases, foot
         ))}
         <div>
           <div className="section-title mb-1 px-1.5">道具</div>
-          <div className="grid grid-cols-6 gap-0.5 px-1">
+          <div className="grid grid-cols-2 gap-0.5">
             {tools.map(([href, label, Icon]) => (
-              <Link key={href} href={href} aria-label={label} title={label}
-                className={`flex h-8 items-center justify-center rounded-md transition ${on(href) ? "bg-white text-brand-700 shadow-card ring-1 ring-zinc-200" : "text-zinc-500 hover:bg-white hover:text-zinc-900"}`}>
-                <Icon size={15} />
+              <Link key={href} href={href} title={label}
+                className={`flex h-8 min-w-0 items-center gap-1.5 rounded-md px-1.5 text-[12px] transition ${on(href) ? "bg-white font-medium text-zinc-900 shadow-card ring-1 ring-zinc-200" : "text-zinc-600 hover:bg-white hover:text-zinc-900"}`}>
+                <Icon size={14} className="shrink-0 text-zinc-500" /><span className="truncate">{label}</span>
               </Link>
             ))}
+          </div>
+          <div className="section-title mb-1 mt-3 px-1.5">振り返り</div>
+          <div className="space-y-0.5">
             {phases.filter((p) => p.gate).map((p) => (
-              <Link key={p.id} href={`/p/${pid}/g/${p.id}`} aria-label={`${p.gate} ${p.gate_question}`} title={`振り返り ${p.gate} ${p.gate_question}`}
-                className={`flex h-8 items-center justify-center rounded-md text-[10px] font-semibold transition ${on(`/p/${pid}/g/${p.id}`) ? "bg-white ring-1 ring-zinc-200" : "hover:bg-white"} ${p.review ? "text-emerald-600" : "text-zinc-400"}`}>
-                <Diamond size={10} className="mr-0.5" />{p.gate}
+              <Link key={p.id} href={`/p/${pid}/g/${p.id}`} title={`振り返り ${p.gate} ${p.gate_question}`}
+                className={`flex h-8 items-center gap-1.5 rounded-md px-1.5 text-[12px] transition ${on(`/p/${pid}/g/${p.id}`) ? "bg-white font-medium shadow-card ring-1 ring-zinc-200" : "text-zinc-600 hover:bg-white"}`}>
+                <Diamond size={12} className={`shrink-0 ${p.review ? "text-emerald-500" : "text-zinc-400"}`} />
+                <span className="truncate">{p.gate} {p.gate_question}</span>
               </Link>
             ))}
           </div>

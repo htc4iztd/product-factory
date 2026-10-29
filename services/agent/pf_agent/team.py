@@ -584,6 +584,16 @@ def _material(product: Product, key: str, rs: dict) -> str:
                     + (f"・障害：{'／'.join(rep.get('blockers') or [])}" if rep.get("blockers") else "")
                 )
         parts.append("## 各工程の担当の報告\n" + "\n".join(rows))
+    from .imports import docs_context
+
+    docs = docs_context(product.id, key)
+    if docs:
+        parts.append(
+            "## 取り込んだ資料"
+            + ("（自分の工程に関係する箇所）" if key in STAGE_BY_ID else "（一覧と割り当て先）")
+            + "\n"
+            + docs
+        )
     parts.append(
         "## 自分の未完了タスク\n"
         + ("\n".join(f"- TS-{t['number']}［{t['status']}］{t['title']}" for t in my_tasks) or "（なし）")

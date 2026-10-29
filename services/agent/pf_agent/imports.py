@@ -32,6 +32,7 @@ jobs.JOBS["import"] = jobs.JobDef(
 )
 
 MODES = ("propose", "fill")
+ACTION_JA = {"filled": "入れた", "proposed": "案を出した", "dropped": "外した"}
 DOC_CHARS = 120_000   # 項目を抜き出すときに AI に渡す本文の長さ
 
 
@@ -260,6 +261,13 @@ def run(job_id: str) -> None:
             d = s.get(ImportDoc, doc_id)
             d.status, d.result = "done", result
             s.commit()
+        # 割り当てた工程の担当に、掲示板で知らせる（担当は次に動くとき資料を読む）
+        from . import team
+        for sid in dict.fromkeys(r["stage"] for r in result):
+            got = "、".join(f"{r['label']}（{ACTION_JA[r['action']]}）" for r in result if r["stage"] == sid)
+            text = (f"資料{doc_id}「{filename}」を取り込みました。この工程には：{got}。"
+                    "資料の該当箇所は、次に動くときに読めます。")
+            team.post(product, "pdm", sid, "report", text, author=user, job_id=job_id)
     except Exception:
         with session() as s:
             s.get(ImportDoc, doc_id).status = "failed"
@@ -268,3 +276,55 @@ def run(job_id: str) -> None:
 
 
 jobs.HANDLERS["import"] = run
+
+
+# ---------------- エージェントが読む ----------------
+def _sections(text: str) -> list[tuple[str, str]]:
+    """「## 見出し」ごとに分ける（シート・スライド・章）。"""
+    out, head, buf = [], "", []
+    for line in text.splitlines():
+        if line.startswith("## "):
+            if buf:
+                out.append((head, "\n".join(buf)))
+            head, buf = line[3:].strip(), []
+        else:
+            buf.append(line)
+    if buf:
+        out.append((head, "\n".join(buf)))
+    return out
+
+
+def docs_context(product_id: str, key: str, limit: int = 16000) -> str:
+    """エージェントが読む取り込んだ資料。工程の担当は、自分の工程に割り当てられた資料のうち、
+    項目名・工程名がよく出てくる章を多い順に。司令塔・PM は資料の一覧と割り当て先。"""
+    with session() as s:
+        docs = list(s.execute(select(ImportDoc).where(ImportDoc.product_id == product_id, ImportDoc.status == "done")
+                              .order_by(ImportDoc.id.desc()).limit(20)).scalars())
+        rows = [(d.id, d.filename, d.text or "", d.result or [], d.created_at) for d in docs]
+    if not rows:
+        return ""
+    if key not in STAGE_BY_ID:
+        lines = []
+        for i, name, _, result, at in rows:
+            stages = sorted({r["stage"] for r in result})
+            where = "、".join(f"{STAGE_BY_ID[x].no}{STAGE_BY_ID[x].name}" for x in stages if x in STAGE_BY_ID)
+            lines.append(f"- 資料{i}「{name}」（{at:%m/%d}）→ {where or '割り当てなし'}")
+        return "\n".join(lines)
+    st, fw = STAGE_BY_ID[key], fx.FRAMEWORK_BY_STAGE[key]
+    words = [st.name, *(f.label for f in fw.fields)]
+    mine = [r for r in rows if any(x["stage"] == key for x in r[3])]
+    out, used = [], 0
+    for i, name, text, result, _ in mine[:3]:
+        got = "、".join(f"{x['label']}（{ACTION_JA[x['action']]}）" for x in result if x["stage"] == key)
+        secs = sorted(_sections(text), key=lambda hs: -sum((hs[0] + hs[1]).count(w) for w in words))
+        part = f"### 資料{i}「{name}」（この工程に：{got}）\n"
+        for h, body in secs:
+            chunk = f"#### {h}\n{body.strip()}\n"
+            if used + len(part) + len(chunk) > limit:
+                break
+            part += chunk
+        out.append(part)
+        used += len(part)
+        if used >= limit:
+            break
+    return "\n".join(out)

@@ -45,6 +45,10 @@ def converse(ctx: Context, node_input: Any):
     # PdM が工程の画面で担当と話したら、担当からの PdM 宛ては読んだことにする
     team.mark_read_from(product_id, stage_id)
     me = team.stage_context(product_id, stage_id)
+    from .imports import docs_context
+    docs = docs_context(product_id, stage_id)
+    if docs:
+        c["upstream"]["取り込んだ資料（この工程に関係する箇所）"] = docs
     if me:
         c["upstream"]["担当エージェントとしての前提（使命・戦略・タスク・掲示板）"] = me
     if ds:

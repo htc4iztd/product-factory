@@ -134,3 +134,25 @@ def test_import_rejects_bad_input(client):
     r = c.post(f"/products/{pid}/imports", headers=H,
                json={"filename": "a.md", "content_b64": base64.b64encode(b"x").decode(), "stages": ["s99"]})
     assert r.status_code == 422
+
+
+def test_agents_read_imported_docs(client):
+    from pf_agent import imports, repo, team
+    c = client
+    pid = c.post("/products", headers=H, json={"name": "取込", "idea": "申込の受付"}).json()["id"]
+    body = {"filename": "仕様.xlsx", "content_b64": base64.b64encode(xlsx()).decode(), "mode": "propose"}
+    d = wait(c, pid, c.post(f"/products/{pid}/imports", headers=H, json=body).json()["id"])
+    # 割り当てた工程の担当に掲示板で知らせる
+    th = c.get(f"/products/{pid}/board?agent=s09", headers=H).json()["threads"]
+    assert any(p["sender"] == "pdm" and p["intent"] == "report" and "仕様.xlsx" in p["text"]
+               for t in th for p in t["posts"])
+    # 担当は自分の工程に関係する章を読み、司令塔・PM は一覧と割り当て先を読む
+    s09 = imports.docs_context(pid, "s09")
+    assert f"資料{d['id']}「仕様.xlsx」" in s09 and "受付はAPIで行う" in s09 and "設計方針（案を出した）" in s09
+    assert imports.docs_context(pid, "s01") == ""
+    assert "→ ⑨アプリケーション設計" in imports.docs_context(pid, "pm")
+    from pf_agent.db import Product, session
+    with session() as s:
+        p = s.get(Product, pid)
+        s.expunge(p)
+    assert "## 取り込んだ資料" in team._material(p, "s09", repo.runs(pid))
