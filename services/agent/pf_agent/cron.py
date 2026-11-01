@@ -94,6 +94,9 @@ def describe(expr: str) -> str:
     step = re.fullmatch(r"\*/(\d+)", m)
     if step and h == d == mo == w == "*":
         return f"{int(step.group(1))}分ごと"
+    off = re.fullmatch(r"(\d+)-59/(\d+)", m)
+    if off and h == d == mo == w == "*" and int(off.group(1)) < int(off.group(2)):
+        return f"{int(off.group(2))}分ごと（{int(off.group(1))}分から）"
     if m == h == d == mo == w == "*":
         return "毎分"
     hstep = re.fullmatch(r"\*/(\d+)", h)

@@ -93,7 +93,7 @@ def test_pm_sync_every_10_minutes(env):
     c, p = env
     team.ensure(p)
     v = c.get(f"/products/{p.id}/schedule", headers=H).json()
-    assert next(a for a in v["agents"] if a["key"] == "pm_sync")["label"] == "10分ごと"
+    assert next(a for a in v["agents"] if a["key"] == "pm_sync")["label"] == "10分ごと（5分から）"
     # 変化がある（事業 PM がリスクを記録した）→ PM が他の PM に確認を出し、受けた PM はすぐ動いて答える
     # （起こされた PM は定時の状況確認は出さない）
     from pf_agent import pms

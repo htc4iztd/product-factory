@@ -344,7 +344,11 @@ def _is_claude(conn: Conn, model: str) -> bool:
 
 # 1回の呼び出しの上限（応答が止まっても、ジョブが固まらないように）。検索つきの長い調べものも収まる長さ
 TIMEOUT_S = 600
-_HTTP = {"timeout": TIMEOUT_S * 1000, "retry_options": {"attempts": 3}}
+# 利用上限（429 Resource exhausted）は1分あたりの上限が多いので、上限が戻るまで待ってやり直す
+# （4秒から倍々・最大60秒・計7回で、最大およそ3分待つ）。それでもだめならジョブの失敗になる
+_HTTP = {"timeout": TIMEOUT_S * 1000,
+         "retry_options": {"attempts": 7, "initial_delay": 4.0, "max_delay": 60.0, "exp_base": 2.0}}
+CLAUDE_RETRIES = 6  # Anthropic の SDK は retry-after を読んで待つ
 
 
 def _genai(conn: Conn):
@@ -364,10 +368,10 @@ def _anthropic(conn: Conn):
         if not conn.project:
             raise LLMError("Vertex AI のプロジェクトが決まっていません")
         return anthropic.AnthropicVertex(project_id=conn.project, region=conn.location or "global",
-                                         timeout=TIMEOUT_S, max_retries=2)
+                                         timeout=TIMEOUT_S, max_retries=CLAUDE_RETRIES)
     if not conn.api_key:
         raise LLMError("Anthropic API のキーがありません")
-    return anthropic.Anthropic(api_key=conn.api_key, timeout=TIMEOUT_S, max_retries=2)
+    return anthropic.Anthropic(api_key=conn.api_key, timeout=TIMEOUT_S, max_retries=CLAUDE_RETRIES)
 
 
 Images = list[tuple[bytes, str]]   # 添えた画像（中身, MIME）

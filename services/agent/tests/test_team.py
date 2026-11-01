@@ -222,7 +222,7 @@ def test_schedule_view_bulk_preview_and_overview(client):
     v = c.get(f"/products/{pid}/schedule", headers=H).json()
     by = {a["key"]: a for a in v["agents"]}
     assert len(v["agents"]) == 19 and v["hours"] == 24
-    assert by["pm_sync"]["label"] == "10分ごと" and by["pm_sync"]["name"] == "PM 同士の連絡"
+    assert by["pm_sync"]["label"] == "10分ごと（5分から）" and by["pm_sync"]["name"] == "PM 同士の連絡"
     assert by["pm_biz"]["label"] == "毎時 0分" and by["s01"]["label"] == "10分ごと"
     assert by["meeting"]["label"] == "平日 18:00" and by["meeting"]["group"] == "meeting"
     assert sum(by["s01"]["hours"]) == 144 and sum(by["pm_biz"]["hours"]) == 24 and len(by["s01"]["next"]) == 3

@@ -1,6 +1,6 @@
 // 予定の選び方（画面）と cron（内部の表し方）の行き来。読めない cron は「詳しい設定」に残す
 export type Sched =
-  | { mode: "every"; minutes: number }
+  | { mode: "every"; minutes: number; offset?: number } // offset：何分から始めるか（ほかの予定と重ならないようにずらす）
   | { mode: "hourly"; minute: number; hours: number }
   | { mode: "daily" | "weekdays"; time: string }
   | { mode: "weekly"; days: number[]; time: string }
@@ -18,7 +18,7 @@ const pad = (n: number) => String(n).padStart(2, "0");
 
 export function toCron(s: Sched): string {
   switch (s.mode) {
-    case "every": return `*/${s.minutes} * * * *`;
+    case "every": return s.offset && s.offset < s.minutes ? `${s.offset}-59/${s.minutes} * * * *` : `*/${s.minutes} * * * *`;
     case "hourly": return s.hours === 1 ? `${s.minute} * * * *` : `${s.minute} */${s.hours} * * *`;
     case "daily": { const [h, m] = hm(s.time); return `${m} ${h} * * *`; }
     case "weekdays": { const [h, m] = hm(s.time); return `${m} ${h} * * 1-5`; }
@@ -34,6 +34,7 @@ export function fromCron(expr: string): Sched {
   const num = (x: string) => /^\d+$/.test(x);
   let m: RegExpMatchArray | null;
   if ((m = mi.match(/^\*\/(\d+)$/)) && h === "*" && d === "*" && mo === "*" && w === "*" && EVERY_MIN.includes(+m[1])) return { mode: "every", minutes: +m[1] };
+  if ((m = mi.match(/^(\d+)-59\/(\d+)$/)) && h === "*" && d === "*" && mo === "*" && w === "*" && EVERY_MIN.includes(+m[2]) && +m[1] < +m[2]) return { mode: "every", minutes: +m[2], offset: +m[1] };
   if (num(mi) && h === "*" && d === "*" && mo === "*" && w === "*") return { mode: "hourly", minute: +mi, hours: 1 };
   if (num(mi) && (m = h.match(/^\*\/(\d+)$/)) && d === "*" && mo === "*" && w === "*" && EVERY_HOURS.includes(+m[1])) return { mode: "hourly", minute: +mi, hours: +m[1] };
   if (num(mi) && num(h) && d === "*" && mo === "*") {

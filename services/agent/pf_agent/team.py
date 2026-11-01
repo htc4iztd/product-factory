@@ -42,7 +42,10 @@ INTENTS = ("confirm", "answer", "notice")
 INTENT_LABEL = {"confirm": "確認", "answer": "回答", "notice": "共有"}
 HEALTH = ("green", "yellow", "red")
 MAX_TURNS = 30
-DEFAULT_CRON = {"pm": "0 * * * *", "stage": "*/10 * * * *", MEETING: "0 18 * * 1-5", PM_SYNC: "*/10 * * * *"}
+DEFAULT_CRON = {"pm": "0 * * * *", "stage": "*/10 * * * *", MEETING: "0 18 * * 1-5", PM_SYNC: "5-59/10 * * * *"}
+# PM 同士の連絡は、担当の確認（0・10・20…分）と重ならないよう5分ずらす
+# （同じ分に AI の呼び出しが集まると利用上限に当たる）
+_OLD_PM_SYNC = "*/10 * * * *"
 WAKE_INTENTS = ("confirm", "answer")  # 書き込まれたら、宛先がすぐ動く（共有は次に動くときに読む）
 THREAD_WAKE_MAX = 6  # スレッドがこれより長くなったら、返事で相手を起こさない（往復が止まらないのを防ぐ）
 
@@ -128,7 +131,11 @@ def _iso(t: dt.datetime | None) -> str | None:
 def ensure(product: Product) -> None:
     """足りないエージェント（PM 3人・14工程）と会議の予定を置く。"""
     with session() as s:
-        have = set(s.execute(select(TeamAgent.key).where(TeamAgent.product_id == product.id)).scalars())
+        rows = list(s.execute(select(TeamAgent).where(TeamAgent.product_id == product.id)).scalars())
+        have = {a.key for a in rows}
+        for a in rows:  # 前の既定（担当と同じ分）のままなら、ずらした既定にする
+            if a.key == PM_SYNC and a.cron == _OLD_PM_SYNC:
+                a.cron, a.next_run_at = DEFAULT_CRON[PM_SYNC], cron.next_after(DEFAULT_CRON[PM_SYNC], _now())
         for k in (*KEYS, *SCHEDULED):
             if k in have:
                 continue
