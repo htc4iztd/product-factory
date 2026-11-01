@@ -9,9 +9,12 @@
 """
 from __future__ import annotations
 
+import datetime as dt
+import re
 import uuid
 
 from pydantic import BaseModel, Field
+from sqlalchemy import select
 
 from .db import Product
 from .team import PMS, name_of, strip_deadlines
@@ -27,8 +30,56 @@ RULE = (
     "・agree_next（ネクストアクションへの合意依頼）・"
     "approve_done（タスクの終了承認依頼）。報告・共有だけの書き込みはしない（PdM の答えがないと進まないことだけ）。"
     "agree_next は next_action に次にやることを、approve_done は issue に終えたい Issue の番号を必ず入れる。"
-    "期限や時刻は書かない。"
+    "期限や時刻は書かない。PdM がまだ答えていない問いかけと同じことは、もう一度聞かない。"
+    "ツールで読めない・空だと思ったことを、権限の問題として PdM に聞かない（工程の下書きは stage_draft で"
+    "どの工程でも読める。空ならまだ書かれていないだけ）。"
 )
+SIMILAR = 0.35  # 未回答の問いかけとの文字の重なりがこれ以上なら、同じ問いかけとみなして出さない
+OPEN_HOURS = 24
+
+
+def _grams(t: str) -> set[str]:
+    t = re.sub(r"^【[^】]*】|（チャットで[^）]*）|[\s、。，．,.（）()「」・〜~:：]", "", t)
+    return {t[i : i + 2] for i in range(len(t) - 1)}
+
+
+def similar(a: str, b: str) -> float:
+    """文字の2つ組の重なり（短い方に対する割合）。言い回しを変えた同じ問いかけを見分ける。"""
+    x, y = _grams(a), _grams(b)
+    return len(x & y) / min(len(x), len(y)) if x and y else 0.0
+
+
+def open_asks(product_id: str, pm: str) -> list[dict]:
+    """PdM がまだ答えていない、この PM からの問いかけ（24時間以内）。
+    合意依頼・終了承認依頼はボタンに答えるまで、質問・相談はその PM に PdM が書くまで、を未回答とする。"""
+    from .db import AssistantMessage, session
+
+    since = dt.datetime.now(dt.UTC) - dt.timedelta(hours=OPEN_HOURS)
+    with session() as s:
+        rows = list(
+            s.execute(
+                select(AssistantMessage)
+                .where(AssistantMessage.product_id == product_id, AssistantMessage.created_at >= since)
+                .order_by(AssistantMessage.id)
+            ).scalars()
+        )
+    out = []
+    for i, m in enumerate(rows):
+        ctx = m.context or {}
+        if m.role != "agent" or m.agent != pm or not ctx.get("ask"):
+            continue
+        if ctx["ask"] in ("agree_next", "approve_done"):
+            if any(a.get("status") == "pending" for a in m.actions or []):
+                out.append({"kind": ctx["ask"], "text": m.text})
+            continue
+        if not any(x.role == "pdm" and (x.context or {}).get("responder") == pm for x in rows[i + 1 :]):
+            out.append({"kind": ctx["ask"], "text": m.text})
+    return out
+
+
+def open_asks_md(product_id: str, pm: str) -> str:
+    rows = open_asks(product_id, pm)
+    return "\n".join(f"- {r['text'][:300]}" for r in rows) or "（なし）"
 
 
 class PdmAsk(BaseModel):
@@ -45,6 +96,10 @@ def send(product: Product, pm: str, ask: PdmAsk) -> dict | None:
 
     text = strip_deadlines(ask.text).strip()
     if pm not in PMS or ask.kind not in KINDS or not text:
+        return None
+    # 同じ問いかけを重ねない（担当が何人も同じことを上げてきても、PdM に聞くのは1回）
+    probe = f"{text} {ask.next_action}"
+    if any(similar(probe, o["text"]) >= SIMILAR for o in open_asks(product.id, pm)):
         return None
     label = KINDS[ask.kind]
     actions: list[dict] = []

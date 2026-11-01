@@ -127,7 +127,12 @@ def _upstream(ctx: Ctx, a: StageArg) -> str:
     st = STAGE_BY_ID[sid]
     ups = repo.confirmed_artifacts(p.id, st.inputs)
     down = "、".join(f"{x.id}={x.no}{x.name}" for x in STAGES if sid in x.inputs)
-    body = "\n\n".join(f"## {k}\n{v[:6000]}" for k, v in ups.items()) or "（上流に確定した版はまだありません）"
+    parts = [f"## {k}（確定版）\n{v[:6000]}" for k, v in ups.items()]
+    # 確定していない上流は、今の下書きを読む（確定を待たずに進められるように。読む権限の制限はない）
+    for u in st.inputs:
+        if not any(k.startswith(u) or STAGE_BY_ID[u].name in k for k in ups):
+            parts.append(f"## {u}（未確定の下書き）\n{_stage_draft(ctx, StageArg(stage_id=u))[:6000]}")
+    body = "\n\n".join(parts) or "（上流はありません）"
     return f"上流：{'、'.join(st.inputs) or 'なし'}／下流：{down or 'なし'}\n\n{body}"
 
 
@@ -283,7 +288,9 @@ TOOLS: dict[str, Tool] = {
             "stage_draft",
             "工程の下書きを読む",
             "read",
-            "工程の今の下書き（項目ごとの値）と、空の必須項目を読む",
+            "工程の今の下書き（項目ごとの値）と、空の必須項目を読む。stage_id に s01〜s14 を入れれば、"
+            "どの工程でも読める"
+            "（読む権限の制限はない。空の項目は、まだ書かれていないだけ）",
             StageArg,
             _stage_draft,
             ("stage", "pm"),
@@ -299,9 +306,9 @@ TOOLS: dict[str, Tool] = {
         ),
         Tool(
             "upstream",
-            "上流の確定版を読む",
+            "上流を読む",
             "read",
-            "工程の上流（入力になる工程）の確定した版と、下流の工程の一覧を読む",
+            "工程の上流（入力になる工程）と下流の工程の一覧を読む。上流が確定していなければ今の下書きを読む",
             StageArg,
             _upstream,
             ("stage", "pm"),

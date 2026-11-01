@@ -151,3 +151,43 @@ def test_pdm_asks_are_four_kinds(env):
     assert issues.get(p, j["number"])["status"] == "closed"
     # 終わった Issue には終了承認依頼を出さない
     assert asks.send(p, "pm_biz", asks.PdmAsk(kind="approve_done", text="終えてよいですか", issue=j["number"])) is None
+
+
+def test_same_ask_is_not_repeated(env):
+    """担当が何人も同じことを上げてきても、PdM に聞くのは1回。PdM が答えたら、また聞ける。"""
+    from pf_agent import asks
+    from pf_agent.db import AssistantMessage, session
+
+    c, p = env
+    texts = [
+        "実装担当者（s12、s13、s14）が、設計ドラフト（s06〜s11）を stage_draft から参照できない状況です。"
+        "担当者への参照権限付与、または代替の共有方法についてご指示いただけますでしょうか。",
+        "実装担当者（s12〜s14）がツール（stage_draft）で設計ドラフト（s09〜s11）を参照できないと報告を受けています。"
+        "システム上の参照権限の設定等に問題がないか、ご確認いただけますでしょうか。",
+        "実装担当者（s12、s13、s14）が設計ドラフト（s06〜s11）を参照できるよう、システム上の閲覧権限を付与いただくか、"
+        "共有用の格納場所をご指示いただけますでしょうか。",
+    ]
+    sent = [asks.send(p, "pm_design", asks.PdmAsk(kind="consult", text=t)) for t in texts]
+    assert sent[0] and sent[1:] == [None, None]
+    assert len(asks.open_asks(p.id, "pm_design")) == 1
+    # 別のことは聞ける。別の PM は別に聞ける
+    assert asks.send(p, "pm_design", asks.PdmAsk(kind="question", text="対象端末はスマホだけで確定ですか"))
+    assert asks.send(p, "pm_impl", asks.PdmAsk(kind="consult", text=texts[0]))
+    # PdM が設計 PM に返事をしたら、未回答ではなくなる
+    with session() as s:
+        s.add(AssistantMessage(tenant_id="tenant-a", user="owner@example.com", product_id=p.id, role="pdm", agent="",
+                               text="下書きはツールで読めます", context={"responder": "pm_design"}))
+        s.commit()
+    assert asks.open_asks(p.id, "pm_design") == []
+
+
+def test_upstream_reads_drafts_when_not_confirmed(env):
+    from pf_agent import repo
+    from pf_agent import tools as tl
+
+    c, p = env
+    repo.set_field(p.id, "s09", "overview", "モノリスで作る", "t", "test")
+    out = tl.call(tl.Ctx(product=p, key="s12", tenant="tenant-a"), "upstream", {})
+    assert "s09（未確定の下書き）" in out and "モノリスで作る" in out
+    ctx = tl.Ctx(product=p, key="s12", tenant="tenant-a")
+    assert "モノリスで作る" in tl.call(ctx, "stage_draft", {"stage_id": "s09"})
