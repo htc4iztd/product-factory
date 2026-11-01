@@ -72,7 +72,11 @@ def open_asks(product_id: str, pm: str) -> list[dict]:
             if any(a.get("status") == "pending" for a in m.actions or []):
                 out.append({"kind": ctx["ask"], "text": m.text})
             continue
-        if not any(x.role == "pdm" and (x.context or {}).get("responder") == pm for x in rows[i + 1 :]):
+        if not any(
+            x.role == "pdm"
+            and ((x.context or {}).get("reply_to", {}).get("id") == m.id or (x.context or {}).get("responder") == pm)
+            for x in rows[i + 1 :]
+        ):
             out.append({"kind": ctx["ask"], "text": m.text})
     return out
 

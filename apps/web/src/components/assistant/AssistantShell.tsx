@@ -2,7 +2,7 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, useTransition } from "react";
 import { usePathname, useRouter } from "next/navigation";
 import { AtSign, Check, CornerDownLeft, Library, MessageSquare, PanelRightClose, Send, X } from "lucide-react";
-import type { AssistantMsg, ChatActionT, MentionT } from "@/lib/agent";
+import type { AssistantMsg, ChatActionT, MentionT, Quote } from "@/lib/agent";
 import { decideAssistant, researchBrief, sendAssistant } from "@/lib/assistant-actions";
 import { Avatar } from "@/components/rail/Avatar";
 import { AttachButton, AttachChips, SentAttachments, useAttachments } from "@/components/chat/Attachments";
@@ -59,7 +59,7 @@ export function AssistantShell({ children, initialOpen }: { children: React.Reac
   const [msgs, setMsgs] = useState<AssistantMsg[]>([]);
   const [seen, setSeen] = useState(0);
   const setOpen = (v: boolean) => { setOpenState(v); document.cookie = `pf_chat=${v ? "open" : "closed"}; path=/; max-age=31536000; samesite=lax`; };
-  const [incoming, setIncoming] = useState<{ text?: string; mention?: MentionT; n: number } | null>(null);
+  const [incoming, setIncoming] = useState<{ text?: string; mention?: MentionT; quote?: Quote; n: number } | null>(null);
   // 対話はプロダクトごと（プロダクトの外のページでは、ファクトリー全体の対話）
   const load = useCallback(async () => {
     if (document.visibilityState !== "visible") return;
@@ -72,7 +72,7 @@ export function AssistantShell({ children, initialOpen }: { children: React.Reac
   // ⌘K などから「チャットで話す」：チャットを開いて入力欄に入れる
   useEffect(() => {
     const onCompose = (e: Event) => {
-      const d = (e as CustomEvent<{ text?: string; mention?: MentionT }>).detail ?? {};
+      const d = (e as CustomEvent<{ text?: string; mention?: MentionT; quote?: Quote }>).detail ?? {};
       setOpen(true);
       setIncoming((x) => ({ ...d, n: (x?.n ?? 0) + 1 }));
     };
@@ -137,13 +137,16 @@ function Feed({ msgs, onChanged }: { msgs: AssistantMsg[]; onChanged: (m: Assist
                   </span>
                 )}
               </div>
+              {m.context.reply_to && <QuoteBox q={m.context.reply_to} dark={me} />}
               <div className="whitespace-pre-wrap">{m.text}</div>
               <SentAttachments items={m.attachments as never} dark={me} />
               {m.actions.map((a) => <ActionCard key={a.id} m={m} a={a} onChanged={onChanged} />)}
               {(m.context.ask === "question" || m.context.ask === "consult") && (
                 <button className="btn-secondary btn-sm mt-2" onClick={() => {
+                  // 元の発言を引用して返事をする（何への返事かを、PM にも記録にも残す）
                   const mention = { kind: "agent" as const, ref: m.agent, label: m.agent_name };
-                  window.dispatchEvent(new CustomEvent("pf:compose", { detail: { mention, text: `@${m.agent_name} ` } }));
+                  const quote = { id: m.id, agent: m.agent, agent_name: m.agent_name, text: m.text, ask: m.context.ask };
+                  window.dispatchEvent(new CustomEvent("pf:compose", { detail: { mention, quote } }));
                 }}><CornerDownLeft size={12} />{m.agent_name}に返事をする</button>
               )}
             </div>
@@ -152,6 +155,19 @@ function Feed({ msgs, onChanged }: { msgs: AssistantMsg[]; onChanged: (m: Assist
       })}
       <div ref={end} />
     </ol>
+  );
+}
+
+// 引用（返事をする元の発言）
+function QuoteBox({ q, dark, onRemove }: { q: Quote; dark?: boolean; onRemove?: () => void }) {
+  return (
+    <div className={`mb-1 flex gap-1.5 rounded border-l-2 px-2 py-1 text-[11px] ${dark ? "border-zinc-500 bg-zinc-800 text-zinc-300" : "border-amber-400 bg-amber-50/60 text-zinc-600"}`} aria-label="引用">
+      <div className="min-w-0 flex-1">
+        <div className="font-semibold">{q.agent_name}への返事</div>
+        <div className="line-clamp-3 whitespace-pre-wrap">{q.text.replace(/\n（チャットで[^）]*）$/, "")}</div>
+      </div>
+      {onRemove && <button className="self-start text-zinc-400 hover:text-zinc-700" onClick={onRemove} aria-label="引用を外す"><X size={12} /></button>}
+    </div>
   );
 }
 
@@ -212,8 +228,9 @@ function ActionCard({ m, a, onChanged }: { m: AssistantMsg; a: ChatActionT; onCh
   );
 }
 
-function Composer({ path, pid, incoming, onSent }: { path: string; pid: string | null; incoming: { text?: string; mention?: MentionT; n: number } | null; onSent: (m: AssistantMsg) => void }) {
+function Composer({ path, pid, incoming, onSent }: { path: string; pid: string | null; incoming: { text?: string; mention?: MentionT; quote?: Quote; n: number } | null; onSent: (m: AssistantMsg) => void }) {
   const [text, setText] = useState("");
+  const [quote, setQuote] = useState<Quote | null>(null);
   const [mentions, setMentions] = useState<MentionT[]>([]);
   const [choices, setChoices] = useState<MentionT[]>([]);
   const [query, setQuery] = useState<string | null>(null);
@@ -232,6 +249,7 @@ function Composer({ path, pid, incoming, onSent }: { path: string; pid: string |
     const m = incoming.mention;
     if (m) setMentions((x) => (x.some((y) => y.ref === m.ref) ? x : [...x, m]));
     if (incoming.text) setText(incoming.text);
+    if (incoming.quote) setQuote(incoming.quote);
     setTimeout(() => box.current?.focus(), 10);
   }, [incoming]);
   const stage = path.match(/^\/p\/[0-9a-f]+\/s\/(s\d\d)/)?.[1] ?? null;
@@ -254,11 +272,11 @@ function Composer({ path, pid, incoming, onSent }: { path: string; pid: string |
   };
   const send = (t = text, material = "") => {
     if (!t.trim() || pending) return;
-    const used = mentions.filter((m) => t.includes(`@${m.label}`) || material);
+    const used = mentions.filter((m) => t.includes(`@${m.label}`) || material || (quote && m.ref === quote.agent));
     start(async () => {
-      const r = await sendAssistant(path, t, used, files.items.map((a) => a.id), material);
+      const r = await sendAssistant(path, t, used, files.items.map((a) => a.id), material, quote?.id ?? null);
       if (r.error) { setError(r.error); return; }
-      setText(""); setMentions([]); setError(null); files.clear();
+      setText(""); setMentions([]); setQuote(null); setError(null); files.clear();
       if (r.reply) onSent(r.reply);
     });
   };
@@ -299,6 +317,7 @@ function Composer({ path, pid, incoming, onSent }: { path: string; pid: string |
         {pending && <span className="text-brand-700">{w.who === "内容から PM が決まります" ? "考えています…" : `${w.who}が考えています…`}</span>}
       </div>
       <div className="mt-1 space-y-1.5">
+        {quote && <QuoteBox q={quote} onRemove={() => setQuote(null)} />}
         <textarea ref={box} rows={3} value={text} aria-label="チャットに話す" onPaste={pid ? files.onPaste : undefined}
           placeholder="このページについて指示・質問（@ で別のページ・工程・エージェント）。Enter で送る・Shift+Enter で改行"
           className="input min-h-0 w-full resize-none text-[13px]"

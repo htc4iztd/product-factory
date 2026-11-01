@@ -557,6 +557,7 @@ class AssistantBody(BaseModel):
     mentions: list[dict] = Field(default_factory=list, max_length=10)
     attachments: list[int] = Field(default_factory=list, max_length=5)
     material: str = Field(default="", max_length=40000)  # 発言に添える材料（リサーチのまとめなど。画面には出さない）
+    reply_to: int | None = None  # 返事をする元の発言（引用して送る）
 
 
 @router.post("/assistant/messages")
@@ -564,7 +565,9 @@ def assistant_send(body: AssistantBody, c: Caller = Depends(caller)):
     from . import assistant
 
     _write(c)
-    return assistant.send(c.tenant, c.user, body.path, body.text, body.mentions, body.attachments, body.material)
+    return assistant.send(
+        c.tenant, c.user, body.path, body.text, body.mentions, body.attachments, body.material, body.reply_to
+    )
 
 
 @router.get("/assistant/messages")

@@ -457,6 +457,7 @@ export type AgentCatalog = {
 };
 
 // ファクトリー全体で1つのチャット
+export type Quote = { id: number; agent: string; agent_name: string; text: string; ask?: string | null };
 export type MentionT = { kind: "stage" | "page" | "agent" | "issue"; ref: string; label: string };
 export type ChatActionT = {
   id: string; type: string; status: "pending" | "approved" | "rejected" | "failed"; by: string; title: string;
@@ -466,7 +467,9 @@ export type AssistantMsg = {
   id: number; role: "pdm" | "agent"; agent: string; agent_name: string; text: string; product_id: string | null;
   context: { kind?: string; label?: string; product_name?: string; stage_id?: string; responder?: string; mentioned?: boolean;
     // AI から PdM への話しかけの型（質問・相談・ネクストアクションへの合意依頼・タスクの終了承認依頼）
-    ask?: "question" | "consult" | "agree_next" | "approve_done"; ask_label?: string };
+    ask?: "question" | "consult" | "agree_next" | "approve_done"; ask_label?: string;
+    // 返事をした元の発言（引用）
+    reply_to?: Quote };
   mentions: MentionT[]; attachments: { id: number; filename: string; kind: string }[]; actions: ChatActionT[]; created_at: string;
 };
 

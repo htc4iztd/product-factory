@@ -191,3 +191,23 @@ def test_upstream_reads_drafts_when_not_confirmed(env):
     assert "s09（未確定の下書き）" in out and "モノリスで作る" in out
     ctx = tl.Ctx(product=p, key="s12", tenant="tenant-a")
     assert "モノリスで作る" in tl.call(ctx, "stage_draft", {"stage_id": "s09"})
+
+
+def test_reply_quotes_the_ask(env):
+    """「返事をする」は元の発言を引用して送る。宛先は元の発言の PM になり、問いかけは答えたことになる。"""
+    from pf_agent import asks
+
+    c, p = env
+    q = asks.send(p, "pm_design", asks.PdmAsk(kind="question", text="対象端末はスマホだけで確定ですか"))
+    body = {"path": f"/p/{p.id}", "text": "はい、スマホだけです", "mentions": [], "attachments": []}
+    body["reply_to"] = q["id"]
+    r = c.post("/assistant/messages", headers=H, json=body).json()
+    mine = r["message"]
+    assert mine["context"]["reply_to"]["id"] == q["id"] and "スマホだけで確定" in mine["context"]["reply_to"]["text"]
+    assert mine["context"]["responder"] == "pm_design" and r["reply"]["agent"] == "pm_design"
+    assert "reply_to" not in r["reply"]["context"]  # 引用は PdM の発言にだけ付く
+    assert asks.open_asks(p.id, "pm_design") == []
+    w = c.get(f"/products/{p.id}/pm/pm_design", headers=H).json()
+    assert any(m["role"] == "pdm" and m["text"].startswith("> 【質問】") for m in w["messages"])
+    bad = {**body, "reply_to": 99999}
+    assert c.post("/assistant/messages", headers=H, json=bad).status_code == 404

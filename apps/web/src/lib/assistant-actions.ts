@@ -3,9 +3,9 @@ import { revalidatePath } from "next/cache";
 import { agent, AgentError, type AssistantMsg, type MentionT } from "@/lib/agent";
 
 // チャットに話す・承認依頼に答える
-export async function sendAssistant(path: string, text: string, mentions: MentionT[], attachments: number[], material = ""): Promise<{ error?: string; reply?: AssistantMsg }> {
+export async function sendAssistant(path: string, text: string, mentions: MentionT[], attachments: number[], material = "", replyTo: number | null = null): Promise<{ error?: string; reply?: AssistantMsg }> {
   try {
-    const r = await agent<{ reply: AssistantMsg }>("/assistant/messages", { method: "POST", body: { path, text, mentions, attachments, material } });
+    const r = await agent<{ reply: AssistantMsg }>("/assistant/messages", { method: "POST", body: { path, text, mentions, attachments, material, reply_to: replyTo } });
     return { reply: r.reply };
   } catch (e) {
     if (e instanceof AgentError) return { error: e.message };

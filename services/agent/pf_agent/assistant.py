@@ -444,6 +444,11 @@ def _prompt(
         + (f"## 添えられたもの\n{extra}\n\n" if extra else "")
         + "## これまでの対話\n"
         + "\n".join(f"{'PdM' if m['role'] == 'pdm' else m['agent_name']}：{m['text'][:600]}" for m in history[-10:])
+        + (
+            f"\n\n## PdM が返事をしている、元の発言（{ctx['reply_to']['agent_name']}）\n{ctx['reply_to']['text']}"
+            if ctx.get("reply_to")
+            else ""
+        )
         + f"\n\n## PdM の発言\n{text}\n"
     )
 
@@ -516,14 +521,34 @@ def _save(tenant, user, product_id, role, agent, text, ctx, mentions=None, attac
         return message_dict(m)
 
 
+def quote_of(tenant: str, message_id: int) -> dict:
+    """返事をする元の発言（引用）。返事の宛先は、元の発言をしたエージェントにする。"""
+    with session() as s:
+        m = s.get(AssistantMessage, message_id)
+        if m is None or m.tenant_id != tenant or m.role != "agent":
+            raise AssistantError(404, "返事をする元の発言がありません")
+        return {"id": m.id, "agent": m.agent, "agent_name": name_of(m.agent), "text": m.text[:1500],
+                "ask": (m.context or {}).get("ask"), "product_id": m.product_id}
+
+
 def send(
-    tenant: str, user: str, path: str, text: str, mentions: list[dict], attachment_ids: list[int], material: str = ""
+    tenant: str,
+    user: str,
+    path: str,
+    text: str,
+    mentions: list[dict],
+    attachment_ids: list[int],
+    material: str = "",
+    reply_to: int | None = None,
 ) -> dict:
     from . import agentrun, attachments, pms
 
     text = text.strip()
     if not text:
         raise AssistantError(422, "本文が空です")
+    quote = quote_of(tenant, reply_to) if reply_to else None
+    if quote and quote["agent"] in RESPONDERS and not any(m.get("ref") == quote["agent"] for m in mentions):
+        mentions = [{"kind": "agent", "ref": quote["agent"], "label": quote["agent_name"]}, *mentions]
     ctx = parse_path(path)
     product = None
     if ctx.get("product_id"):
@@ -552,6 +577,8 @@ def send(
     conn = llmconf.resolve(tenant)
     responder = route(conn, ctx, text)
     ctx["responder"] = responder
+    if quote:
+        ctx["reply_to"] = {k: quote[k] for k in ("id", "agent", "agent_name", "text", "ask")}
     mine = _save(tenant, user, ctx.get("product_id"), "pdm", "", text, ctx, mentions, files)
     if conn.provider == "stub":
         out = _stub(product, ctx, responder, text)
@@ -573,9 +600,11 @@ def send(
         except Exception as e:  # noqa: BLE001  1つの案の不備で答え全体を落とさない
             dropped.append(f"{a.type}：{getattr(e, 'message', e)}")
     reply = out.reply + (f"\n（出せなかった変更：{'／'.join(dropped)}）" if dropped else "")
-    answer = _save(tenant, user, ctx.get("product_id"), "agent", responder, reply, ctx, actions=actions)
+    actx = {k: v for k, v in ctx.items() if k != "reply_to"}  # 引用は PdM の発言にだけ付ける
+    answer = _save(tenant, user, ctx.get("product_id"), "agent", responder, reply, actx, actions=actions)
     if product is not None and responder in PMS:  # PM の対話の記録にも残す
-        pms._say(product.id, responder, "pdm", user, text, ctx.get("stage_id"), ctx.get("meeting_id"), files)
+        said = (f"> {quote['text'][:300]}\n\n" if quote else "") + text  # 何への返事かを PM の記録にも残す
+        pms._say(product.id, responder, "pdm", user, said, ctx.get("stage_id"), ctx.get("meeting_id"), files)
         pms._say(product.id, responder, "pm", name_of(responder), reply, ctx.get("stage_id"), ctx.get("meeting_id"))
     return {"message": mine, "reply": answer}
 
