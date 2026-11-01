@@ -1,15 +1,14 @@
 import Link from "next/link";
-import { agent, type TeamMember, type TeamTask } from "@/lib/agent";
+import { agent, type TeamInfo } from "@/lib/agent";
 import { PageHeader } from "@/components/PageHeader";
 import { AutoRefresh } from "@/components/autodev/AutoRefresh";
-import { OrgSettings, TaskBoard } from "@/components/org/OrgSettings";
-import { RunTeamButton } from "@/components/org/DirectorChat";
+import { MeetingSchedule, OrgSettings } from "@/components/org/OrgSettings";
+import { RunTeamButton } from "@/components/org/bits";
 
 export default async function TeamPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
-  const [team, tasks, versions] = await Promise.all([
-    agent<{ agents: TeamMember[] }>(`/products/${id}/team`),
-    agent<TeamTask[]>(`/products/${id}/team/tasks`),
+  const [team, versions] = await Promise.all([
+    agent<TeamInfo>(`/products/${id}/team`),
     agent<Record<string, string>>("/avatars").catch(() => ({} as Record<string, string>)),
   ]);
   return (
@@ -18,12 +17,12 @@ export default async function TeamPage({ params }: { params: Promise<{ id: strin
       <PageHeader
         crumbs={<><Link href={`/p/${id}`} className="hover:text-zinc-700">ダッシュボード</Link><span>/</span><span>エージェントの組織</span></>}
         title="エージェントの組織"
-        sub="司令塔・PM・各工程の担当の使命と動く時刻、それぞれが洗い出したタスク。"
+        sub="事業 PM（①〜⑤）・設計 PM（⑥〜⑪）・実装 PM（⑫〜⑭）と各工程の担当。PM は1時間ごとに担当の状況を確かめ、担当は10分ごとに自分宛ての Issue を確かめて実行します。"
         actions={<RunTeamButton pid={id} running={false} />}
       />
       <div className="space-y-6 px-8 py-6">
+        <MeetingSchedule pid={id} meeting={team.meeting} beats={team.beats} />
         <OrgSettings pid={id} agents={team.agents} versions={versions} />
-        <TaskBoard pid={id} tasks={tasks} agents={team.agents} />
       </div>
     </>
   );

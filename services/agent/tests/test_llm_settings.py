@@ -229,5 +229,6 @@ def test_vertex_model_list_trims_and_filters(monkeypatch):
     conn = Conn(provider="vertex", chat_model="x", summary_model="x", image_model="", source="app",
                 project="p", location="global")
     assert llm.list_models(conn) == ["gemini-3-flash"]
-    assert seen["kw"] == {"vertexai": True, "project": "p", "location": "global"}
+    # 応答が止まってもジョブが固まらないよう、上限時間と再試行を付けて作る
+    assert seen["kw"] == {"vertexai": True, "project": "p", "location": "global", "http_options": llm._HTTP}
     assert seen["config"] == {"query_base": True}

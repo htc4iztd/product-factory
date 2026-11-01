@@ -249,6 +249,13 @@ class Engine:
             repo.complete_stage(product.id, stage_id, decision)
         else:
             repo.request_changes(product.id, stage_id, user, comment.strip())
+            # 修正指示は、その領域の PM から担当への Issue にする（担当は PdM と直接は話さない）
+            from . import issues
+            from .team import PM_OF, ensure
+            ensure(product)
+            issues.create(product, PM_OF[stage_id], stage_id, f"承認者の修正指示に対応する：{comment.strip()[:80]}",
+                          f"承認者（{user}）の修正指示：{comment.strip()}\n直したら resolved にして返してください。",
+                          tracker="task", priority="high", stage_id=stage_id)
 
     def update_settings(self, product: Product, user: str, stages: dict[str, dict]) -> None:
         for sid, cfg in stages.items():

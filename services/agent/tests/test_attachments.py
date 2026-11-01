@@ -62,12 +62,11 @@ def test_chat_attachments_reach_the_ai_once(client, monkeypatch):
     c.post(f"/products/{pid}/stages/s01/chat", headers=H, json={"message": "続けて"})
     msg, images, history = seen[-1]
     assert "共働きの夫婦" not in msg and images == [] and any("［添付：メモ.md］" in h["text"] for h in history)
-    # 司令塔との対話にも添えられる
-    d = c.post(f"/products/{pid}/agents/director/attachments", headers=H,
+    # PM との対話にも添えられる
+    d = c.post(f"/products/{pid}/agents/pm_biz/attachments", headers=H,
                json={"filename": "方針.txt", "content_b64": b64("MVP は締めだけ".encode())}).json()
-    r = c.post(f"/products/{pid}/director/talk", headers=H, json={"text": "読んで", "attachments": [d["id"]]}).json()
-    th = c.get(f"/products/{pid}/board?thread={r['thread']}", headers=H).json()["threads"][0]
-    assert any("［添付：方針.txt］" in p["text"] for p in th["posts"] if p["sender"] == "pdm")
+    r = c.post(f"/products/{pid}/pm/pm_biz/talk", headers=H, json={"text": "読んで", "attachments": [d["id"]]}).json()
+    assert r["message"]["attachments"][0]["filename"] == "方針.txt"
 
 
 def test_import_readers(client):
@@ -83,11 +82,11 @@ def test_import_readers(client):
         if d["status"] == "done":
             break
         time.sleep(0.1)
-    # 決めていなければ、割り当てた工程（「設計方針」がある⑨⑩）の担当と司令塔・PM
-    assert d["readers"] == ["director", "pm", "s09", "s10"] and d["readers_custom"] is False
+    # 決めていなければ、割り当てた工程（「設計方針」がある⑨⑩）の担当と、その領域の PM
+    assert d["readers"] == ["pm_design", "s09", "s10"] and d["readers_custom"] is False
     assert imports.docs_context(pid, "s01") == ""
-    d = c.put(f"/products/{pid}/imports/{d['id']}/readers", headers=H, json={"readers": ["s01", "pm"]}).json()
-    assert d["readers"] == ["pm", "s01"] and d["readers_custom"] is True
+    d = c.put(f"/products/{pid}/imports/{d['id']}/readers", headers=H, json={"readers": ["s01", "pm_biz"]}).json()
+    assert d["readers"] == ["pm_biz", "s01"] and d["readers_custom"] is True
     assert "受付はAPIで行う" in imports.docs_context(pid, "s01")
-    assert imports.docs_context(pid, "s09") == "" and imports.docs_context(pid, "director") == ""
+    assert imports.docs_context(pid, "s09") == "" and imports.docs_context(pid, "pm_design") == ""
     assert c.put(f"/products/{pid}/imports/{d['id']}/readers", headers=H, json={"readers": ["zz"]}).status_code == 422

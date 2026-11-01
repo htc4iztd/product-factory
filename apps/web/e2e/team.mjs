@@ -85,7 +85,7 @@ await page.getByRole("region", { name: "進行中" }).getByText(/DEC-1 を反映
 await shot("t4-tickets");
 
 // 会議：文字起こしから議事録
-await page.getByRole("link", { name: "会議" }).click();
+await page.getByRole("link", { name: "会議", exact: true }).click();
 await page.getByLabel("会議名").fill("週次定例");
 await btn("作成", true).click();
 await page.waitForURL(/meetings\/1$/);

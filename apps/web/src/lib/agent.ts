@@ -98,30 +98,51 @@ export type CanvasInfo = {
   facts: { stage: string; label: string; value: string; source: string }[]; images: CanvasImage[];
 };
 export type Overview = { product: Product; phases: Phase[]; stages: StageSummary[] };
-// エージェントの組織（司令塔・PM・各工程の担当）と掲示板
+// エージェントの組織（事業 PM・設計 PM・実装 PM と各工程の担当）・掲示板・Issue・PdM と PM の対話・振り返りの会議
 export type AgentReport = { health: "green" | "yellow" | "red"; progress: number; summary: string; blockers: string[]; next: string[]; at: string };
+export type PmKey = "pm_biz" | "pm_design" | "pm_impl";
 export type TeamMember = {
-  key: string; name: string; role: "director" | "pm" | "stage"; mission: string; cron: string; cron_label: string; enabled: boolean;
-  report: AgentReport | null; memory: { strategy?: string; priorities?: string[]; decided_at?: string; decided_with?: string };
-  next_run_at: string | null; last_run_at: string | null; last_job_id: string | null; runs: number; open_tasks: number; unread: number;
-  state?: "working" | "waiting" | "stuck" | "idle" | "off"; avatar_v?: string;
+  key: string; name: string; role: "pm" | "stage"; pm: PmKey | null; domain: string[]; mission: string; cron: string; cron_label: string;
+  enabled: boolean; report: AgentReport | null; next_run_at: string | null; last_run_at: string | null; last_job_id: string | null;
+  runs: number; open_issues: number; unread: number; state?: "working" | "waiting" | "stuck" | "idle" | "off"; avatar_v?: string;
+};
+export type TeamInfo = {
+  agents: TeamMember[]; meeting: { cron: string; cron_label: string; enabled: boolean; next_run_at: string | null };
+  beats?: Record<string, { at: string; detail: string }>;
 };
 export type BoardPostT = {
   id: number; thread: number; title: string; sender: string; sender_name: string; recipient: string; recipient_name: string;
-  intent: "report" | "request" | "answer" | "decision" | "directive" | "question"; text: string; author: string; read: boolean;
-  job_id: string | null; created_at: string;
+  intent: string; text: string; author: string; read: boolean; job_id: string | null; created_at: string;
 };
 export type BoardThread = { thread: number; title: string; posts: BoardPostT[]; participants: string[]; last_at: string };
-export type TeamTask = {
-  number: number; key: string; agent: string; agent_name: string; title: string; detail: string;
-  status: "todo" | "doing" | "blocked" | "done"; owner: "agent" | "pdm"; created_by: string; created_at: string; updated_at: string;
+export type IssueJournalT = { id: number; author: string; author_name: string; notes: string; details: { prop: string; label: string; old: unknown; new: unknown }[]; created_at: string };
+export type AgentIssueT = {
+  number: number; key: string; tracker: string; tracker_label: string; subject: string; description: string;
+  status: "new" | "in_progress" | "resolved" | "feedback" | "closed" | "rejected"; status_label: string;
+  priority: string; priority_label: string; author: string; author_name: string; assignee: string; assignee_name: string;
+  watchers: string[]; stage_id: string | null; parent: number | null; start_date: string | null; due_date: string | null;
+  done_ratio: number; created_at: string; updated_at: string; journals?: IssueJournalT[];
 };
-export type DirectorView = { strategy: TeamMember["memory"]; thread: number | null; posts: BoardPostT[] };
-export type Dashboard = Overview & {
-  agents: TeamMember[]; pdm_unread: number; findings_open: number; running: boolean;
+export type PmMessageT = {
+  id: number; pm: PmKey; pm_name: string; role: "pdm" | "pm"; author: string; text: string; stage_id: string | null;
+  meeting_id: number | null; attachments: { id: number; filename: string; kind: string }[]; issues: number[]; created_at: string;
+};
+export type PmNoteT = { id: number; pm: string; agent: string; agent_name: string; kind: string; kind_label: string; text: string; meeting_id: number | null; created_at: string };
+export type PmWorkspace = {
+  pm: TeamMember; domain: { key: string; name: string }[]; notes: PmNoteT[]; pending: number; checked_at: string | null;
+  assigned: AgentIssueT[]; authored: AgentIssueT[]; messages: PmMessageT[];
+};
+export type DailyMeetingT = {
+  id: number; day: string; status: "preparing" | "open" | "closed" | "failed";
+  reports: Record<string, { text: string; health: string; at: string }>;
+  reviews: { pm: string; about: string; conflict: boolean; text: string }[]; job_id: string | null; created_at: string;
+  messages?: PmMessageT[];
+};
+export type Dashboard = Overview & TeamInfo & {
+  findings_open: number; running: boolean; pending_notes: number;
   variants: { number: number; key: string; title: string; status: string; stages: string[] }[];
-  edges: { source: string; target: string; count: number; last: { intent: string; text: string; at: string; thread: number } }[];
-  to_pdm: BoardPostT[]; director: DirectorView; avatar_versions: Record<string, string>;
+  edges: { source: string; target: string; count: number; issues: number; last: { intent: string; text: string; at: string; thread: number } }[];
+  from_pm: PmMessageT[]; meeting_today: DailyMeetingT | null; avatar_versions: Record<string, string>;
 };
 // 自律エージェント（AG-n）と、その提案（受け箱）
 export type AgentSchedule = {

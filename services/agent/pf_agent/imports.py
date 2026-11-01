@@ -56,11 +56,14 @@ def readers_of(d: ImportDoc) -> list[str]:
     """読んでいいエージェント。決めていなければ、割り当てた工程の担当と司令塔・PM。"""
     if d.readers is not None:
         return list(d.readers)
-    return ["director", "pm", *dict.fromkeys(r["stage"] for r in d.result or [])]
+    from .team import PM_OF
+    stages = list(dict.fromkeys(r["stage"] for r in d.result or []))
+    return [*dict.fromkeys(PM_OF[x] for x in stages if x in PM_OF), *stages]
 
 
 def set_readers(product: Product, doc_id: int, readers: list[str]) -> dict:
-    ok = {"director", "pm", *STAGE_BY_ID}
+    from .team import KEYS
+    ok = set(KEYS)
     bad = [r for r in readers if r not in ok]
     if bad:
         raise ImportsError(422, f"不明なエージェント：{', '.join(bad)}")
@@ -68,7 +71,7 @@ def set_readers(product: Product, doc_id: int, readers: list[str]) -> dict:
         d = s.get(ImportDoc, doc_id)
         if d is None or d.product_id != product.id:
             raise ImportsError(404, "取り込んだ資料が見つかりません")
-        d.readers = [k for k in ["director", "pm", *STAGE_BY_ID] if k in readers]
+        d.readers = [k for k in KEYS if k in readers]
         s.commit()
     return get(product, doc_id)
 
@@ -287,9 +290,9 @@ def run(job_id: str) -> None:
         from . import team
         for sid in dict.fromkeys(r["stage"] for r in result):
             got = "、".join(f"{r['label']}（{ACTION_JA[r['action']]}）" for r in result if r["stage"] == sid)
-            text = (f"資料{doc_id}「{filename}」を取り込みました。この工程には：{got}。"
+            text = (f"PdM が資料{doc_id}「{filename}」を取り込みました。この工程には：{got}。"
                     "資料の該当箇所は、次に動くときに読めます。")
-            team.post(product, "pdm", sid, "report", text, author=user, job_id=job_id)
+            team.post(product, team.PM_OF[sid], sid, "notice", text, author=user, job_id=job_id)
     except Exception:
         with session() as s:
             s.get(ImportDoc, doc_id).status = "failed"

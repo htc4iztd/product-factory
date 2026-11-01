@@ -1,27 +1,37 @@
 import Link from "next/link";
-import { AlertTriangle, CheckCircle2, CircleDashed, Clock, MessagesSquare } from "lucide-react";
-import { agent, type Dashboard } from "@/lib/agent";
+import { AlertTriangle, CalendarClock, CheckCircle2, CircleDashed, Clock, ListChecks } from "lucide-react";
+import { agent, type AgentIssueT, type Dashboard, type PmMessageT } from "@/lib/agent";
 import { PageHeader } from "@/components/PageHeader";
 import { AutoRefresh } from "@/components/autodev/AutoRefresh";
 import { TeamGraph } from "@/components/org/TeamGraph";
-import { DirectorChat, PdmInbox, RunTeamButton } from "@/components/org/DirectorChat";
+import { PmChat } from "@/components/org/PmChat";
+import { RunTeamButton } from "@/components/org/bits";
+import { MeetingCard } from "@/components/org/MeetingCard";
 
-// ダッシュボード：工程どうしのつながりと進み具合を、各エージェントが報告する。案ごとの状況もグラフで見る
+const when = (t: string | null | undefined) => (t ? new Date(t).toLocaleString("ja-JP", { timeZone: "Asia/Tokyo", month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit" }) : "—");
+
+// ダッシュボード：工程どうしのつながりと進み具合を、各エージェントが報告する。PdM は PM と話し、毎日の会議で振り返る
 export default async function ProductPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
-  const d = await agent<Dashboard>(`/products/${id}/dashboard`);
+  const [d, msgs, issues, team] = await Promise.all([
+    agent<Dashboard>(`/products/${id}/dashboard`),
+    agent<PmMessageT[]>(`/products/${id}/pm-messages`),
+    agent<AgentIssueT[]>(`/products/${id}/issues?open_only=true`),
+    agent<{ beats?: Record<string, { at: string; detail: string }> }>(`/products/${id}/team`),
+  ]);
   const active = d.stages.filter((s) => s.enabled);
   const done = active.filter((s) => s.status === "completed").length;
   const waiting = active.filter((s) => s.pending_kind === "approval");
   const recheck = active.filter((s) => s.status === "needs_recheck");
   const pct = active.length ? Math.round((done / active.length) * 100) : 0;
-  const reds = d.agents.filter((a) => a.report?.health === "red");
+  const tick = team.beats?.tick;
+  const stale = !tick || Date.now() - new Date(tick.at).getTime() > 5 * 60 * 1000;
   const stats = [
     { label: "更新済み", value: `${done} / ${active.length}`, icon: CheckCircle2, tone: "text-emerald-600" },
     { label: "承認待ち", value: waiting.length, icon: Clock, tone: "text-amber-600" },
     { label: "要再確認", value: recheck.length, icon: AlertTriangle, tone: "text-rose-600" },
-    { label: "PdM 宛て（未読）", value: d.pdm_unread, icon: MessagesSquare, tone: "text-brand-600" },
-    { label: "止まっている担当", value: reds.length, icon: CircleDashed, tone: "text-rose-600" },
+    { label: "動いている Issue", value: issues.length, icon: ListChecks, tone: "text-violet-600" },
+    { label: "止まっている担当", value: d.agents.filter((a) => a.report?.health === "red").length, icon: CircleDashed, tone: "text-rose-600" },
   ];
   return (
     <>
@@ -32,18 +42,18 @@ export default async function ProductPage({ params }: { params: Promise<{ id: st
         sub={d.product.idea || "意図は未記入"}
         actions={<>
           <RunTeamButton pid={id} running={d.running} />
+          <Link href={`/p/${id}/issues`} className="btn-secondary">Issue</Link>
           <Link href={`/p/${id}/board`} className="btn-secondary">掲示板</Link>
-          <Link href={`/p/${id}/import`} className="btn-secondary">資料を取り込む</Link>
         </>}
       >
-        {d.product.status === "stopped" && (
-          <div className="mt-4 rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-[13px] text-rose-700">このプロダクトは中止されました。</div>
-        )}
         <div className="mt-5 flex items-center gap-3">
           <div className="h-1.5 flex-1 overflow-hidden rounded-full bg-zinc-100">
             <div className="h-full rounded-full bg-gradient-to-r from-brand-500 to-violet-500" style={{ width: `${pct}%` }} />
           </div>
           <span className="text-xs tabular-nums text-zinc-500">{pct}%</span>
+          <span className={`flex items-center gap-1 text-[11px] ${stale ? "text-rose-600" : "text-zinc-400"}`} title={tick?.detail}>
+            <CalendarClock size={12} />定期実行：{tick ? `最後の確認 ${when(tick.at)}` : "まだ一度も動いていません"}{stale && tick ? "（止まっているかもしれません）" : ""}
+          </span>
         </div>
       </PageHeader>
       <div className="space-y-6 px-8 py-6">
@@ -56,10 +66,10 @@ export default async function ProductPage({ params }: { params: Promise<{ id: st
           ))}
         </section>
         <TeamGraph d={d} pid={id} />
-        <div className="grid gap-6 xl:grid-cols-2">
-          <DirectorChat pid={id} v={d.director} versions={d.avatar_versions} />
+        <div className="grid gap-6 xl:grid-cols-[minmax(0,1.3fr)_minmax(0,1fr)]">
+          <div className="card"><PmChat pid={id} messages={msgs} versions={d.avatar_versions} /></div>
           <div className="space-y-6">
-            <PdmInbox pid={id} posts={d.to_pdm} findings={d.findings_open} />
+            <MeetingCard pid={id} meeting={d.meeting_today} schedule={d.meeting} pending={d.pending_notes} />
             {(waiting.length > 0 || recheck.length > 0) && (
               <section>
                 <h2 className="section-title mb-2">対応が必要</h2>

@@ -664,6 +664,91 @@ class AgentAvatar(Base):
     created_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), default=_now)
 
 
+class AgentIssue(Base):
+    """エージェントの Issue（#n。Redmine と同じ形）。宛先（担当）は PM と各工程の担当だけ。PdM は宛先にできない。"""
+    __tablename__ = "agent_issues"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    tenant_id: Mapped[str] = mapped_column(String(64), index=True)
+    product_id: Mapped[str] = mapped_column(String(32), index=True)
+    number: Mapped[int] = mapped_column(Integer)
+    tracker: Mapped[str] = mapped_column(String(10), default="task")       # task | feature | bug | question | support
+    subject: Mapped[str] = mapped_column(String(300))
+    description: Mapped[str] = mapped_column(Text, default="")
+    status: Mapped[str] = mapped_column(String(12), default="new")         # 新規〜却下
+    priority: Mapped[str] = mapped_column(String(10), default="normal")    # low | normal | high | urgent | immediate
+    author: Mapped[str] = mapped_column(String(200))                       # エージェントの key か PdM（人のメール）
+    assignee: Mapped[str] = mapped_column(String(12), index=True)          # pm_biz | pm_design | pm_impl | sNN
+    watchers: Mapped[list | None] = mapped_column(JSON, nullable=True)     # 確認が要るエージェント
+    stage_id: Mapped[str | None] = mapped_column(String(8), nullable=True)
+    parent: Mapped[int | None] = mapped_column(Integer, nullable=True)     # 親 Issue の番号
+    start_date: Mapped[str | None] = mapped_column(String(10), nullable=True)
+    due_date: Mapped[str | None] = mapped_column(String(10), nullable=True)
+    done_ratio: Mapped[int] = mapped_column(Integer, default=0)
+    created_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), default=_now)
+    updated_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), default=_now, onupdate=_now)
+
+
+class IssueJournal(Base):
+    """Issue の更新の記録（注記と、変えた属性の前後）。"""
+    __tablename__ = "issue_journals"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    issue_id: Mapped[int] = mapped_column(Integer, index=True)
+    author: Mapped[str] = mapped_column(String(200))
+    notes: Mapped[str] = mapped_column(Text, default="")
+    details: Mapped[list | None] = mapped_column(JSON, nullable=True)      # [{prop, old, new}]
+    created_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), default=_now)
+
+
+class PmNote(Base):
+    """PM のタスク管理の場所：状況確認で拾い集めたこと。会議で PdM に伝える。"""
+    __tablename__ = "pm_notes"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    product_id: Mapped[str] = mapped_column(String(32), index=True)
+    pm: Mapped[str] = mapped_column(String(12), index=True)
+    agent: Mapped[str] = mapped_column(String(12), default="")
+    kind: Mapped[str] = mapped_column(String(10), default="status")        # status | risk | decision | memo
+    text: Mapped[str] = mapped_column(Text)
+    meeting_id: Mapped[int | None] = mapped_column(Integer, nullable=True)  # 伝えた会議
+    created_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), default=_now)
+
+
+class PmMessage(Base):
+    """PdM と PM の対話（PdM が話せるのは PM だけ）。会議の中の発言も持つ。"""
+    __tablename__ = "pm_messages"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    product_id: Mapped[str] = mapped_column(String(32), index=True)
+    pm: Mapped[str] = mapped_column(String(12), index=True)
+    role: Mapped[str] = mapped_column(String(6))                            # pdm | pm
+    author: Mapped[str] = mapped_column(String(200))
+    text: Mapped[str] = mapped_column(Text)
+    stage_id: Mapped[str | None] = mapped_column(String(8), nullable=True)   # 工程の画面から話したとき
+    meeting_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    attachments: Mapped[list | None] = mapped_column(JSON, nullable=True)
+    issues: Mapped[list | None] = mapped_column(JSON, nullable=True)         # この発言で起票した Issue の番号
+    created_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), default=_now)
+
+
+class DailyMeeting(Base):
+    """PdM と PM の振り返りの会議（1日1回）。各 PM のレポートと、PM どうしの突き合わせ。"""
+    __tablename__ = "daily_meetings"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    product_id: Mapped[str] = mapped_column(String(32), index=True)
+    day: Mapped[str] = mapped_column(String(10))                             # YYYY-MM-DD（日本時間）
+    status: Mapped[str] = mapped_column(String(10), default="preparing")     # preparing | open | closed | failed
+    reports: Mapped[dict | None] = mapped_column(JSON, nullable=True)        # {pm: {text, health, at}}
+    reviews: Mapped[list | None] = mapped_column(JSON, nullable=True)        # [{pm, about, text, conflict}]
+    job_id: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    created_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), default=_now)
+
+
+class SystemBeat(Base):
+    """定期の呼び出し（tick）などが最後に来た時刻。止まっていないかを画面で確かめる。"""
+    __tablename__ = "system_beats"
+    name: Mapped[str] = mapped_column(String(40), primary_key=True)
+    at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), default=_now)
+    detail: Mapped[str] = mapped_column(String(500), default="")
+
+
 class TenantSecret(Base):
     """テナントの秘密情報（GitHub のトークンなど）。値は暗号化して置く。"""
     __tablename__ = "tenant_secrets"

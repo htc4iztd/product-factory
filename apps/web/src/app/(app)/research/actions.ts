@@ -99,6 +99,19 @@ export async function sendResearchToStage(pid: string, sid: string, n: number, i
   return {};
 }
 
+// リサーチの要約を、工程の領域の PM に渡す（PM が担当への Issue にする）
+export async function sendResearchToPm(pid: string, pm: string, sid: string, n: number, issue: string): Promise<Result> {
+  const r = await run(async () => {
+    const { brief } = await agent<{ brief: string }>(`/research/${n}/brief${issue ? `?issue=${encodeURIComponent(issue)}` : ""}`);
+    const text = `リサーチライブラリ RL-${n}${issue ? `の論点「${issue}」` : ""}を根拠に、この工程（${sid}）の項目を見直すよう担当に依頼してください。`
+      + "数字や主張には根拠のファクト番号 [RF-n] か記事番号 [RA-n] を添え、【原文未確認】のファクトは確かめが要ると伝えてください。\n\n" + fit(brief, 18000);
+    return agent(`/products/${pid}/pm/${pm}/talk`, { method: "POST", body: { text, stage_id: sid } });
+  });
+  if ("error" in r) return r;
+  revalidatePath(`/p/${pid}`, "layout");
+  return {};
+}
+
 // ---------------- 画面の中の操作（記事・ファクト・質問・プレーヤー・調査レポート） ----------------
 async function act(n: number, fn: () => Promise<unknown>): Promise<Result> {
   const r = await run(fn);

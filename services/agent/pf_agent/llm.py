@@ -372,15 +372,20 @@ def _is_claude(conn: Conn, model: str) -> bool:
     return conn.provider == "anthropic" or (conn.provider == "vertex" and model.startswith("claude"))
 
 
+# 1回の呼び出しの上限（応答が止まっても、ジョブが固まらないように）。検索つきの長い調べものも収まる長さ
+TIMEOUT_S = 600
+_HTTP = {"timeout": TIMEOUT_S * 1000, "retry_options": {"attempts": 3}}
+
+
 def _genai(conn: Conn):
     from google import genai  # google-adk の依存に含まれる
     if conn.provider == "vertex":
         if not conn.project:
             raise LLMError("Vertex AI のプロジェクトが決まっていません")
-        return genai.Client(vertexai=True, project=conn.project, location=conn.location or "global")
+        return genai.Client(vertexai=True, project=conn.project, location=conn.location or "global", http_options=_HTTP)
     if not conn.api_key:
         raise LLMError("Gemini API のキーがありません")
-    return genai.Client(api_key=conn.api_key)
+    return genai.Client(api_key=conn.api_key, http_options=_HTTP)
 
 
 def _anthropic(conn: Conn):
@@ -388,10 +393,11 @@ def _anthropic(conn: Conn):
     if conn.provider == "vertex":
         if not conn.project:
             raise LLMError("Vertex AI のプロジェクトが決まっていません")
-        return anthropic.AnthropicVertex(project_id=conn.project, region=conn.location or "global")
+        return anthropic.AnthropicVertex(project_id=conn.project, region=conn.location or "global",
+                                         timeout=TIMEOUT_S, max_retries=2)
     if not conn.api_key:
         raise LLMError("Anthropic API のキーがありません")
-    return anthropic.Anthropic(api_key=conn.api_key)
+    return anthropic.Anthropic(api_key=conn.api_key, timeout=TIMEOUT_S, max_retries=2)
 
 
 Images = list[tuple[bytes, str]]   # 添えた画像（中身, MIME）

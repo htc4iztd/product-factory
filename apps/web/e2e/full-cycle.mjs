@@ -40,14 +40,23 @@ await createProduct("家計簿アプリ", "共働き世帯の家計を5分で締
 const pid = page.url().split("/p/")[1];
 await shot("01-overview", true);
 
-async function draftAndCommit(sid, shotName, beforeCommit) {
+
+// 工程の下書きは、PdM が領域の PM に頼む → PM が担当に Issue を起票 → 担当が書き込む（PdM は担当と直接話さない）
+async function askPm(sid) {
   await page.goto(`${BASE}/p/${pid}/s/${sid}`);
-  await btn("下書きを作って").click();
-  const all = page.getByRole("button", { name: /件をすべて採用/ });
-  await all.waitFor();
-  if (shotName) await shot(`${shotName}-proposals`);
-  await all.click();
-  await all.waitFor({ state: "detached" });
+  await btn("この工程の下書きを作って").click();
+  for (let i = 0; i < 60; i++) {
+    await page.waitForTimeout(1000);
+    await page.reload();
+    const t = await page.locator("main").first().innerText();
+    const m = t.match(/必須項目\s*(\d+)\s*\/\s*(\d+)/);
+    if (m && m[1] === m[2]) return;
+  }
+  throw new Error(`${sid} の下書きが担当から返ってこない`);
+}
+
+async function draftAndCommit(sid, shotName, beforeCommit) {
+  await askPm(sid);
   if (shotName) await shot(`${shotName}-canvas`);
   if (beforeCommit) await beforeCommit();
   await btn(/^更新/).first().click();
@@ -132,7 +141,9 @@ await btn("Request Changes").click();
 await page.getByText("理由が必須").waitFor();
 await page.getByPlaceholder(/理由・修正指示/).fill("撤退条件を数値で");
 await btn("Request Changes").click();
+await btn("案タブ").click();
 await page.getByText("承認者の修正指示：撤退条件を数値で").waitFor();
+await btn("PMタブ").click();
 await page.getByRole("button", { name: "撤退条件を編集" }).click();
 await page.locator("textarea").first().fill("6か月で週次の締め完了世帯が100未満なら撤退");
 await btn("保存", true).click();
@@ -174,10 +185,7 @@ await page.waitForSelector('[aria-label="業務要求定義を使う"][aria-chec
 // 文書型のステージ（⑥）も同じ流れで更新できる
 await draftAndCommit("s06", "11-doc-stage");
 // ⑧：⑥のストーリーが機能要求で覆われているかを見る。⑬：⑥の受入基準を取り込む
-await page.goto(`${BASE}/p/${pid}/s/s08`);
-await btn("下書きを作って").click();
-await page.getByRole("button", { name: /件をすべて採用/ }).click();
-await page.getByRole("button", { name: /件をすべて採用/ }).waitFor({ state: "detached" });
+await askPm("s08");
 await page.getByText("⑥ストーリーの網羅").waitFor();
 await shot("11d-system-req", true);
 await page.goto(`${BASE}/p/${pid}/s/s13`);
@@ -192,24 +200,16 @@ await page.getByText("事業フェーズの成果物").waitFor();
 await page.getByRole("button", { name: /④ プロダクト戦略/ }).click();
 await page.getByText("北極星指標").first().waitFor();
 await shot("11b-reference");
-await btn("AIタブ").click();
+await btn("PMタブ").click();
 await btn("AIタブを閉じる").click();
 await btn("AIタブを閉じる").waitFor({ state: "detached" });
-await btn("AIタブ").click();
-await btn("下書きを作って").waitFor();
-// 対話セッション：新しいセッションで話し、前のセッションに戻れる。レポートで全セッションを要約する
-await btn("新しいセッション").click();
-await page.getByText("考えていることをそのまま書いてください").waitFor();
-await btn("矛盾や抜けを指摘して").click();
-await page.getByText(/すべての項目が埋まっています|項目の/).last().waitFor();
-const sessions = page.getByLabel("対話セッション");
-await sessions.selectOption({ index: 1 });
-await page.getByText(/項目の下書きを提案します/).waitFor();
-await page.getByRole("button", { name: "レポート", exact: true }).click();
-await btn("レポートを作成").click();
-await page.getByText("決まったこと（採用した案）").waitFor();
-await shot("11c-report");
-await page.getByRole("button", { name: "対話", exact: true }).click();
+await btn("PMタブ").click();
+await btn("この工程の下書きを作って").waitFor();
+// 担当エージェントとは直接話さない：案タブは届いた案の採用・却下だけ
+await btn("案タブ").click();
+await page.getByText(/担当エージェントとは直接話せません/).waitFor();
+await shot("11c-props");
+await btn("PMタブ").click();
 
 await page.goto(`${BASE}/p/${pid}/g/P1`);
 await btn("進む", true).click();
@@ -217,7 +217,7 @@ await page.getByText("直近の記録").waitFor();
 await shot("12-gate", true);
 
 await page.goto(`${BASE}/p/${pid}`);
-await page.getByRole("region", { name: "司令塔との対話" }).waitFor();   // トップはダッシュボード（表紙はプロダクト・キャンバスに）
+await page.getByRole("region", { name: "PM との対話" }).waitFor();   // トップはダッシュボード（表紙はプロダクト・キャンバスに）
 await shot("13-overview-after", true);
 // サイドバーを隠す → 再読み込みしても隠れたまま → 表示に戻す
 await btn("サイドバーを隠す").click();

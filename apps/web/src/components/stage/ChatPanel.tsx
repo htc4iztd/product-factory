@@ -14,7 +14,7 @@ import { AttachButton, AttachChips, SentAttachments, useAttachments } from "@/co
 type Choice = Awaited<ReturnType<typeof researchChoices>>[number];
 
 // リサーチライブラリの論点のまとめとファクトを、根拠つきの案を頼む発言として送る
-function ResearchImport({ busy, onSend, onClose }: { busy: boolean; onSend: (n: number, issue: string, label: string) => void; onClose: () => void }) {
+export function ResearchImport({ busy, onSend, onClose }: { busy: boolean; onSend: (n: number, issue: string, label: string) => void; onClose: () => void }) {
   const [libs, setLibs] = useState<Choice[] | null>(null);
   const [n, setN] = useState(0);
   const [issue, setIssue] = useState("");
@@ -166,7 +166,7 @@ export function ChatPanel({ pid, sid, chat, fields, prompts, disabled, onClose, 
           )}
         </div>
         <span className="ml-auto shrink-0 text-[11px] text-zinc-400">
-          {me ? <a href={`/p/${pid}/board?agent=${sid}`} className="hover:underline">掲示板{me.open_tasks ? `・タスク ${me.open_tasks}` : ""}</a> : "案は採用するまで反映されません"}
+          {me ? <a href={`/p/${pid}/issues?assignee=${sid}`} className="hover:underline">Issue {me.open_issues}</a> : "案は採用するまで反映されません"}
         </span>
         {onClose && (
           <button onClick={onClose} className="btn-ghost btn-sm h-7 w-7 p-0" title="AIタブを閉じる（]）" aria-label="AIタブを閉じる"><PanelRightClose size={15} /></button>

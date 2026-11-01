@@ -15,7 +15,7 @@ from . import images, jobs, llmconf
 from .db import AgentAvatar, JobRun, session
 from .stages import STAGE_BY_ID, STAGES
 
-KEYS = ("director", "pm", *(s.id for s in STAGES))
+KEYS = ("pm_biz", "pm_design", "pm_impl", *(s.id for s in STAGES))
 
 STYLE = (
     "Character portrait for a product-development team app. Friendly modern flat illustration, soft gradients, "
@@ -25,11 +25,11 @@ STYLE = (
 )
 # 役割ごとの人物像と持ち物（顔だけで役割が分かるように）
 CHARACTERS = {
-    "director": (
-        "calm strategic leader in a dark navy jacket, holding a brass compass, thoughtful confident expression",
-        "deep indigo",
-    ),
-    "pm": ("organized project manager with a headset and a tablet showing a timeline, attentive smile", "violet"),
+    "pm_biz": ("business project manager in a smart blazer holding a roadmap with coins and a target, decisive smile",
+               "amber"),
+    "pm_design": ("design project manager with a headset and a tablet showing connected diagrams, attentive", "violet"),
+    "pm_impl": ("delivery project manager with rolled-up sleeves holding a kanban board and a small rocket, energetic",
+                "emerald"),
     "s01": ("curious idea maker with a lightbulb pin, sticky notes around, bright eyes", "warm yellow"),
     "s02": ("market analyst with round glasses holding a small bar chart", "teal"),
     "s03": ("competitive researcher with binoculars around the neck, sharp look", "orange"),
@@ -64,7 +64,7 @@ class AvatarError(Exception):
 
 def prompt_for(key: str) -> str:
     who, color = CHARACTERS[key]
-    role = "commander" if key == "director" else "project manager" if key == "pm" else f"owner of the stage '{key}'"
+    role = "project manager" if key.startswith("pm_") else f"owner of the stage '{key}'"
     return f"{STYLE} Character: {who}. Role: {role}. Background color: {color}."
 
 
@@ -72,7 +72,8 @@ def geometric(key: str) -> bytes:
     """役割から決まる幾何学模様の顔（描いていないときの代わり）。"""
     h = hashlib.sha256(key.encode()).digest()
     c1, c2 = PALETTE[h[0] % len(PALETTE)], PALETTE[h[1] % len(PALETTE)]
-    label = "司" if key == "director" else "PM" if key == "pm" else STAGE_BY_ID[key].no if key in STAGE_BY_ID else "?"
+    label = {"pm_biz": "事", "pm_design": "設", "pm_impl": "実"}.get(key)
+    label = label or (STAGE_BY_ID[key].no if key in STAGE_BY_ID else "?")
     shapes = "".join(
         f'<circle cx="{20 + (h[i] % 60)}" cy="{20 + (h[i + 1] % 60)}" r="{8 + h[i + 2] % 18}" fill="#fff" '
         f'opacity="{0.10 + (h[i + 3] % 20) / 100:.2f}"/>'

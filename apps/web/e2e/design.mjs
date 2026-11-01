@@ -31,14 +31,21 @@ await btn("この内容でプロダクトをつくる").click();
 await page.waitForURL(/\/p\/[0-9a-f]+$/);
 const pid = page.url().split("/p/")[1];
 
+
+// 工程の下書きは、PdM が領域の PM に頼む → PM が担当に Issue を起票 → 担当が書き込む（PdM は担当と直接話さない）
 async function draft(sid) {
   await page.goto(`${BASE}/p/${pid}/s/${sid}`);
-  await btn("下書きを作って").click();
-  const all = page.getByRole("button", { name: /件をすべて採用/ });
-  await all.waitFor();
-  await all.click();
-  await all.waitFor({ state: "detached" });
+  await btn("この工程の下書きを作って").click();
+  for (let i = 0; i < 60; i++) {
+    await page.waitForTimeout(1000);
+    await page.reload();
+    const t = await page.locator("main").first().innerText();
+    const m = t.match(/必須項目\s*(\d+)\s*\/\s*(\d+)/);
+    if (m && m[1] === m[2]) return;
+  }
+  throw new Error(`${sid} の下書きが担当から返ってこない`);
 }
+
 
 // ⑨：ER図・処理仕様・状態遷移
 await draft("s09");
@@ -103,6 +110,8 @@ await btn("保存", true).click();
 await page.getByText(/次に動くとき・話すときから読みます/).waitFor();
 await shot("d8-import", true);
 await page.getByRole("link", { name: /工程を開いて案を選ぶ/ }).first().click();
+await page.waitForURL(/\/s\/s\d\d$/);
+await btn("案タブ").click();
 await page.getByText(/資料「運用設計.md」から 1 項目の案を作りました/).waitFor();
 await shot("d9-import-proposals");
 // 報告資料：⑨⑩を選び、AI の構成 → 直す → PowerPoint

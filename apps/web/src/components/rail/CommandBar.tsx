@@ -2,18 +2,20 @@
 import { useEffect, useMemo, useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { ArrowRight, CornerDownLeft, Send } from "lucide-react";
-import { postBoard, talkDirector } from "@/app/(app)/p/[id]/org-actions";
+import { talkPm } from "@/app/(app)/p/[id]/org-actions";
 import { Avatar } from "./Avatar";
 
 type Item =
   | { kind: "go"; label: string; href: string; hint: string; keys: string }
-  | { kind: "say"; label: string; to: string; agent: string; text: string };
+  | { kind: "say"; label: string; to: string; agent: string; text: string; stage?: string };
 
-// 話して移動する：⌘K（どこからでも）。言葉で行き先を探すか、そのまま担当に話しかける。
+// 話して移動する：⌘K（どこからでも）。言葉で行き先を探すか、そのまま PM に話しかける（PdM が話せるのは PM だけ。
+// 工程の名前・番号が出てきたら、その工程の領域の PM に「その工程について」話す）。
 // 読み違えないよう、行き先も話しかける相手も候補として見せ、選んだものだけを実行する
-export function CommandBar({ pid, places, agents, versions }: {
+export function CommandBar({ pid, places, agents, stages, versions }: {
   pid: string; places: { label: string; href: string; hint: string; keys: string }[];
-  agents: { key: string; name: string; keys: string }[]; versions: Record<string, string>;
+  agents: { key: string; name: string; keys: string }[]; stages: { id: string; label: string; keys: string; pm: string }[];
+  versions: Record<string, string>;
 }) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
@@ -38,26 +40,33 @@ export function CommandBar({ pid, places, agents, versions }: {
   const items = useMemo<Item[]>(() => {
     const t = q.trim();
     const low = t.toLowerCase();
-    // 「@担当」で宛先を決める。名前・工程番号が文に出てきたら、その担当にも話しかけられるようにする
+    // 「@事業PM」「@⑨」で宛先を決める。工程が出てきたら、その工程の領域の PM にその工程について話す
     const at = t.match(/^@(\S+)\s*(.*)$/);
-    const mentioned = agents.filter((a) => a.keys.split(" ").some((k) => k && (at ? at[1].includes(k) || k.includes(at[1]) : t.includes(k))));
+    const hit = (keys: string) => keys.split(" ").some((k) => k && (at ? at[1].includes(k) || k.includes(at[1]) : t.includes(k)));
+    const stage = stages.find((s) => hit(s.keys));
+    const pm = agents.find((a) => hit(a.keys));
     const body = at ? at[2] : t;
     const go: Item[] = places.filter((p) => !t || (p.label + p.keys).toLowerCase().includes(low) || low.split(/\s+/).some((w) => w && (p.label + p.keys).toLowerCase().includes(w)))
       .slice(0, t ? 6 : 8).map((p) => ({ kind: "go", ...p }));
     if (!body) return go;
-    const targets = [...mentioned, ...agents.filter((a) => a.key === "director" || a.key === "pm")]
-      .filter((a, i, arr) => arr.findIndex((x) => x.key === a.key) === i).slice(0, 4);
-    const say: Item[] = targets.map((a) => ({ kind: "say", label: `${a.name}に話す`, to: a.key, agent: a.key, text: body }));
+    const say: Item[] = [];
+    if (stage) {
+      const a = agents.find((x) => x.key === stage.pm)!;
+      say.push({ kind: "say", label: `${a.name}に話す（${stage.label}について）`, to: a.key, agent: a.key, text: body, stage: stage.id });
+    }
+    for (const a of pm ? [pm] : agents) {
+      if (!say.some((x) => x.kind === "say" && x.to === a.key)) say.push({ kind: "say", label: `${a.name}に話す`, to: a.key, agent: a.key, text: body });
+    }
     return at ? [...say, ...go] : [...go.slice(0, 3), ...say, ...go.slice(3)];
-  }, [q, places, agents]);
+  }, [q, places, agents, stages]);
 
   function run(it: Item) {
     if (it.kind === "go") { setOpen(false); setQ(""); router.push(it.href); return; }
     start(async () => {
-      const r = it.to === "director" ? await talkDirector(pid, it.text) : await postBoard(pid, it.to, it.text);
+      const r = await talkPm(pid, it.to, it.text, { stage_id: it.stage });
       if (r.error) return setMsg(r.error);
       setQ("");
-      setMsg(it.to === "director" ? "司令塔が答えました（ダッシュボードの対話に出ています）" : `${it.label.replace("に話す", "")}に送りました。すぐ動いて掲示板で答えます`);
+      setMsg(`${it.label.replace(/に話す.*/, "")}が答えました${r.issues?.length ? `（Issue ${r.issues.map((n) => `#${n}`).join("、")} を起票）` : ""}。ダッシュボードか PM の作業場所で読めます`);
       router.refresh();
     });
   }
@@ -67,7 +76,7 @@ export function CommandBar({ pid, places, agents, versions }: {
     <div className="fixed inset-0 z-[60] flex items-start justify-center bg-zinc-900/30 px-4 pt-[12vh] backdrop-blur-[2px]" onClick={() => setOpen(false)}>
       <div className="w-full max-w-xl overflow-hidden rounded-2xl border border-zinc-200 bg-white shadow-pop" onClick={(e) => e.stopPropagation()} role="dialog" aria-label="話しかける・移動する">
         <div className="flex items-center gap-2 border-b border-zinc-100 px-4 py-3">
-          <input ref={input} value={q} aria-label="話しかける・移動する" placeholder="行き先を探す・担当に話しかける（@⑨ ER図に申込日時を足して）"
+          <input ref={input} value={q} aria-label="話しかける・移動する" placeholder="行き先を探す・PM に話しかける（@⑨ ER図に申込日時を足して → 設計PMへ）"
             className="flex-1 bg-transparent text-[15px] outline-none placeholder:text-zinc-400"
             onChange={(e) => { setQ(e.target.value); setIdx(0); setMsg(null); }}
             onKeyDown={(e) => {

@@ -5,12 +5,12 @@ import Link from "next/link";
 import {
   Background, Controls, Handle, MarkerType, Position, ReactFlow, ReactFlowProvider, type Edge, type Node, type NodeProps,
 } from "@xyflow/react";
-import { Compass, GitBranch, ListChecks, Mail, Network, Users } from "lucide-react";
+import { GitBranch, ListChecks, Mail, Network, Users } from "lucide-react";
 import type { Dashboard, StageSummary, TeamMember } from "@/lib/agent";
 import { Avatar } from "@/components/rail/Avatar";
 
 // ダッシュボードのグラフ。2つの見方：
-// - 組織と工程：司令塔・PM・各工程の担当。工程のつながり（灰色）と、最近のエージェント同士のやり取り（色つき・動く線）
+// - 組織と工程：3人の PM と各工程の担当。工程のつながり（灰色）と、最近のエージェント同士のやり取り（色つき・動く線）
 // - 案ごと：本線と各案（PP-n）を行に、工程を列にして、どの案がどの工程まで進んでいるか
 const HEALTH: Record<string, { dot: string; label: string }> = {
   green: { dot: "bg-emerald-500", label: "順調" }, yellow: { dot: "bg-amber-400", label: "注意" },
@@ -20,7 +20,7 @@ const STATUS: Record<string, string> = {
   not_started: "未着手", in_progress: "作業中", awaiting_approval: "承認待ち", revising: "修正中", completed: "完了",
   skipped: "スキップ", needs_recheck: "要再確認",
 };
-const INTENT: Record<string, string> = { report: "報告", request: "依頼", answer: "回答", decision: "決定", directive: "指示", question: "質問" };
+const INTENT: Record<string, string> = { confirm: "確認", answer: "回答", notice: "共有", issue: "Issue" };
 const PHASE_ORDER = ["P1", "P2", "P3", "P4", "P5"];
 // 工程グループの色（事業・要求設計・構築・リリース）。レールと同じ
 const PHASE_COLOR: Record<string, string> = { P1: "#f59e0b", P2: "#f59e0b", P3: "#6366f1", P4: "#10b981", P5: "#f43f5e" };
@@ -47,7 +47,7 @@ function AgentNode({ data }: NodeProps<Node<AData>>) {
       <Hd />
       <div className="flex items-center gap-1.5">
         <Avatar k={m.key} v={v} size={lead ? 34 : 28} state={off ? "off" : m.state ?? "idle"} />
-        {m.role === "director" ? <Compass size={12} className="text-brand-600" /> : m.role === "pm" ? <Users size={12} className="text-brand-600" /> : null}
+        {m.role === "pm" ? <Users size={12} className="text-brand-600" /> : null}
         <span className="truncate text-[12px] font-semibold text-zinc-900">{m.name}</span>
         <span className={`ml-auto h-2 w-2 shrink-0 rounded-full ${rep ? HEALTH[rep.health]?.dot ?? "bg-zinc-300" : "bg-zinc-200"}`} title={rep ? HEALTH[rep.health]?.label : "まだ報告がない"} />
       </div>
@@ -63,7 +63,7 @@ function AgentNode({ data }: NodeProps<Node<AData>>) {
       )}
       <p className="mt-1.5 line-clamp-2 min-h-[2.4em] text-zinc-600">{rep?.summary || (lead ? m.mission : "まだ動いていません")}</p>
       <div className="mt-1.5 flex flex-wrap items-center gap-1 text-[10px]">
-        {m.open_tasks > 0 && <span className="flex items-center gap-0.5 rounded bg-zinc-100 px-1 text-zinc-600"><ListChecks size={10} />{m.open_tasks}</span>}
+        {m.open_issues > 0 && <span className="flex items-center gap-0.5 rounded bg-violet-100 px-1 text-violet-800" title="自分宛ての終わっていない Issue"><ListChecks size={10} />Issue {m.open_issues}</span>}
         {m.unread > 0 && <span className="flex items-center gap-0.5 rounded bg-amber-100 px-1 text-amber-800"><Mail size={10} />未読 {m.unread}</span>}
         {variants.map((v) => (
           <span key={v.key} className={`rounded px-1 font-medium ${v.status === "adopted" ? "bg-emerald-100 text-emerald-800" : v.status === "generating" ? "bg-sky-100 text-sky-800" : "bg-violet-100 text-violet-800"}`}>{v.key}</span>
@@ -97,9 +97,13 @@ function OrgGraph({ d, pid, sel, onSelect }: { d: Dashboard; pid: string; sel: s
     const ids = phases[ph] ?? [];
     return ids.length > 4 ? [ids.slice(0, Math.ceil(ids.length / 2)), ids.slice(Math.ceil(ids.length / 2))] : [ids];
   });
-  const mid = ((cols.length - 1) * COL) / 2;
-  const pos: Record<string, { x: number; y: number }> = { director: { x: mid - COL * 0.6, y: 0 }, pm: { x: mid + COL * 0.6, y: 0 } };
+  const pos: Record<string, { x: number; y: number }> = {};
   cols.forEach((ids, i) => ids.forEach((sid, j) => { pos[sid] = { x: i * COL, y: ROW * 1.4 + j * ROW }; }));
+  // PM は自分の領域の列の真上に置く
+  for (const m of d.agents.filter((a) => a.role === "pm")) {
+    const xs = m.domain.map((sid) => pos[sid]?.x).filter((x): x is number => x !== undefined);
+    if (xs.length) pos[m.key] = { x: (Math.min(...xs) + Math.max(...xs)) / 2, y: 0 };
+  }
   const vOf = (sid: string) => d.variants.filter((v) => v.stages.includes(sid)).map((v) => ({ key: v.key, status: v.status, number: v.number }));
   const nodes: Node<AData>[] = d.agents.filter((m) => pos[m.key]).map((m) => ({
     id: m.key, type: "agent", position: pos[m.key], draggable: false,
@@ -117,19 +121,23 @@ function OrgGraph({ d, pid, sel, onSelect }: { d: Dashboard; pid: string; sel: s
         type: "smoothstep", style: { stroke: "#d4d4d8", strokeWidth: 1.2 } });
     }
   }
+  // PM と領域の担当（指揮系統）
+  const lines: Edge[] = d.agents.filter((a) => a.role === "pm").flatMap((m) => m.domain.filter((sid) => pos[sid] && pos[m.key])
+    .map((sid) => ({ id: `cmd-${m.key}-${sid}`, source: m.key, target: sid, sourceHandle: "b", targetHandle: "t", type: "straight",
+      style: { stroke: "#e4e4e7", strokeWidth: 1, strokeDasharray: "3 3" } })));
   const talk: Edge[] = d.edges.filter((e) => pos[e.source] && pos[e.target]).map((e) => {
     const a = pos[e.source], b = pos[e.target];
     const down = Math.abs(b.y - a.y) > Math.abs(b.x - a.x);
     return {
       id: `talk-${e.source}-${e.target}`, source: e.source, target: e.target, animated: true, type: "default",
       sourceHandle: down ? (b.y > a.y ? "b" : "t") : (b.x > a.x ? "r" : "l"), targetHandle: down ? (b.y > a.y ? "t" : "b") : (b.x > a.x ? "l" : "r"),
-      label: `${INTENT[e.last.intent] ?? e.last.intent} ${e.count}`, labelStyle: { fontSize: 10, fontWeight: 700, fill: "#4338ca" },
+      label: [e.count ? `掲示板 ${e.count}` : "", e.issues ? `Issue ${e.issues}` : ""].filter(Boolean).join("・") || INTENT[e.last.intent], labelStyle: { fontSize: 10, fontWeight: 700, fill: "#4338ca" },
       labelBgStyle: { fill: "#eef2ff" }, labelBgPadding: [4, 2] as [number, number],
       markerEnd: { type: MarkerType.ArrowClosed, color: "#6366f1" }, style: { stroke: "#6366f1", strokeWidth: 1.6 },
     };
   });
   return (
-    <ReactFlow nodes={nodes} edges={[...deps, ...talk]} nodeTypes={nodeTypes} fitView fitViewOptions={{ padding: 0.04 }} minZoom={0.2} proOptions={{ hideAttribution: true }}
+    <ReactFlow nodes={nodes} edges={[...lines, ...deps, ...talk]} nodeTypes={nodeTypes} fitView fitViewOptions={{ padding: 0.04 }} minZoom={0.2} proOptions={{ hideAttribution: true }}
       nodesConnectable={false} onNodeClick={(_, n) => onSelect(n.id)} onPaneClick={() => onSelect(null)}>
       <Background gap={24} color="#f4f4f5" />
       <Controls showInteractive={false} position="bottom-right" />
@@ -213,7 +221,9 @@ export function TeamGraph({ d, pid }: { d: Dashboard; pid: string }) {
             {!!m.report?.next.length && <div><div className="text-[11px] font-medium text-zinc-500">次にやること</div><ul className="list-disc pl-4">{m.report.next.map((b, i) => <li key={i}>{b}</li>)}</ul></div>}
             <div className="text-[11px] text-zinc-400">使命：{m.mission}</div>
             <div className="flex gap-2 pt-1">
-              {m.role === "stage" && <Link href={`/p/${pid}/s/${m.key}`} className="btn-secondary btn-sm">工程を開いて話す</Link>}
+              {m.role === "stage" ? <Link href={`/p/${pid}/s/${m.key}`} className="btn-secondary btn-sm">工程を開く</Link>
+                : <Link href={`/p/${pid}/pm/${m.key}`} className="btn-secondary btn-sm">作業場所</Link>}
+              <Link href={`/p/${pid}/issues?assignee=${m.key}`} className="btn-ghost btn-sm">Issue</Link>
               <Link href={`/p/${pid}/board?agent=${m.key}`} className="btn-ghost btn-sm">掲示板で見る</Link>
             </div>
           </div>

@@ -1,13 +1,12 @@
 "use client";
 import Link from "next/link";
 import { useState, useTransition } from "react";
-import { Compass, Play, Plus, Save, Users } from "lucide-react";
-import type { TeamMember, TeamTask } from "@/lib/agent";
-import { drawAvatars, editTeamAgent, runTeam, saveTeamTask } from "@/app/(app)/p/[id]/org-actions";
+import { Play, Save, Users } from "lucide-react";
+import type { TeamInfo, TeamMember } from "@/lib/agent";
+import { drawAvatars, editTeamAgent, runTeam } from "@/app/(app)/p/[id]/org-actions";
 import { Avatar } from "@/components/rail/Avatar";
 
 const HEALTH: Record<string, string> = { green: "bg-emerald-500", yellow: "bg-amber-400", red: "bg-rose-500" };
-const TASK: Record<TeamTask["status"], string> = { todo: "未着手", doing: "進行中", blocked: "止まっている", done: "完了" };
 const when = (t: string | null) => (t ? new Date(t).toLocaleString("ja-JP", { timeZone: "Asia/Tokyo", month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit" }) : "—");
 
 // エージェントの組織：使命・動く時刻（cron）・止める／動かす。タスクの一覧
@@ -18,7 +17,7 @@ function MemberRow({ pid, m, v }: { pid: string; m: TeamMember; v?: string }) {
   const [msg, setMsg] = useState<string | null>(null);
   const [pending, start] = useTransition();
   const act = (fn: () => Promise<{ error?: string }>, ok?: string) => start(async () => { const r = await fn(); setMsg(r.error ?? ok ?? null); });
-  const Icon = m.role === "director" ? Compass : m.role === "pm" ? Users : null;
+  const Icon = m.role === "pm" ? Users : null;
   return (
     <div className={`border-b border-zinc-100 px-4 py-2.5 last:border-0 ${m.enabled ? "" : "opacity-60"}`}>
       <div className="flex flex-wrap items-center gap-2 text-[13px]">
@@ -64,53 +63,34 @@ export function OrgSettings({ pid, agents, versions }: { pid: string; agents: Te
           </button>
         </div>
         {msg && <p className="mt-1 text-[11px] text-zinc-500">{msg}</p>}
-        <p className="text-[11px] text-zinc-500">司令塔は PdM と戦略を決め、PM に伝える。PM は工程を横ぐしで見て担当に依頼する。各工程の担当は自分の工程を作る。進めていない工程の担当は、依頼がなければ動きません。</p>
+        <p className="text-[11px] text-zinc-500">PdM が話すのは PM だけ。PM は自分の領域の担当に Issue で伝え、1時間ごとに状況を確かめる。各工程の担当は10分ごとに自分宛ての Issue を確かめ、あれば実行して工程に書き込み、結果を返す（なければ AI は使わない）。</p>
       </div>
       {agents.map((m) => <MemberRow key={m.key} pid={pid} m={m} v={versions[m.key]} />)}
     </section>
   );
 }
 
-export function TaskBoard({ pid, tasks, agents }: { pid: string; tasks: TeamTask[]; agents: TeamMember[] }) {
-  const [title, setTitle] = useState("");
-  const [who, setWho] = useState("pm");
+// 会議の予定と、定期実行が動いているか
+export function MeetingSchedule({ pid, meeting, beats }: { pid: string; meeting: TeamInfo["meeting"]; beats?: TeamInfo["beats"] }) {
+  const [cronExpr, setCron] = useState(meeting.cron);
+  const [msg, setMsg] = useState<string | null>(null);
   const [pending, start] = useTransition();
-  const cols: TeamTask["status"][] = ["todo", "doing", "blocked", "done"];
+  const tick = beats?.tick;
   return (
-    <section className="card p-4">
-      <div className="mb-3 flex flex-wrap items-center gap-2">
-        <h2 className="text-[14px] font-semibold">タスク</h2>
-        <span className="text-[11px] text-zinc-500">エージェントが洗い出し、動くたびに最新にします。PdM が持つタスクには「PdM」と付きます</span>
-        <span className="ml-auto flex gap-1.5">
-          <select className="input h-8 w-auto py-0 text-[12px]" value={who} onChange={(e) => setWho(e.target.value)} aria-label="タスクの担当">
-            {agents.map((a) => <option key={a.key} value={a.key}>{a.name}</option>)}
-          </select>
-          <input className="input h-8 w-56 text-[12px]" value={title} placeholder="タスクを足す" aria-label="タスクを足す" onChange={(e) => setTitle(e.target.value)} />
-          <button className="btn-secondary btn-sm" disabled={pending || !title.trim()} onClick={() => start(async () => { await saveTeamTask(pid, null, { agent: who, title }); setTitle(""); })}><Plus size={12} /></button>
-        </span>
+    <section className="card space-y-2 p-4 text-[12.5px]">
+      <div className="flex flex-wrap items-end gap-2">
+        <div className="mr-auto">
+          <h2 className="text-[14px] font-semibold">振り返りの会議の予定</h2>
+          <p className="text-[11px] text-zinc-500">PdM と3人の PM が1日1回振り返ります。時刻になると PM がレポートと突き合わせを準備します。次：{meeting.enabled ? when(meeting.next_run_at) : "止めています"}</p>
+        </div>
+        <label className="block"><span className="label">cron（日本時間）</span>
+          <input className="input h-8 w-40 font-mono text-[12px]" value={cronExpr} aria-label="会議の cron" onChange={(e) => setCron(e.target.value)} /></label>
+        <button className="btn-primary btn-sm mb-0.5" disabled={pending} onClick={() => start(async () => { const r = await editTeamAgent(pid, "meeting", { cron: cronExpr }); setMsg(r.error ?? "保存しました"); })}>保存</button>
       </div>
-      <div className="grid gap-3 md:grid-cols-4">
-        {cols.map((c) => (
-          <div key={c} className="rounded-lg bg-zinc-50 p-2">
-            <div className="mb-1.5 text-[11px] font-semibold text-zinc-500">{TASK[c]}（{tasks.filter((t) => t.status === c).length}）</div>
-            <div className="space-y-1.5">
-              {tasks.filter((t) => t.status === c).slice(0, 40).map((t) => (
-                <div key={t.number} className="rounded-md border border-zinc-200 bg-white p-2 text-[12px]">
-                  <div className="flex items-center gap-1 text-[10px] text-zinc-500">
-                    <span className="font-mono">{t.key}</span><span>{t.agent_name}</span>
-                    {t.owner === "pdm" && <span className="rounded bg-rose-100 px-1 text-rose-800">PdM</span>}
-                  </div>
-                  <div className="mt-0.5">{t.title}</div>
-                  <select className="mt-1 w-full rounded border border-zinc-200 bg-white text-[11px]" value={t.status} aria-label={`${t.key}の状態`}
-                    onChange={(e) => start(async () => { await saveTeamTask(pid, t.number, { status: e.target.value }); })}>
-                    {cols.map((x) => <option key={x} value={x}>{TASK[x]}</option>)}
-                  </select>
-                </div>
-              ))}
-            </div>
-          </div>
-        ))}
-      </div>
+      <p className={`text-[11px] ${tick ? "text-zinc-500" : "text-rose-600"}`}>
+        定期実行（毎分の呼び出し）：{tick ? `最後 ${when(tick.at)}・${tick.detail}` : "まだ一度も呼ばれていません（Cloud Scheduler の設定を確かめてください）"}
+      </p>
+      {msg && <p className="text-[11px] text-zinc-500">{msg}</p>}
     </section>
   );
 }

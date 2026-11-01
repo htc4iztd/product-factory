@@ -169,13 +169,14 @@ const [deck] = await Promise.all([page.waitForEvent("download"), btn("PowerPoint
 if (fs.statSync(await deck.path()).size < 10000) throw new Error("PowerPoint が小さすぎる");
 
 // ②の対話にリサーチを取り込む
+// ②の領域の PM（事業 PM）にリサーチを渡す → PM が②の担当に Issue で依頼する
 await page.goto(`${BASE}/p/${pid}/s/s02`);
 await btn("リサーチから取り込む").click();
 await page.getByRole("combobox", { name: "ライブラリ" }).selectOption({ index: 0 });
 await page.getByLabel("論点", { exact: true }).selectOption("締め処理");
 await btn("送る", true).click();
-await page.getByText(/リサーチライブラリ RL-\d+「家計管理アプリの動向」から/).waitFor();
-await page.getByText("考えています…").waitFor({ state: "detached" });
+await page.getByText(/リサーチライブラリ RL-\d+の論点「締め処理」を根拠に/).waitFor();
+await page.getByText(/承知しました/).first().waitFor();
 await shot("k7-stage-import");
 console.log(`ok product=${pid} library=RL-${lib}`);
 await browser.close();

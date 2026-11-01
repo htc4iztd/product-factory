@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { ArrowRight, Lock } from "lucide-react";
-import { agent, AgentError, type StageDetail, type VariantStage } from "@/lib/agent";
+import { agent, AgentError, type StageDetail, type VariantStage, type PmMessageT } from "@/lib/agent";
 import { auth } from "@/lib/auth";
 import { PatternStageBar } from "@/components/autodev/PatternStageBar";
 import { StatusBadge, StatusDot } from "@/components/StatusBadge";
@@ -27,7 +27,11 @@ export default async function StagePage({ params, searchParams }: Props) {
   const st: StageDetail = pp ? { ...main, draft: pp.draft, markdown: pp.markdown, chat: [] } : main;
   const canEdit = (await auth())?.user?.role !== "VIEWER";
   const panel = (await cookies()).get("pf_ai")?.value;
-  const drawer = panel === "closed" || panel === "ref" ? panel : "ai";
+  const drawer = panel === "closed" || panel === "ref" || panel === "props" ? panel : "ai";
+  const [pmMessages, versions] = await Promise.all([
+    agent<PmMessageT[]>(`/products/${id}/pm-messages?pm=${main.agent?.pm ?? "pm_biz"}`).catch(() => [] as PmMessageT[]),
+    agent<Record<string, string>>("/avatars").catch(() => ({} as Record<string, string>)),
+  ]);
   const here = `/p/${id}/s/${stage}`;
   const awaiting = st.status === "awaiting_approval";
   const readOnly = !st.enabled || !!pp;
@@ -120,7 +124,7 @@ export default async function StagePage({ params, searchParams }: Props) {
             )}
           </div>
         </section>
-        <AiDrawer initial={drawer} agent={st.agent} references={st.references} decisions={st.decisions} sessions={st.sessions} sessionId={st.session_id} report={st.report} pid={id} sid={stage} chat={st.chat} fields={st.framework.fields} prompts={st.framework.prompts}
+        <AiDrawer initial={drawer} agent={st.agent} pmMessages={pmMessages} versions={versions} references={st.references} decisions={st.decisions} sessions={st.sessions} sessionId={st.session_id} report={st.report} pid={id} sid={stage} chat={st.chat} fields={st.framework.fields} prompts={st.framework.prompts}
           disabled={pp ? `案（${pp.key}）を表示中です。対話は「本線」で行います` : !st.enabled ? "ステージを開くと対話できます" : null} />
       </div>
     </div>

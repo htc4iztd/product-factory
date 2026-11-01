@@ -5,7 +5,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import Response
 from pydantic import BaseModel, Field
 
-from . import agents, autodev, imports, jobs, reports, team
+from . import agents, autodev, imports, issues, jobs, meetings, pms, reports, team
 from .api_collab import _p
 from .authz import Caller, caller
 from .stages import STAGE_BY_ID
@@ -168,30 +168,29 @@ class TeamRunBody(BaseModel):
     keys: list[str] = Field(default_factory=list, max_length=20)
 
 
-class BoardBody(BaseModel):
-    to: str = Field(min_length=1, max_length=10)
-    text: str = Field(min_length=1, max_length=8000)
-    thread: int | None = None
-    intent: str = "directive"
-
-
 class TalkBody(BaseModel):
     text: str = Field(min_length=1, max_length=8000)
-    thread: int | None = None
+    stage_id: str | None = None
+    meeting_id: int | None = None
     attachments: list[int] = Field(default_factory=list, max_length=5)
 
 
-class TaskBody(BaseModel):
-    agent: str = Field(default="pm", max_length=10)
-    title: str | None = Field(default=None, max_length=300)
+class IssueBody(BaseModel):
+    assignee: str | None = Field(default=None, max_length=12)
+    subject: str | None = Field(default=None, max_length=300)
+    description: str = Field(default="", max_length=8000)
+    tracker: str = "task"
+    priority: str | None = None
     status: str | None = None
-    detail: str | None = Field(default=None, max_length=4000)
-    owner: str | None = None
+    done_ratio: int | None = Field(default=None, ge=0, le=100)
+    due_date: str | None = Field(default=None, max_length=10)
+    notes: str = Field(default="", max_length=8000)
+    stage_id: str | None = None
 
 
 @router.get(P + "/team")
 def team_overview(product_id: str, c: Caller = Depends(caller)):
-    return team.overview(_p(c, product_id))
+    return {**team.overview(_p(c, product_id)), "beats": team.beats()}
 
 
 @router.put(P + "/team/{key}")
@@ -202,8 +201,7 @@ def edit_team_agent(product_id: str, key: str, body: TeamAgentBody, c: Caller = 
 @router.post(P + "/team/run")
 def run_team(product_id: str, body: TeamRunBody, c: Caller = Depends(caller)):
     p = _p(c, product_id, True)
-    keys = body.keys or ["director", "pm", *STAGE_BY_ID]
-    return {"job_id": team.start(p, c.user, keys)}
+    return {"job_id": team.start(p, c.user, body.keys or list(team.KEYS))}
 
 
 @router.get(P + "/board")
@@ -212,36 +210,66 @@ def get_board(product_id: str, agent: str | None = None, intent: str | None = No
     return team.board(_p(c, product_id), agent, intent, q, thread)
 
 
-@router.post(P + "/board")
-def post_board(product_id: str, body: BoardBody, c: Caller = Depends(caller)):
-    return team.pdm_post(_p(c, product_id, True), c.user, body.to, body.text, body.thread, body.intent)
+# PdM が話せるのは PM だけ
+@router.get(P + "/pm/{pm}")
+def pm_workspace(product_id: str, pm: str, c: Caller = Depends(caller)):
+    return pms.workspace(_p(c, product_id), pm)
 
 
-@router.get(P + "/director")
-def director(product_id: str, c: Caller = Depends(caller)):
-    return team.director_view(_p(c, product_id))
+@router.get(P + "/pm-messages")
+def pm_messages(product_id: str, pm: str | None = None, stage_id: str | None = None, meeting_id: int | None = None,
+                c: Caller = Depends(caller)):
+    return pms.messages(_p(c, product_id), pm, stage_id, meeting_id)
 
 
-@router.post(P + "/director/talk")
-def director_talk(product_id: str, body: TalkBody, c: Caller = Depends(caller)):
-    return team.director_talk(_p(c, product_id, True), c.user, body.text, body.thread, body.attachments)
+@router.post(P + "/pm/{pm}/talk")
+def pm_talk(product_id: str, pm: str, body: TalkBody, c: Caller = Depends(caller)):
+    return pms.talk(_p(c, product_id, True), c.user, pm, body.text, body.stage_id, body.meeting_id, body.attachments)
 
 
-@router.get(P + "/team/tasks")
-def team_tasks(product_id: str, agent: str | None = None, open_only: bool = False, c: Caller = Depends(caller)):
-    return team.tasks(_p(c, product_id), agent, open_only)
+@router.get(P + "/issues")
+def list_issues(product_id: str, assignee: str | None = None, author: str | None = None, status: str | None = None,
+                open_only: bool = False, stage: str | None = None, c: Caller = Depends(caller)):
+    return issues.search(_p(c, product_id), assignee, author, status, open_only, stage)
 
 
-@router.post(P + "/team/tasks")
-def add_team_task(product_id: str, body: TaskBody, c: Caller = Depends(caller)):
-    return team.upsert_task(_p(c, product_id, True), c.user, body.agent, None, body.title, body.status, body.detail,
-                            body.owner)
+@router.post(P + "/issues")
+def create_issue(product_id: str, body: IssueBody, c: Caller = Depends(caller)):
+    return issues.create(_p(c, product_id, True), c.user, body.assignee or "", body.subject or "", body.description,
+                         tracker=body.tracker, priority=body.priority or "normal", stage_id=body.stage_id,
+                         due_date=body.due_date)
 
 
-@router.put(P + "/team/tasks/{number}")
-def edit_team_task(product_id: str, number: int, body: TaskBody, c: Caller = Depends(caller)):
-    return team.upsert_task(_p(c, product_id, True), c.user, body.agent, number, body.title, body.status, body.detail,
-                            body.owner)
+@router.get(P + "/issues/{number}")
+def get_issue(product_id: str, number: int, c: Caller = Depends(caller)):
+    return issues.get(_p(c, product_id), number)
+
+
+@router.put(P + "/issues/{number}")
+def update_issue(product_id: str, number: int, body: IssueBody, c: Caller = Depends(caller)):
+    return issues.update(_p(c, product_id, True), c.user, number, notes=body.notes, status=body.status,
+                         assignee=body.assignee, priority=body.priority, done_ratio=body.done_ratio,
+                         due_date=body.due_date, subject=body.subject)
+
+
+@router.get(P + "/meetings-daily")
+def list_daily_meetings(product_id: str, c: Caller = Depends(caller)):
+    return meetings.list_meetings(_p(c, product_id))
+
+
+@router.post(P + "/meetings-daily")
+def start_daily_meeting(product_id: str, c: Caller = Depends(caller)):
+    return meetings.start(_p(c, product_id, True), c.user)
+
+
+@router.get(P + "/meetings-daily/{mid}")
+def get_daily_meeting(product_id: str, mid: int, c: Caller = Depends(caller)):
+    return meetings.get(_p(c, product_id), mid)
+
+
+@router.post(P + "/meetings-daily/{mid}/close")
+def close_daily_meeting(product_id: str, mid: int, c: Caller = Depends(caller)):
+    return meetings.close(_p(c, product_id, True), mid)
 
 
 class AutodevBody(BaseModel):

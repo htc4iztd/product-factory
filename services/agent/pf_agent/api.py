@@ -18,6 +18,7 @@ from . import (
     collab,
     ghsync,
     imports,
+    issues,
     jobs,
     llm,
     llmconf,
@@ -95,6 +96,11 @@ async def _avatar_error(_, exc: avatars.AvatarError):
 
 @app.exception_handler(attachments.AttachmentError)
 async def _attachment_error(_, exc: attachments.AttachmentError):
+    return JSONResponse(status_code=exc.status, content={"detail": exc.message})
+
+
+@app.exception_handler(issues.IssueError)
+async def _issue_error(_, exc: issues.IssueError):
     return JSONResponse(status_code=exc.status, content={"detail": exc.message})
 
 

@@ -3,7 +3,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import {
   Activity, BookText, Bot, Boxes, ChevronLeft, Code2, Command, Diamond, FileInput, FileText, ImageIcon, KanbanSquare,
-  LayoutDashboard, Megaphone, MessagesSquare, Network, Presentation, ScrollText, Settings2, Video,
+  CalendarCheck, LayoutDashboard, ListChecks, Megaphone, MessagesSquare, Network, Presentation, ScrollText, Settings2, Video,
 } from "lucide-react";
 import type { Phase, Product, StageSummary, TeamMember } from "@/lib/agent";
 import { GROUPS } from "@/lib/groups";
@@ -12,7 +12,7 @@ import { Avatar, STATE_LABEL, type AgentState } from "./Avatar";
 export type RailAgent = TeamMember & { state: AgentState };
 const GROUP_TONE: Record<string, string> = { 事業: "pf-g-biz", "要求・設計": "pf-g-design", 構築: "pf-g-build", リリース: "pf-g-release" };
 
-// 左のレール：ページではなく「人」を並べる。司令塔と PM、各工程の担当（顔・状態・未読）。道具は下に小さく
+// 左のレール：ページではなく「人」を並べる。事業・設計・実装の PM と、各工程の担当（顔・状態・自分宛ての Issue）。道具は下に小さく
 export function AgentRail({ pid, product, agents, versions, stages, phases, footer }: {
   pid: string; product: Product; agents: RailAgent[]; versions: Record<string, string>; stages: StageSummary[]; phases: Phase[];
   footer: React.ReactNode;
@@ -23,7 +23,8 @@ export function AgentRail({ pid, product, agents, versions, stages, phases, foot
   const ph = Object.fromEntries(phases.map((p) => [p.id, p]));
   const open = () => window.dispatchEvent(new Event("pf:command"));
   const tools: [string, string, typeof Bot][] = [
-    [`/p/${pid}`, "ダッシュボード", LayoutDashboard], [`/p/${pid}/board`, "掲示板", Megaphone],
+    [`/p/${pid}`, "ダッシュボード", LayoutDashboard], [`/p/${pid}/issues`, "Issue", ListChecks],
+    [`/p/${pid}/meetings-daily`, "振り返りの会議", CalendarCheck], [`/p/${pid}/board`, "掲示板", Megaphone],
     [`/p/${pid}/team`, "エージェントの組織", Network], [`/p/${pid}/canvas`, "プロダクト・キャンバス", ImageIcon],
     [`/p/${pid}/import`, "資料の取り込み", FileInput], [`/p/${pid}/reports`, "報告資料", Presentation],
     [`/p/${pid}/agents`, "定期の仕事", Bot], [`/p/${pid}/preproducts`, "プリプロダクト", Boxes],
@@ -40,12 +41,12 @@ export function AgentRail({ pid, product, agents, versions, stages, phases, foot
     return (
       <Link href={href} title={a ? `${a.name}：${STATE_LABEL[state]}${a.report?.summary ? `\n${a.report.summary}` : ""}` : label}
         className={`group flex items-center gap-2 rounded-lg px-1.5 ${big ? "py-1.5" : "py-1"} transition ${on(href) ? "bg-white shadow-card ring-1 ring-zinc-200" : "hover:bg-white/70"}`}>
-        <Avatar k={a?.key ?? "director"} v={versions[a?.key ?? ""]} size={big ? 34 : 26} state={state} />
+        <Avatar k={a?.key ?? "pm_biz"} v={versions[a?.key ?? ""]} size={big ? 34 : 26} state={state} />
         <span className="min-w-0 flex-1">
           <span className={`block truncate ${big ? "text-[13px] font-semibold" : "text-[12.5px]"} ${muted ? "text-zinc-400" : "text-zinc-800"}`}>{label}</span>
           {sub && <span className="block truncate text-[10.5px] text-zinc-500">{sub}</span>}
         </span>
-        {!!a?.unread && <span className="rounded-full bg-amber-400 px-1.5 text-[10px] font-bold text-white" title="未読">{a.unread}</span>}
+        {!!a?.open_issues && <span className="rounded-full bg-violet-500 px-1.5 text-[10px] font-bold text-white" title="自分宛ての終わっていない Issue">{a.open_issues}</span>}
         {a?.state === "waiting" && <span className="h-1.5 w-1.5 rounded-full bg-amber-500" title="PdM の返事待ち" />}
       </Link>
     );
@@ -68,8 +69,10 @@ export function AgentRail({ pid, product, agents, versions, stages, phases, foot
       </div>
       <nav className="flex-1 space-y-4 overflow-y-auto px-2.5 py-2" aria-label="エージェント">
         <div className="space-y-0.5">
-          <Person a={by.director} href={`/p/${pid}`} big label="司令塔" sub={by.director?.memory?.strategy ? `戦略：${by.director.memory.strategy}` : "PdM と戦略を決める"} />
-          <Person a={by.pm} href={`/p/${pid}/board?agent=pm`} big label="PM" sub={by.pm?.report?.summary ?? "工程を横ぐしで見る"} />
+          {(["pm_biz", "pm_design", "pm_impl"] as const).map((k) => (
+            <Person key={k} a={by[k]} href={`/p/${pid}/pm/${k}`} big label={by[k]?.name ?? k}
+              sub={by[k]?.report?.summary ?? ({ pm_biz: "①〜⑤ 事業", pm_design: "⑥〜⑪ 要求・設計", pm_impl: "⑫〜⑭ 構築・リリース" } as Record<string, string>)[k]} />
+          ))}
         </div>
         {GROUPS.map((g) => (
           <div key={g.title} className={GROUP_TONE[g.title]}>
