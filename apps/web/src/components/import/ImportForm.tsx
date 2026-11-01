@@ -28,7 +28,7 @@ export function ImportForm({ pid, stages }: { pid: string; stages: StageSummary[
     setBusy(false);
     if (!res.ok) return setError(String(body.detail ?? "送れませんでした"));
     setFile(null);
-    router.push(`/p/${pid}/import?doc=${body.id}`);
+    router.push(`/p/${pid}/docs?doc=${body.id}`);
     router.refresh();
   }
 
@@ -51,7 +51,7 @@ export function ImportForm({ pid, stages }: { pid: string; stages: StageSummary[
       <fieldset className="space-y-1.5 text-[13px]">
         <legend className="label">入れ方</legend>
         <label className="flex items-start gap-2"><input type="radio" name="mode" checked={mode === "propose"} onChange={() => setMode("propose")} className="mt-1" />
-          <span><span className="font-medium">AI の案として出す</span><span className="block text-[12px] text-zinc-500">各工程の対話に「資料の取り込み」として案が並びます。採用したものだけが入ります。</span></span></label>
+          <span><span className="font-medium">AI の案として出す</span><span className="block text-[12px] text-zinc-500">ダッシュボードの「承認待ちの案」に並び、承認したものだけが入ります。</span></span></label>
         <label className="flex items-start gap-2"><input type="radio" name="mode" checked={mode === "fill"} onChange={() => setMode("fill")} className="mt-1" />
           <span><span className="font-medium">空の項目には直接入れる</span><span className="block text-[12px] text-zinc-500">値がすでにある項目は上書きせず、案として出します。</span></span></label>
       </fieldset>

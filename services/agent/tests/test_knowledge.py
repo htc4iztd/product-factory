@@ -85,10 +85,10 @@ def test_ontology_edit_context_and_skos_round_trip(client):
     assert c.get("/ontology", headers=H).json()["relations"] == []
 
 
-def test_ontology_suggest_from_decisions(client):
+def test_ontology_suggest_from_docs(client):
     c = client
     pid = c.post("/products", headers=H, json={"name": "x", "idea": "y"}).json()["id"]
-    c.post(f"/products/{pid}/decisions", headers=H, json={"title": "「家計ボード」は週次で見る", "confirmed": True})
+    c.post(f"/products/{pid}/docs", headers=H, json={"title": "運用メモ", "body": "「家計ボード」は週次で見る"})
     r = c.post("/ontology/suggest", headers=H).json()
     assert [x["label"] for x in r["concepts"]] == ["家計ボード"] and r["concepts"][0]["status"] == "proposed"
     assert c.post("/ontology/suggest", headers=H).json()["concepts"] == []  # 二度は出さない

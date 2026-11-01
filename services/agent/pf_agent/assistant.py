@@ -35,13 +35,10 @@ PAGES = {
     "cast": ("cast", "ペルソナ・スキル・ツール"),
     "schedule": ("schedule", "スケジュール"),
     "platform": ("platform", "プラットフォーム"),
-    "import": ("import", "資料の取り込み"),
     "reports": ("reports", "報告資料"),
     "agents": ("agents", "定期の仕事"),
     "canvas": ("canvas", "プロダクト・キャンバス"),
     "preproducts": ("preproducts", "プリプロダクト"),
-    "decisions": ("decisions", "決定記録"),
-    "tickets": ("tickets", "チケット"),
     "docs": ("docs", "ドキュメント"),
     "settings": ("settings", "ステージの設定"),
 }

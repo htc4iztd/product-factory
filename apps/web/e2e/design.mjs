@@ -106,8 +106,8 @@ await shot("d6-infra", true);
 await draft("s11");
 await page.getByText("S1（全面停止）").first().scrollIntoViewIfNeeded();
 await shot("d7-ops");
-// 資料の取り込み：資料を読み、工程の項目にあたる中身を案として出す
-await page.goto(`${BASE}/p/${pid}/import`);
+// ドキュメント（資料の取り込み）：資料を読み、工程の項目にあたる中身を案として出す
+await page.goto(`${BASE}/p/${pid}/docs`);
 await page.getByLabel("取り込む資料").setInputFiles({
   name: "運用設計.md", mimeType: "text/markdown",
   buffer: Buffer.from("# 運用設計書\n## 監視項目\n| 対象 | 閾値 |\n|---|---|\n| DB | CPU 80% |\n## 設計方針\nコンテナで動かす"),

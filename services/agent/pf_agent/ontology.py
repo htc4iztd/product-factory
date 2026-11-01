@@ -12,7 +12,7 @@ from pydantic import BaseModel
 from sqlalchemy import select
 
 from . import llm, llmconf, repo
-from .db import Concept, Decision, Doc, Product, Relation, session
+from .db import Concept, Doc, ImportDoc, Product, Relation, session
 
 KINDS = {
     "term": "用語",
@@ -194,16 +194,22 @@ class Candidates(BaseModel):
 
 
 def suggest(tenant: str, user: str) -> list[dict]:
-    """決定記録とドキュメントから、まだ登録していない社内の用語の候補を AI に出させる（status=proposed）。"""
+    """ドキュメント（書いたもの・取り込んだ資料）から、未登録の社内の用語の候補を AI に出させる（status=proposed）。"""
     with session() as s:
         pids = [p.id for p in s.execute(select(Product).where(Product.tenant_id == tenant)).scalars()]
         if not pids:
             return []
-        ds = s.execute(
-            select(Decision).where(Decision.product_id.in_(pids)).order_by(Decision.id.desc()).limit(100)
-        ).scalars()
         docs = s.execute(select(Doc).where(Doc.product_id.in_(pids)).order_by(Doc.id.desc()).limit(30)).scalars()
-        text = "\n".join([f"{d.title}：{d.detail}" for d in ds] + [f"# {d.title}\n{d.body[:4000]}" for d in docs])
+        imported = s.execute(
+            select(ImportDoc)
+            .where(ImportDoc.product_id.in_(pids), ImportDoc.status == "done")
+            .order_by(ImportDoc.id.desc())
+            .limit(10)
+        ).scalars()
+        text = "\n".join(
+            [f"# {d.title}\n{d.body[:4000]}" for d in docs]
+            + [f"# {d.filename}\n{(d.text or '')[:4000]}" for d in imported]
+        )
         known = {c.label for c in s.execute(select(Concept).where(Concept.tenant_id == tenant)).scalars()}
     if not text.strip():
         return []
@@ -213,7 +219,7 @@ def suggest(tenant: str, user: str) -> list[dict]:
         found = [Candidate(label=x, kind="term", definition="", aliases=[]) for x in labels]
     else:
         prompt = (
-            "次は社内の決定記録とドキュメントです。社内に特有の用語・組織名・役割・業務プロセス・システム名を挙げ、"
+            "次は社内のドキュメント（書いたもの・取り込んだ資料）です。社内に特有の用語・組織名・役割・業務プロセス・システム名を挙げ、"
             "文中から読み取れる範囲で定義を書いてください。一般的な言葉は入れない。推測で定義を作らない。"
             f"kind は {list(KINDS)} のどれか。\n\n既に登録済み：{'、'.join(sorted(known)) or 'なし'}\n\n"
             f"## 本文\n{text[-50000:]}"

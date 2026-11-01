@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { Fragment } from "react";
 
-// 本文の中の ID（US-01・TK-3・DEC-2 など）を、それぞれの置き場所へのリンクにする
+// 本文の中の ID（US-01・DOC-2 など）を、それぞれの置き場所へのリンクにする
 const STAGE_OF: Record<string, string> = { US: "s06", AC: "s06", SC: "s06", FR: "s08", IF: "s08", TC: "s13" };
 
 export function refHref(pid: string, ref: string): string | null {
@@ -9,9 +9,6 @@ export function refHref(pid: string, ref: string): string | null {
   if (!m) return null;
   const [, p, n] = m;
   if (STAGE_OF[p]) return `/p/${pid}/s/${STAGE_OF[p]}`;
-  if (p === "TK") return `/p/${pid}/tickets/${n}`;
-  if (p === "DEC") return `/p/${pid}/decisions#DEC-${n}`;
-  if (p === "MTG") return `/p/${pid}/meetings/${n}`;
   if (p === "DOC") return `/p/${pid}/docs/${n}`;
   return null;
 }

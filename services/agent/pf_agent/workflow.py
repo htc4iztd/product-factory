@@ -15,8 +15,8 @@ from typing import Any
 from google.adk.agents.context import Context
 from google.adk.workflow import START, Workflow
 
-from . import collab, llm, llmconf, ontology, repo
 from . import frameworks as fx
+from . import llm, llmconf, ontology, repo
 from .stages import STAGE_BY_ID
 
 
@@ -34,8 +34,6 @@ def converse(ctx: Context, node_input: Any):
     fw = fx.FRAMEWORK_BY_STAGE[stage_id]
     c = repo.chat_context(product_id, stage_id, _chat_session(ctx))
     conn = llmconf.resolve(c["tenant_id"])
-    # 会話で確定した決定記録も、上流の成果物と同じく前提として渡す
-    ds = collab.stage_decisions(product_id, stage_id, fx.ids_in(json.dumps(c["draft"], ensure_ascii=False)))
     # 社内の用語・組織・業務（オントロジー）は、扱う文章に出てくる語に関係する部分だけを渡す
     seen = [c["message"], c["idea"], json.dumps(c["draft"], ensure_ascii=False), *c["upstream"].values()]
     onto = ontology.context_for(c["tenant_id"], " ".join(seen))
@@ -51,9 +49,6 @@ def converse(ctx: Context, node_input: Any):
         c["upstream"]["取り込んだ資料（この工程に関係する箇所）"] = docs
     if me:
         c["upstream"]["担当エージェントとしての前提（使命・戦略・タスク・掲示板）"] = me
-    if ds:
-        c["upstream"]["決定記録（確定済み）"] = "\n".join(
-            f"- {d['key']} {d['title']}：{d['detail']}（理由：{d['rationale'] or '記載なし'}）" for d in ds)
     try:
         from . import attachments
         extra, images = attachments.material(c.get("attachments") or [])
