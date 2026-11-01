@@ -287,7 +287,7 @@ def prepare_action(tenant: str, product: Product | None, responder: str, a: Acti
         return {
             **base,
             "title": f"{len(keys)} 人を{'動かす' if on else '止める'}",
-            "before": "\n".join(name_of(k) if k in KEYS else "振り返りの会議" for k in keys),
+            "before": "\n".join(name_of(k) for k in keys),
             "after": "定期実行で動かす" if on else "定期実行を止める",
             "args": {"keys": keys, "enabled": on},
         }
@@ -429,7 +429,10 @@ def _prompt(
         + f"いま PdM が見ているのは「{ctx.get('label')}」です"
         + "（メンションがなければ、このページについての指示・質問）。\n"
         + header
-        + "\n\n## 出力\n- reply：日本語で短く直接答える。前置き・称賛は書かない。根拠の弱い意図には率直に指摘する。\n"
+        + "\n\n## 出力\n- reply：日本語で短く直接答える。前置き・称賛は書かない。"
+            "根拠の弱い意図には率直に指摘する。報告だけで終えない：最後は、"
+            "自分が次にやること（承認依頼にしたもの）か、"
+            "PdM への質問・相談・合意依頼・終了承認依頼のどれかで終える。期限や時刻は書かない。\n"
         "- actions：何かを変えるときだけ。自分では実行せず、PdM の承認を待つ承認依頼として出す。種類は "
         "set_field（工程の項目を書き換える：stage_id・field・value）、issue_create（担当に動いてもらう：assignee・"
         "subject・description・stage_id。PM のときだけ）、issue_update（number・status・notes。PM のときだけ）、"
@@ -474,21 +477,24 @@ def feed(tenant: str, user: str, limit: int = 80, after: int = 0, product_id: st
         return [message_dict(m) for m in reversed(rows)]
 
 
-def notify(tenant: str, product_id: str | None, agent: str, text: str, context: dict | None = None) -> None:
-    """エージェントから PdM に知らせる（テナントの全員のチャットに出る）。"""
+def notify(
+    tenant: str, product_id: str | None, agent: str, text: str, context: dict | None = None, actions: list | None = None
+) -> dict:
+    """エージェントから PdM に話しかける（テナントの全員のチャットに出る）。型は asks.py の4つだけ。"""
     with session() as s:
-        s.add(
-            AssistantMessage(
-                tenant_id=tenant,
-                user=None,
-                product_id=product_id,
-                role="agent",
-                agent=agent,
-                text=text[:8000],
-                context=context or {},
-            )
+        m = AssistantMessage(
+            tenant_id=tenant,
+            user=None,
+            product_id=product_id,
+            role="agent",
+            agent=agent,
+            text=text[:8000],
+            context=context or {},
+            actions=actions or [],
         )
+        s.add(m)
         s.commit()
+        return message_dict(m)
 
 
 def _save(tenant, user, product_id, role, agent, text, ctx, mentions=None, attachments=None, actions=None) -> dict:
@@ -589,7 +595,14 @@ def decide(tenant: str, user: str, message_id: int, action_id: str, approve: boo
         product = s.get(Product, m.product_id) if m.product_id else None
         if product is not None:
             s.expunge(product)
-    if not approve:
+    if not approve and a["type"] == "pm_ask":  # 合意しない・終了を否認する、も PM に返して動かす
+        from . import asks
+
+        try:
+            a.update(status="rejected", result=asks.execute(product, user, a, False))
+        except Exception as e:  # noqa: BLE001
+            a.update(status="failed", result=f"伝えられませんでした：{getattr(e, 'message', e)}")
+    elif not approve:
         a.update(status="rejected", result="否認しました。何も変えていません")
     else:
         try:
@@ -645,6 +658,10 @@ def _execute(tenant: str, product: Product | None, user: str, a: dict) -> str:
         from . import platform_agent as pa
 
         return pa.act(tenant, user, x["finding"])["done"]
+    if a["type"] == "pm_ask":
+        from . import asks
+
+        return asks.execute(product, user, a, True)
     raise AssistantError(422, "知らない変更の種類です")
 
 

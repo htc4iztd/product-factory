@@ -38,6 +38,7 @@ const row = (k) => grid.locator(`[data-key="${k}"]`);
 await row("s01").getByText("10分ごと").waitFor();
 await row("pm_biz").getByText("毎時 0分").waitFor();
 await row("meeting").getByText("平日 18:00").waitFor();
+await row("pm_sync").getByText("10分ごと").waitFor(); // PM 同士の連絡も定期実行
 // 事業の担当をまとめて選び、「◯時間ごと」→ 曜日を選ぶ に切り替えて読み方を確かめ、30分ごとにする
 await page.getByLabel("事業の担当（①〜⑤）をまとめて選ぶ").check();
 const box = page.getByRole("region", { name: "予定を変える" });

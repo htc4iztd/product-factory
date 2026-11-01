@@ -77,11 +77,16 @@ def test_pdm_talks_to_pm_and_issue_flows(client):
     b = c.get(f"/products/{pid}/board", headers=H).json()
     assert b["threads"]
     assert all(p["sender"] != "pdm" and p["recipient"] != "pdm" for t in b["threads"] for p in t["posts"])
+    # Issue で起こされた PM は答えるだけ（定時の状況確認は出さない）。定時（今すぐ動かす）で状況を集める
+    assert not any("定時の状況確認" in (t["title"] or "") for t in b["threads"])
+    c.post(f"/products/{pid}/team/run", headers=H, json={"keys": ["pm_biz"]})
+    wait_idle(c, pid)
     # PM の作業場所：対話・状況確認で集めたこと
     w = c.get(f"/products/{pid}/pm/pm_biz", headers=H).json()
     assert [m["role"] for m in w["messages"]][:2] == ["pdm", "pm"] and w["checked_at"]
     assert any(n["agent"] == "s01" and n["kind"] == "status" for n in w["notes"])
     # 定時の状況確認：領域の担当は全員が返事をする（変わっていない担当も、今の状況を自分で返す）
+    b = c.get(f"/products/{pid}/board", headers=H).json()
     th = [t for t in b["threads"] if "事業PM 定時の状況確認" in t["title"]]
     assert th
     replies = [p for p in th[0]["posts"] if p["intent"] == "answer"]
@@ -195,7 +200,7 @@ def test_schedule_always_runs(client):
     other = new_product(c, "未表示")
     team.ensure_all()
     with session() as s:
-        assert s.query(TeamAgent).filter_by(product_id=other).count() == 18
+        assert s.query(TeamAgent).filter_by(product_id=other).count() == 19
 
 
 def test_avatars(client):
@@ -216,7 +221,8 @@ def test_schedule_view_bulk_preview_and_overview(client):
     pid = new_product(c)
     v = c.get(f"/products/{pid}/schedule", headers=H).json()
     by = {a["key"]: a for a in v["agents"]}
-    assert len(v["agents"]) == 18 and v["hours"] == 24
+    assert len(v["agents"]) == 19 and v["hours"] == 24
+    assert by["pm_sync"]["label"] == "10分ごと" and by["pm_sync"]["name"] == "PM 同士の連絡"
     assert by["pm_biz"]["label"] == "毎時 0分" and by["s01"]["label"] == "10分ごと"
     assert by["meeting"]["label"] == "平日 18:00" and by["meeting"]["group"] == "meeting"
     assert sum(by["s01"]["hours"]) == 144 and sum(by["pm_biz"]["hours"]) == 24 and len(by["s01"]["next"]) == 3

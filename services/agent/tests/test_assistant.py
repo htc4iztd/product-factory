@@ -142,7 +142,7 @@ def test_mentions_routing_schedule_and_attachments(client):
     assert {x["text"] for x in outside if x["role"] == "pdm"} == {"全体は？"}
     # ほかの人の発言は見えない（テナントの全員への知らせ＝プラットフォームの【要対応】だけは見える）
     assert all(
-        x["role"] == "agent" and x["text"].startswith("【要対応】")
+        x["role"] == "agent" and x["text"].startswith("【ネクストアクションへの合意依頼】")
         for x in c.get(f"/assistant/messages?product={pid}", headers=OTHER_USER).json()
     )
     assert c.get("/assistant/messages?product=nope", headers=H).status_code == 404
@@ -161,7 +161,8 @@ def test_platform_alert_reaches_chat_with_approval(client):
         s.commit()
     c.get("/platform", headers=H)
     f = [x for x in c.get("/assistant/messages", headers=OTHER_USER).json() if x["agent"] == "platform"]
-    assert f and f[0]["text"].startswith("【要対応】定期実行（tick）が止まっています")  # テナントの全員に出る
+    # テナントの全員に出る（対処があるので、ネクストアクションへの合意依頼）
+    assert f and f[0]["text"].startswith("【ネクストアクションへの合意依頼】定期実行（tick）が止まっています")
     a = f[0]["actions"][0]
     m = c.post(f"/assistant/messages/{f[0]['id']}/actions/{a['id']}", headers=H, json={"approve": True}).json()
     assert m["actions"][0]["status"] == "approved" and m["actions"][0]["result"].startswith("定期実行を1回動かしました")

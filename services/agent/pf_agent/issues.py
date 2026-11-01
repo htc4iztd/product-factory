@@ -148,6 +148,10 @@ def create(
 ) -> dict:
     by_pdm = author not in _keys()
     _check_assignee(assignee, by_pdm)
+    if not by_pdm:  # エージェントは期限・時刻を書かない（受けた相手はすぐ動く）
+        from .team import strip_deadlines
+
+        subject, description = strip_deadlines(subject), strip_deadlines(description)
     if not subject.strip():
         raise IssueError(422, "題名が空です")
     if author == assignee:
@@ -214,6 +218,10 @@ def update(
     wake: bool = True,
 ) -> dict:
     by_pdm = actor not in _keys()
+    if not by_pdm:
+        from .team import strip_deadlines
+
+        notes = strip_deadlines(notes)
     with session() as s:
         i = _get(s, product, number)
         if by_pdm and i.assignee not in _pms():

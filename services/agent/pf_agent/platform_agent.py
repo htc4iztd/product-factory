@@ -372,7 +372,7 @@ def _detect_product(p: Product, now: dt.datetime) -> list[dict]:
                 "agent",
                 "high",
                 f"予定の時刻を過ぎても動いていないエージェントが {len(missed)} 人います",
-                "、".join(name_of(k) if k in KEYS else "振り返りの会議" for k in missed[:10]),
+                "、".join(name_of(k) for k in missed[:10]),
                 "定期実行（tick）が来ていないか、予定の取り合いで抜けています。予定を立て直してください。",
                 p.id,
                 {"type": "reschedule", "label": "予定を立て直す", "product_id": p.id, "keys": missed},
@@ -387,7 +387,7 @@ def _detect_product(p: Product, now: dt.datetime) -> list[dict]:
                 "agent",
                 "medium",
                 f"次の予定がないエージェントが {len(broken)} 人います",
-                "、".join(name_of(k) if k in KEYS else "振り返りの会議" for k in broken[:10]),
+                "、".join(name_of(k) for k in broken[:10]),
                 "cron の書き方が読めない可能性があります。エージェントの組織で予定を直してください。",
                 p.id,
                 {"type": "reschedule", "label": "予定を立て直す", "product_id": p.id, "keys": broken},
@@ -457,13 +457,21 @@ def detect(tenant: str, now: dt.datetime | None = None) -> dict:
         s.flush()
         for f in alerts:
             where = f"（{names[f.product_id]}）" if f.product_id in names else ""
+            # PdM への話しかけは4つの型だけ：対処があれば合意依頼、なければ相談
+            if f.action:
+                ask, ask_label = "agree_next", "ネクストアクションへの合意依頼"
+                msg = f"【{ask_label}】{f.title}{where}\n{f.suggestion}\n→「{f.action['label']}」を実行してよいですか。"
+            else:
+                ask, ask_label = "consult", "相談"
+                msg = (f"【{ask_label}】{f.title}{where}\n{f.suggestion}\n→ どう対処するか、"
+                       f"チャットで @プラットフォーム に返事をしてください。")
             s.add(
                 PlatformMessage(
                     tenant_id=tenant,
                     role="platform",
                     author=NAME,
                     findings=[f.id],
-                    text=f"【要対応】{f.title}{where}\n{f.suggestion}",
+                    text=msg,
                 )
             )
             s.add(
@@ -473,8 +481,9 @@ def detect(tenant: str, now: dt.datetime | None = None) -> dict:
                     product_id=f.product_id,
                     role="agent",
                     agent="platform",
-                    text=f"【要対応】{f.title}{where}\n{f.suggestion}",
-                    context={"kind": "platform", "label": "プラットフォーム", "finding": f.id},
+                    text=msg,
+                    context={"kind": "platform", "label": "プラットフォーム", "finding": f.id, "ask": ask,
+                             "ask_label": ask_label},
                     actions=[
                         {"id": f"f{f.id}", "type": "platform_act", "status": "pending", "by": "platform",
                          "title": f"対処を実行する：{f.action['label']}", "before": f.title,

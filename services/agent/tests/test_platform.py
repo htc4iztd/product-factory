@@ -8,6 +8,7 @@ import time
 import pytest
 from fastapi.testclient import TestClient
 
+ASKS = ("【ネクストアクションへの合意依頼】", "【相談】")  # プラットフォームから PdM への話しかけ
 H = {"x-pf-internal-token": "t", "x-pf-user": "owner@example.com", "x-pf-tenant": "tenant-a", "x-pf-role": "OWNER"}
 VIEWER = {**H, "x-pf-role": "VIEWER"}
 OTHER = {**H, "x-pf-tenant": "tenant-b", "x-pf-user": "b@example.com"}
@@ -97,10 +98,10 @@ def test_detects_and_acts_with_pdm_approval(client):
     tick_f = by_title(ws, "定期実行（tick）が止まっています")[0]
     missed = by_title(ws, "予定の時刻を過ぎても")[0]
     assert missed["action"] == {"type": "reschedule", "label": "予定を立て直す", "product_id": pid, "keys": ["s02"]}
-    alerts = [m for m in ws["messages"] if m["role"] == "platform" and m["text"].startswith("【要対応】")]
+    alerts = [m for m in ws["messages"] if m["role"] == "platform" and m["text"].startswith(ASKS)]
     assert len(alerts) == 4  # 重いものは PdM に知らせる（最初の「一度も来ていません」を含む。同じ問題は二度知らせない）
     c.get("/platform", headers=H)
-    assert len([m for m in c.get("/platform", headers=H).json()["messages"] if "【要対応】" in m["text"]]) == 4
+    assert len([m for m in c.get("/platform", headers=H).json()["messages"] if m["text"].startswith(ASKS)]) == 4
     assert c.get(f"/products/{pid}/team", headers=H).json()["platform"]["high"] == 3
 
     # 閲覧のみの人・別のテナントは対処できない

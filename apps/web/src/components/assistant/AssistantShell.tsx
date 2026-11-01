@@ -1,7 +1,7 @@
 "use client";
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, useTransition } from "react";
 import { usePathname, useRouter } from "next/navigation";
-import { AtSign, Check, Library, MessageSquare, PanelRightClose, Send, X } from "lucide-react";
+import { AtSign, Check, CornerDownLeft, Library, MessageSquare, PanelRightClose, Send, X } from "lucide-react";
 import type { AssistantMsg, ChatActionT, MentionT } from "@/lib/agent";
 import { decideAssistant, researchBrief, sendAssistant } from "@/lib/assistant-actions";
 import { Avatar } from "@/components/rail/Avatar";
@@ -127,9 +127,10 @@ function Feed({ msgs, onChanged }: { msgs: AssistantMsg[]; onChanged: (m: Assist
         return (
           <li key={m.id} className={`flex items-end gap-2 ${me ? "justify-end" : ""}`} data-msg={m.id}>
             {!me && <Avatar k={m.agent} size={26} />}
-            <div className={`max-w-[88%] rounded-xl px-3 py-2 text-[12.5px] ${me ? "bg-zinc-900 text-white" : m.text.startsWith("【要対応】") ? "bg-rose-50 text-rose-900 ring-1 ring-rose-200" : "bg-zinc-100 text-zinc-800"}`}>
+            <div className={`max-w-[88%] rounded-xl px-3 py-2 text-[12.5px] ${me ? "bg-zinc-900 text-white" : m.context.ask ? "bg-amber-50 text-zinc-900 ring-1 ring-amber-200" : "bg-zinc-100 text-zinc-800"}`}>
               <div className={`mb-0.5 flex flex-wrap gap-x-1 text-[10px] ${me ? "text-zinc-400" : "text-zinc-500"}`}>
                 <span>{me ? "PdM" : m.agent_name}・{time(m.created_at)}</span>
+                {m.context.ask_label && <span className="rounded bg-amber-200 px-1 font-semibold text-amber-900">{m.context.ask_label}</span>}
                 {(m.context.label || m.context.product_name) && (
                   <span className={`rounded px-1 ${me ? "bg-zinc-700 text-zinc-200" : "bg-white text-zinc-600"}`}>
                     {m.context.product_name ? `${m.context.product_name}／` : ""}{m.context.label}{m.context.mentioned ? "（@）" : ""}
@@ -139,6 +140,12 @@ function Feed({ msgs, onChanged }: { msgs: AssistantMsg[]; onChanged: (m: Assist
               <div className="whitespace-pre-wrap">{m.text}</div>
               <SentAttachments items={m.attachments as never} dark={me} />
               {m.actions.map((a) => <ActionCard key={a.id} m={m} a={a} onChanged={onChanged} />)}
+              {(m.context.ask === "question" || m.context.ask === "consult") && (
+                <button className="btn-secondary btn-sm mt-2" onClick={() => {
+                  const mention = { kind: "agent" as const, ref: m.agent, label: m.agent_name };
+                  window.dispatchEvent(new CustomEvent("pf:compose", { detail: { mention, text: `@${m.agent_name} ` } }));
+                }}><CornerDownLeft size={12} />{m.agent_name}に返事をする</button>
+              )}
             </div>
           </li>
         );
@@ -156,11 +163,16 @@ function ActionCard({ m, a, onChanged }: { m: AssistantMsg; a: ChatActionT; onCh
     const r = await decideAssistant(m.id, a.id, approve);
     if (r.error) setErr(r.error); else if (r.message) onChanged(r.message);
   });
+  // PdM への合意依頼・終了承認依頼は、ボタンの言葉を型に合わせる
+  const kind = a.type === "pm_ask" ? (a as ChatActionT & { args?: { kind?: string } }).args?.kind : undefined;
+  const words = kind === "agree_next" ? { badge: "合意依頼", yes: "合意する", no: "合意しない", did: "合意しました", didnt: "合意しませんでした" }
+    : kind === "approve_done" ? { badge: "終了承認依頼", yes: "終了を承認", no: "否認（続けてもらう）", did: "承認しました", didnt: "否認しました" }
+    : { badge: "承認依頼", yes: "承認", no: "否認", did: "承認しました", didnt: "否認しました" };
   const tone = a.status === "approved" ? "border-emerald-300" : a.status === "rejected" ? "border-zinc-200 opacity-70" : a.status === "failed" ? "border-rose-300" : "border-amber-300";
   return (
     <div className={`mt-2 rounded-lg border bg-white p-2.5 text-zinc-800 ${tone}`} role="group" aria-label={`承認依頼：${a.title}`}>
       <div className="flex items-center gap-1.5 text-[12px] font-semibold">
-        {a.status === "pending" && <span className="rounded bg-amber-100 px-1 text-[10px] font-medium text-amber-800">承認依頼</span>}
+        {a.status === "pending" && <span className="rounded bg-amber-100 px-1 text-[10px] font-medium text-amber-800">{words.badge}</span>}
         {a.title}
       </div>
       {a.reason && <div className="mt-0.5 text-[11px] text-zinc-500">{a.reason}</div>}
@@ -187,12 +199,12 @@ function ActionCard({ m, a, onChanged }: { m: AssistantMsg; a: ChatActionT; onCh
       )}
       {a.status === "pending" ? (
         <div className="mt-2 flex gap-1.5">
-          <button className="btn-primary btn-sm" disabled={pending} onClick={() => decide(true)}><Check size={12} />承認</button>
-          <button className="btn-secondary btn-sm" disabled={pending} onClick={() => decide(false)}><X size={12} />否認</button>
+          <button className="btn-primary btn-sm" disabled={pending} onClick={() => decide(true)}><Check size={12} />{words.yes}</button>
+          <button className="btn-secondary btn-sm" disabled={pending} onClick={() => decide(false)}><X size={12} />{words.no}</button>
         </div>
       ) : (
         <div className={`mt-1.5 text-[11px] ${a.status === "approved" ? "text-emerald-700" : a.status === "failed" ? "text-rose-600" : "text-zinc-500"}`}>
-          {a.status === "approved" ? "承認しました" : a.status === "rejected" ? "否認しました" : "実行できませんでした"}：{a.result}
+          {a.status === "approved" ? words.did : a.status === "rejected" ? words.didnt : "実行できませんでした"}：{a.result}
         </div>
       )}
       {err && <div className="mt-1 text-[11px] text-rose-600">{err}</div>}

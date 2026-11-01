@@ -17,6 +17,7 @@
 from __future__ import annotations
 
 import datetime as dt
+import re
 
 from pydantic import BaseModel
 from sqlalchemy import func, or_, select, update
@@ -35,11 +36,27 @@ DOMAIN = {
 PM_OF = {sid: pm for pm, sids in DOMAIN.items() for sid in sids}
 KEYS = (*PMS, *(s.id for s in STAGES))
 MEETING = "meeting"  # 会議の予定も TeamAgent の行で持つ（エージェントではない）
+PM_SYNC = "pm_sync"  # PM 同士の連絡（10分ごと）の予定。これも TeamAgent の行で持つ
+SCHEDULED = (MEETING, PM_SYNC)  # エージェントではない予定
 INTENTS = ("confirm", "answer", "notice")
 INTENT_LABEL = {"confirm": "確認", "answer": "回答", "notice": "共有"}
 HEALTH = ("green", "yellow", "red")
 MAX_TURNS = 30
-DEFAULT_CRON = {"pm": "0 * * * *", "stage": "*/10 * * * *", MEETING: "0 18 * * 1-5"}
+DEFAULT_CRON = {"pm": "0 * * * *", "stage": "*/10 * * * *", MEETING: "0 18 * * 1-5", PM_SYNC: "*/10 * * * *"}
+WAKE_INTENTS = ("confirm", "answer")  # 書き込まれたら、宛先がすぐ動く（共有は次に動くときに読む）
+THREAD_WAKE_MAX = 6  # スレッドがこれより長くなったら、返事で相手を起こさない（往復が止まらないのを防ぐ）
+
+# 「本日15時までに」のような期限・時刻の指定。エージェント同士は受けたらすぐ動くので、期限は書かせない
+_DEADLINE = re.compile(
+    r"(?:(?:本日|今日|明日|明朝|今夜|今晩|今週|来週|[0-9０-９]{1,2}[/／月][0-9０-９]{1,2}日?)(?:の|中)?\s*)?"
+    r"[0-9０-９]{1,2}(?:[:：][0-9０-９]{2}|時(?:半|[0-9０-９]{1,2}分)?)\s*(?:まで|迄)(?:に|には)?[、,]?\s*"
+    r"|(?:本日|今日|明日|今週|来週)中に[、,]?\s*"
+)
+
+
+def strip_deadlines(text: str) -> str:
+    """期限・時刻の指定を取り除く（「本日15時までに回答を」→「回答を」）。"""
+    return _DEADLINE.sub("", text)
 
 jobs.JOBS["team"] = jobs.JobDef(
     "team",
@@ -67,6 +84,8 @@ def name_of(key: str) -> str:
         "all": "全員",
         "director": "司令塔（廃止）",
         "pm": "PM（旧）",
+        MEETING: "振り返りの会議",
+        PM_SYNC: "PM 同士の連絡",
     }
     if key in names:
         return names[key]
@@ -110,16 +129,16 @@ def ensure(product: Product) -> None:
     """足りないエージェント（PM 3人・14工程）と会議の予定を置く。"""
     with session() as s:
         have = set(s.execute(select(TeamAgent.key).where(TeamAgent.product_id == product.id)).scalars())
-        for k in (*KEYS, MEETING):
+        for k in (*KEYS, *SCHEDULED):
             if k in have:
                 continue
-            c = DEFAULT_CRON["pm"] if k in PMS else DEFAULT_CRON[MEETING] if k == MEETING else DEFAULT_CRON["stage"]
+            c = DEFAULT_CRON["pm"] if k in PMS else DEFAULT_CRON[k] if k in SCHEDULED else DEFAULT_CRON["stage"]
             s.add(
                 TeamAgent(
                     tenant_id=product.tenant_id,
                     product_id=product.id,
                     key=k,
-                    mission="" if k == MEETING else default_mission(k),
+                    mission="" if k in SCHEDULED else default_mission(k),
                     cron=c,
                     next_run_at=cron.next_after(c, _now()),
                 )
@@ -216,11 +235,11 @@ def overview(product: Product) -> dict:
 
 def edit_agent(product: Product, key: str, mission: str | None, cron_expr: str | None, enabled: bool | None) -> dict:
     ensure(product)
-    if key not in (*KEYS, MEETING):
+    if key not in (*KEYS, *SCHEDULED):
         raise TeamError(404, f"エージェント {key} はいません")
     with session() as s:
         a = _agent(s, product.id, key)
-        if mission is not None and key != MEETING:
+        if mission is not None and key not in SCHEDULED:
             a.mission = mission.strip()[:4000] or default_mission(key)
         if cron_expr is not None:
             try:
@@ -274,7 +293,7 @@ def post(
             sender=sender,
             recipient=recipient,
             intent=intent,
-            text=text.strip()[:8000],
+            text=strip_deadlines(text).strip()[:8000],
             author=author[:200],
             job_id=job_id,
             read=read,
@@ -351,10 +370,64 @@ def _context_posts(s, product_id: str, key: str, limit: int = 30) -> list[BoardP
     return list(reversed(list(rows)))
 
 
+def inbox(product_id: str, key: str) -> list[BoardPost]:
+    """自分宛てで、まだ読んでいない確認・回答（これがあれば、Issue がなくても動いて答える）。"""
+    with session() as s:
+        rows = list(
+            s.execute(
+                select(BoardPost)
+                .where(
+                    BoardPost.product_id == product_id,
+                    BoardPost.recipient == key,
+                    BoardPost.read.is_(False),
+                    BoardPost.intent.in_(WAKE_INTENTS),
+                )
+                .order_by(BoardPost.id)
+                .limit(20)
+            ).scalars()
+        )
+        for p in rows:
+            s.expunge(p)
+        return rows
+
+
+def inbox_md(posts: list[BoardPost]) -> str:
+    return "\n".join(
+        f"- [{p.id}] スレッド {p.thread}・{name_of(p.sender)}から（{INTENT_LABEL.get(p.intent, p.intent)}）"
+        f"：{p.text[:1200]}"
+        for p in posts
+    )
+
+
+def mark_read(product_id: str, key: str) -> None:
+    with session() as s:
+        for p in s.execute(
+            select(BoardPost).where(
+                BoardPost.product_id == product_id, BoardPost.recipient == key, BoardPost.read.is_(False)
+            )
+        ).scalars():
+            p.read = True
+        s.commit()
+
+
+def wakes_from(product_id: str, sender: str, posted: list[dict]) -> list[str]:
+    """掲示板に書いた確認・回答の宛先（すぐ動かす）。長くなったスレッドの返事では起こさない。"""
+    out = []
+    with session() as s:
+        for p in posted:
+            if p["intent"] not in WAKE_INTENTS or p["recipient"] not in KEYS or p["recipient"] == sender:
+                continue
+            n = s.execute(select(func.count()).where(BoardPost.thread == p["thread"])).scalar() or 0
+            if p["intent"] == "answer" and n > THREAD_WAKE_MAX:
+                continue
+            out.append(p["recipient"])
+    return list(dict.fromkeys(out))
+
+
 # ---------------- 実行（ジョブ） ----------------
 def start(product: Product, user: str, keys: list[str], reason: str = "今すぐ動かす") -> str:
     ensure(product)
-    keys = [k for k in KEYS if k in keys]
+    keys = [k for k in (*KEYS, PM_SYNC) if k in keys]
     if not keys:
         raise TeamError(422, "動かすエージェントを選んでください")
     conn = llmconf.resolve(product.tenant_id)
@@ -366,7 +439,8 @@ def start(product: Product, user: str, keys: list[str], reason: str = "今すぐ
         {"keys": keys, "reason": reason},
         total=len(keys),
         model=conn.chat_model,
-        tasks=[{"id": k, "name": f"{name_of(k)}が動く", "group": "予定", "deps": []} for k in keys],
+        tasks=[{"id": k, "name": name_of(k) if k == PM_SYNC else f"{name_of(k)}が動く", "group": "予定", "deps": []}
+               for k in keys],
     )
     jobs.dispatch(job_id)
     with session() as s:
@@ -492,7 +566,7 @@ def tick(now: dt.datetime | None = None) -> list[str]:
                 a = s.get(TeamAgent, aid)
                 a.memory = {**(a.memory or {}), "checked_at": now.isoformat()}
                 s.commit()
-            if not _my_actionable(pid, key):
+            if not _my_actionable(pid, key) and not inbox(pid, key):
                 continue
         by.setdefault(pid, []).append(key)
         claimed[(pid, key)] = (aid, at)
@@ -602,7 +676,9 @@ OUTPUT_RULES = {
     "assign_to（返す相手。そのままなら空。PdM は宛先にできない）。",
     "issue_create": "new_issues：他のエージェントに動いてもらうことだけ"
     "（assignee・tracker・subject・description・priority）。",
-    "board_post": "posts：掲示板（to・intent は confirm/answer/notice・text・thread は返信先の番号か 0）。",
+    "board_post": "posts：掲示板（to・intent は confirm/answer/notice・text・thread は返信先の番号か 0）。"
+    "確認（confirm）と回答（answer）は相手がすぐ動いて読む。回答への返事は書かない（続きは Issue で）。"
+    "期限や時刻（「本日15時までに」など）は書かない。",
 }
 
 
@@ -620,21 +696,31 @@ def turn_schema(writes: list[str]) -> type[BaseModel]:
     return create_model("TurnOut", **fields)
 
 
-def _prompt(product: Product, key: str, mission: str, header: str, issues_md: str, writes: list[str]) -> str:
+def _prompt(
+    product: Product, key: str, mission: str, header: str, issues_md: str, writes: list[str], box_md: str = ""
+) -> str:
     pm = PM_OF[key]
     return (
-        f"プロダクト「{product.name}」（{product.idea}）の「{name_of(key)}」として、自分宛ての Issue を実行します。"
+        f"プロダクト「{product.name}」（{product.idea}）の「{name_of(key)}」として、自分宛ての Issue を実行し、"
+        "掲示板で自分宛てに来た確認に答えます。"
         f"PdM には直接話しかけず、聞きたいことは {pm}（{name_of(pm)}）に返します。\n"
         f"## 使命（このプロダクトで）\n{mission}\n\n{header}\n\n"
-        f"## 自分宛ての Issue（これを実行する）\n{issues_md}\n\n"
-        "## 最後の出力\n"
+        f"## 自分宛ての Issue（これを実行する）\n{issues_md or '（なし）'}\n\n"
+        + (
+            f"## 掲示板の未読（自分宛て。確認には、posts でそのスレッドに answer で答える）\n{box_md}\n\n"
+            if box_md
+            else ""
+        )
+        + "## 最後の出力\n"
         "- report：health は green・yellow・red、progress は 0〜100、summary は2文、blockers と next は短く。\n"
         + "".join(f"- {OUTPUT_RULES[w]}\n" for w in writes if w in OUTPUT_RULES)
         + "割り当てられていない欄はありません。資料にない数値や事実を作らない。\n"
     )
 
 
-def _stub_turn(product: Product, key: str, issues: list[AgentIssue], writes: list[str] | None = None) -> BaseModel:
+def _stub_turn(
+    product: Product, key: str, issues: list[AgentIssue], writes: list[str] | None = None, box: list | None = None
+) -> BaseModel:
     writes = list(writes if writes is not None else ("set_field", "issue_update", "issue_create", "board_post"))
     fw = fwlib.of(product.id, key)
     d = repo.draft(product.id, key)
@@ -674,8 +760,13 @@ def _stub_turn(product: Product, key: str, issues: list[AgentIssue], writes: lis
                 thread=0,
             )
             for x in STAGES
-            if key in x.inputs
-        ][:1],
+            if key in x.inputs and issues
+        ][:1]
+        + [
+            PostOut(to=p.sender, intent="answer", text=f"（スタブ）確認しました：{p.text[:40]}", thread=p.thread)
+            for p in box or []
+            if p.intent == "confirm" and p.sender in KEYS
+        ],
     )
     schema = turn_schema(writes)
     return schema(**{k: getattr(full, k) for k in schema.model_fields})
@@ -745,11 +836,12 @@ def _apply(product: Product, key: str, out: BaseModel, job_id: str, model: str) 
             wake.append(i["assignee"])
         except iss.IssueError:
             continue
+    posted = []
     for p in getattr(out, "posts", [])[:6]:
         if p.to == key or p.to not in (*KEYS, "all") or not p.text.strip():
             continue
-        post(product, key, p.to, p.intent, p.text, p.thread or None, author=model, job_id=job_id)
-    return wake
+        posted.append(post(product, key, p.to, p.intent, p.text, p.thread or None, author=model, job_id=job_id))
+    return wake + wakes_from(product.id, key, posted)
 
 
 def run(job_id: str) -> None:
@@ -758,6 +850,7 @@ def run(job_id: str) -> None:
         product = s.get(Product, j.product_id)
         s.expunge(product)
         queue = list(j.params["keys"])
+    first = set(queue)  # 予定・「今すぐ動かす」で動くもの（PM は定時の状況確認をする）。起こされた PM は答えるだけ
     conn = llmconf.resolve(product.tenant_id)
     done: list[str] = []
     turns = 0
@@ -772,21 +865,26 @@ def run(job_id: str) -> None:
                 [
                     {
                         "id": tid,
-                        "name": f"{name_of(key)}が動く（Issue を受けて）",
+                        "name": f"{name_of(key)}が動く（Issue・掲示板を受けて）",
                         "group": "Issue",
                         "deps": [done[-1]] if done else [],
                     }
                 ],
             )
         jobs.step(job_id, f"{name_of(key)}が動いています", advance=False)
-        if key in PMS:
+        if key == PM_SYNC:
             with jobs.task(job_id, tid):
-                wake, detail = pms.check(product, key, job_id, conn)
+                wake, detail = pms.sync(product, job_id, conn)
+                jobs.set_task(job_id, tid, detail=detail)
+        elif key in PMS:
+            with jobs.task(job_id, tid):
+                wake, detail = pms.check(product, key, job_id, conn, full=key in first and key not in done)
                 jobs.set_task(job_id, tid, detail=detail)
         else:
             issues = _my_actionable(product.id, key)
-            if not issues:
-                jobs.skip_task(job_id, tid, "手を動かす Issue がない")
+            box = inbox(product.id, key)
+            if not issues and not box:
+                jobs.skip_task(job_id, tid, "手を動かす Issue も、答える確認もない")
                 done.append(key)
                 continue
             with session() as s:
@@ -797,15 +895,18 @@ def run(job_id: str) -> None:
                 prep = agentrun.prepare(product.tenant_id, product, key)
                 if conn.provider == "stub":
                     llm._record("stub", 0, 0)
-                    out = _stub_turn(product, key, issues, prep.lo.writes)
+                    out = _stub_turn(product, key, issues, prep.lo.writes, box)
                 else:
-                    prompt = _prompt(product, key, mission, prep.header(), _issues_md(product, issues), prep.lo.writes)
+                    prompt = _prompt(
+                        product, key, mission, prep.header(), _issues_md(product, issues), prep.lo.writes, inbox_md(box)
+                    )
                     out = agentrun.think(conn, prep, prompt, turn_schema(prep.lo.writes))
                 wake = _apply(product, key, out, job_id, conn.chat_model)
                 jobs.set_task(
                     job_id,
                     tid,
-                    detail=f"Issue {len(issues)} 件・書き込み {len(getattr(out, 'changes', []))} 項目"
+                    detail=f"Issue {len(issues)} 件・掲示板 {len(box)} 件・"
+                    f"書き込み {len(getattr(out, 'changes', []))} 項目"
                     + (f"・{'、'.join(name_of(w) for w in dict.fromkeys(wake))}へ" if wake else "")
                     + f"／{prep.summary()}",
                 )

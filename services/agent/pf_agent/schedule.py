@@ -15,10 +15,11 @@ from sqlalchemy import select
 
 from . import cron
 from .db import Product, TeamAgent, TenantSetting, session
-from .team import DOMAIN, MEETING, PMS, TeamError, _iso, _now, edit_agent, ensure, name_of
+from .team import DOMAIN, MEETING, PM_SYNC, PMS, TeamError, _iso, _now, edit_agent, ensure, name_of
 
 GROUPS = (
     ("pm", "PM", PMS),
+    ("pmsync", "PM 同士の連絡", (PM_SYNC,)),
     ("biz", "事業の担当（①〜⑤）", DOMAIN["pm_biz"]),
     ("design", "要求・設計の担当（⑥〜⑪）", DOMAIN["pm_design"]),
     ("impl", "構築・リリースの担当（⑫〜⑭）", DOMAIN["pm_impl"]),
@@ -29,6 +30,8 @@ WHAT = {
     "pm": "担当の状況を集める（変化か PM 宛ての Issue があるときだけ AI を使う）",
     "stage": "自分宛ての Issue を確かめる（手を動かす Issue があるときだけ AI を使う）",
     "meeting": "PM がレポートと突き合わせを準備する",
+    "pmsync": "事業・設計・実装 PM が、他の領域に関わること（依存・食い違い・確認）を掲示板で伝え合う"
+    "（前回から変化があるときだけ AI を使う）",
 }
 HOURS = 24
 PLATFORM_DEFAULT = 5
@@ -86,10 +89,12 @@ def view(product: Product) -> dict:
             agents.append(
                 {
                     "key": k,
-                    "name": name_of(k) if k != MEETING else "振り返りの会議",
+                    "name": name_of(k),
                     "group": g,
                     "group_label": label,
-                    "what": WHAT["meeting" if k == MEETING else "pm" if k in PMS else "stage"],
+                    "what": WHAT[
+                        "meeting" if k == MEETING else "pmsync" if k == PM_SYNC else "pm" if k in PMS else "stage"
+                    ],
                     "cron": a.cron,
                     "label": cron.describe(a.cron),
                     "timezone": a.timezone,

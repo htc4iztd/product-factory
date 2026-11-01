@@ -464,7 +464,9 @@ export type ChatActionT = {
 };
 export type AssistantMsg = {
   id: number; role: "pdm" | "agent"; agent: string; agent_name: string; text: string; product_id: string | null;
-  context: { kind?: string; label?: string; product_name?: string; stage_id?: string; responder?: string; mentioned?: boolean };
+  context: { kind?: string; label?: string; product_name?: string; stage_id?: string; responder?: string; mentioned?: boolean;
+    // AI から PdM への話しかけの型（質問・相談・ネクストアクションへの合意依頼・タスクの終了承認依頼）
+    ask?: "question" | "consult" | "agree_next" | "approve_done"; ask_label?: string };
   mentions: MentionT[]; attachments: { id: number; filename: string; kind: string }[]; actions: ChatActionT[]; created_at: string;
 };
 

@@ -3,7 +3,9 @@ AI に読むツールを呼ばせ（回数の上限つき）、最後の出力�
 
 from __future__ import annotations
 
+import datetime as dt
 from dataclasses import dataclass
+from zoneinfo import ZoneInfo
 
 from pydantic import BaseModel
 
@@ -12,6 +14,7 @@ from . import tools as tl
 from .db import Product
 
 MAX_CALLS = 6
+JST = ZoneInfo("Asia/Tokyo")
 
 
 @dataclass
@@ -24,7 +27,13 @@ class Prepared:
         return tool in self.lo.writes
 
     def header(self) -> str:
-        return self.lo.text() + (f"\n\n## 先に読んだもの\n{self.prefetched}" if self.prefetched else "")
+        now = dt.datetime.now(JST)
+        return (
+            self.lo.text()
+            + (f"\n\n## 先に読んだもの\n{self.prefetched}" if self.prefetched else "")
+            + f"\n\n## いま\n{now:%Y/%m/%d %H:%M}（日本時間）。エージェントは Issue・掲示板を受けるとすぐ動くので、"
+            "相手への期限や時刻（「本日15時までに」など）は書かない。"
+        )
 
     def summary(self) -> str:
         """ジョブの記録に残す：何のスキルで、何を読んだか。"""

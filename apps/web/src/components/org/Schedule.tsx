@@ -131,7 +131,7 @@ function Timeline({ v, versions, sel, toggle }: { v: ScheduleView; versions: Rec
     <div className={`grid grid-cols-[230px_120px_minmax(0,1fr)] items-center border-t border-zinc-100 ${a.enabled ? "" : "opacity-45"}`} data-key={a.key}>
       <label className="flex items-center gap-2 py-1.5 pl-4 text-[12.5px]" title={a.what}>
         <input type="checkbox" checked={sel.includes(a.key)} onChange={() => toggle([a.key])} aria-label={`${a.name}を選ぶ`} className="accent-brand-600" />
-        {a.key !== "meeting" && <Avatar k={a.key} v={versions[a.key]} size={22} />}
+        {a.key !== "meeting" && a.key !== "pm_sync" && <Avatar k={a.key} v={versions[a.key]} size={22} />}
         <span className="truncate">{a.name}</span>
       </label>
       <div className="pr-3 text-[12px] text-zinc-500" title={a.next.length ? `次：${a.next.map(when).join("／")}` : ""}>{a.enabled ? a.label : "止めています"}</div>
