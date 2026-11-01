@@ -211,3 +211,30 @@ def test_reply_quotes_the_ask(env):
     assert any(m["role"] == "pdm" and m["text"].startswith("> 【質問】") for m in w["messages"])
     bad = {**body, "reply_to": 99999}
     assert c.post("/assistant/messages", headers=H, json=bad).status_code == 404
+
+
+def test_stage_complete_via_chat(env):
+    """工程の状態は項目ではない。PM は「工程を確定する」承認依頼を出し、PdM が承認したら確定（完了）になる。"""
+    from pf_agent import assistant, repo
+    from pf_agent.assistant import ActionOut
+
+    c, p = env
+    # 必須が空なら、承認依頼にできない（理由つき）
+    with pytest.raises(ValueError, match="必須が空"):
+        assistant.prepare_action("tenant-a", p, "pm_design", ActionOut(type="stage_complete", stages=["s09"]))
+    with pytest.raises(ValueError, match="PM"):
+        assistant.prepare_action("tenant-a", p, "platform", ActionOut(type="stage_complete", stages=["s09"]))
+    from pf_agent import frameworks as fx
+    from pf_agent import fwlib, llm
+
+    for f in fwlib.of(p.id, "s09").fields:
+        if f.required:
+            repo.set_field(p.id, "s09", f.key, llm._stub_value(f, "家計簿"), "t", "test")
+    a = assistant.prepare_action("tenant-a", p, "pm_design", ActionOut(type="stage_complete", stages=["s09"]))
+    assert "v1 として確定" in a["after"] and not fx.check(fwlib.of(p.id, "s09"), repo.draft(p.id, "s09"))
+    out = assistant._execute("tenant-a", p, "owner@example.com", a)
+    assert "確定しました：⑨" in out and repo.get_run(p.id, "s09").status == "completed"
+    # 存在しない項目（status など）への書き換えは出さず、返事の先頭に「何も変えていません」と出す
+    with pytest.raises(ValueError):
+        assistant.prepare_action("tenant-a", p, "pm_design",
+                                 ActionOut(type="set_field", stage_id="s09", field="status", value="完了"))

@@ -25,7 +25,12 @@ from .stages import STAGE_BY_ID, STAGES
 from .team import DOMAIN, KEYS, PM_OF, PMS, TeamError, _iso, name_of
 
 RESPONDERS = (*PMS, "platform")
-ACTION_TYPES = ("set_field", "issue_create", "issue_update", "schedule", "agent_enabled", "platform_act", "ui_page")
+ACTION_TYPES = (
+    "set_field", "issue_create", "issue_update", "schedule", "agent_enabled", "platform_act", "ui_page",
+    "stage_complete",
+)
+STATUS_JA = {"not_started": "未着手", "in_progress": "作業中", "awaiting_approval": "承認待ち", "revising": "修正中",
+             "completed": "更新済み（完了）", "skipped": "使わない", "needs_recheck": "要再確認"}
 PAGES = {
     "": ("dashboard", "ダッシュボード"),
     "board": ("board", "掲示板"),
@@ -152,7 +157,11 @@ class _Route(BaseModel):
 
 # ---------------- 答えと承認依頼 ----------------
 class ActionOut(BaseModel):
-    type: str = Field(description="set_field | issue_create | issue_update | schedule | agent_enabled | platform_act")
+    type: str = Field(
+        description="set_field | issue_create | issue_update | schedule | agent_enabled | platform_act | ui_page"
+        " | stage_complete"
+    )
+    stages: list[str] = Field(default_factory=list, description="stage_complete：確定する工程（s01〜s14）")
     stage_id: str = ""
     field: str = Field(default="", description="set_field：項目の key")
     value: str = Field(default="", description="set_field：新しい値。箇条書き・表は JSON で")
@@ -313,6 +322,8 @@ def prepare_action(tenant: str, product: Product | None, responder: str, a: Acti
                 "css": a.css[:200_000],
             },
         }
+    if a.type == "stage_complete":
+        return _prepare_complete(product, base, a)
     if a.type == "platform_act":
         from . import platform_agent as pa
 
@@ -327,6 +338,61 @@ def prepare_action(tenant: str, product: Product | None, responder: str, a: Acti
             "args": {"finding": a.number},
         }
     raise ValueError(f"知らない変更の種類：{a.type}")
+
+
+def _prepare_complete(product: Product | None, base: dict, a: ActionOut) -> dict:
+    """工程を確定する（下書きを新しい版にして「更新済み（完了）」にする）。必須が空の工程は確定できない。"""
+    if product is None:
+        raise ValueError("プロダクトを開いてから指示してください")
+    if base["by"] not in PMS:
+        raise ValueError("工程を確定する依頼を出せるのは PM です")
+    sids = [s for s in dict.fromkeys(a.stages or ([a.stage_id] if a.stage_id else [])) if s in STAGE_BY_ID]
+    if not sids:
+        raise ValueError("確定する工程が決まっていません（stages に s01〜s14）")
+    rs = repo.runs(product.id)
+    bad, before, after = [], [], []
+    for sid in sids:
+        st, r = STAGE_BY_ID[sid], rs[sid]
+        miss = fx.check(fwlib.of(product.id, sid), repo.draft(product.id, sid))
+        if miss:
+            bad.append(f"{st.no}{st.name}（{'、'.join(miss)[:200]}）")
+            continue
+        before.append(f"{st.no}{st.name}：{STATUS_JA.get(r.status, r.status)}・版 v{r.approved_version or 0}")
+        after.append(f"{st.no}{st.name}：今の下書きを v{r.current_version + 1} として確定し、更新済み（完了）にする")
+    if bad:
+        raise ValueError("必須が空なので確定できません：" + "／".join(bad))
+    return {
+        **base,
+        "title": f"{len(sids)} 工程を確定する（完了にする）",
+        "before": "\n".join(before),
+        "after": "\n".join(after) + "\n（下流で参照している工程は「要再確認」になります）",
+        "args": {"stages": sids},
+    }
+
+
+def _complete(product: Product, user: str, sids: list[str]) -> str:
+    """PdM がチャットで承認した＝承認者の判断。版を作り、承認が要る工程もそのまま承認する。"""
+    from . import api
+    from .engine import Engine, FactoryError
+    from .stages import APPROVE, AWAITING_APPROVAL, COMPLETED
+
+    engine = api.engine or Engine()  # API が持っている Engine を使う（作り直すと重い）
+
+    done, skipped = [], []
+    for sid in sids:
+        st = STAGE_BY_ID[sid]
+        try:
+            engine.commit(product, sid, user, "チャットで PdM が確定を承認", False)
+        except FactoryError as e:
+            skipped.append(f"{st.no}{st.name}（{e.message}）")
+            continue
+        r = repo.get_run(product.id, sid)
+        if r.status == AWAITING_APPROVAL:
+            engine.decide(product, sid, user, APPROVE, "チャットで PdM が承認")
+        if repo.get_run(product.id, sid).status == COMPLETED:
+            done.append(f"{st.no}{st.name}")
+    out = f"確定しました：{'、'.join(done)}" if done else "確定した工程はありません"
+    return out + (f"／確定できなかった：{'、'.join(skipped)}" if skipped else "")
 
 
 def _material(product: Product | None, ctx: dict, mentions: list[dict]) -> str:
@@ -432,11 +498,15 @@ def _prompt(
         + "\n\n## 出力\n- reply：日本語で短く直接答える。前置き・称賛は書かない。"
             "根拠の弱い意図には率直に指摘する。報告だけで終えない：最後は、"
             "自分が次にやること（承認依頼にしたもの）か、"
-            "PdM への質問・相談・合意依頼・終了承認依頼のどれかで終える。期限や時刻は書かない。\n"
+            "PdM への質問・相談・合意依頼・終了承認依頼のどれかで終える。期限や時刻は書かない。"
+            "actions はまだ実行されていない（PdM が承認したら実行される）。reply に「更新しました」「完了にしました」と"
+            "書かず、「〜の承認依頼を出しました」と書く。\n"
         "- actions：何かを変えるときだけ。自分では実行せず、PdM の承認を待つ承認依頼として出す。種類は "
         "set_field（工程の項目を書き換える：stage_id・field・value）、issue_create（担当に動いてもらう：assignee・"
         "subject・description・stage_id。PM のときだけ）、issue_update（number・status・notes。PM のときだけ）、"
         "schedule（keys・cron）、agent_enabled（keys・enabled は on/off）、platform_act（number は問題の id）、"
+        "stage_complete（工程を確定して「更新済み（完了）」にする：stages に工程の id。"
+        "工程の状態は項目ではないので set_field では変えない。必須が空の工程は確定できない）、"
         "ui_page（⑥UIデザインの画面：page_id は書き換える画面の id か空、subject は画面名、screen は SC-xx、"
         "html は body の中身、css。クラス pf-nav・pf-main・pf-btn・pf-input・pf-card が使える）。"
         "質問への答えだけなら空にする。\n\n"
@@ -599,7 +669,10 @@ def send(
             dropped.append(f"{a.type}：{getattr(e, 'message', e)}")
         except Exception as e:  # noqa: BLE001  1つの案の不備で答え全体を落とさない
             dropped.append(f"{a.type}：{getattr(e, 'message', e)}")
-    reply = out.reply + (f"\n（出せなかった変更：{'／'.join(dropped)}）" if dropped else "")
+    # 出せなかった変更は、何も変えていないことを先頭ではっきり出す（本文が「更新しました」と書いていても）
+    reply = (
+        f"⚠ 次の変更は出せませんでした（何も変えていません）：{'／'.join(dropped)}\n\n" if dropped else ""
+    ) + out.reply
     actx = {k: v for k, v in ctx.items() if k != "reply_to"}  # 引用は PdM の発言にだけ付ける
     answer = _save(tenant, user, ctx.get("product_id"), "agent", responder, reply, actx, actions=actions)
     if product is not None and responder in PMS:  # PM の対話の記録にも残す
@@ -687,6 +760,8 @@ def _execute(tenant: str, product: Product | None, user: str, a: dict) -> str:
         from . import platform_agent as pa
 
         return pa.act(tenant, user, x["finding"])["done"]
+    if a["type"] == "stage_complete":
+        return _complete(product, user, x["stages"])
     if a["type"] == "pm_ask":
         from . import asks
 
