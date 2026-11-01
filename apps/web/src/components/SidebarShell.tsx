@@ -20,9 +20,9 @@ export function SidebarShell({ initialOpen, sidebar, children }: { initialOpen: 
     return () => window.removeEventListener("keydown", onKey);
   });
   return (
-    <div className="flex min-h-screen">
+    <div className="flex min-h-[calc(100vh-var(--pf-composer,0px))]">
       {open && (
-        <aside className="sticky top-0 flex h-screen w-64 shrink-0 flex-col border-r border-zinc-200 bg-zinc-100/70">
+        <aside aria-label="サイドバー" className="sticky top-0 flex h-[calc(100vh-var(--pf-composer,0px))] w-64 shrink-0 flex-col border-r border-zinc-200 bg-zinc-100/70">
           <button onClick={() => toggle(false)} className="btn-ghost btn-sm absolute right-2 top-2 z-10 h-7 w-7 p-0" title="サイドバーを隠す（[）" aria-label="サイドバーを隠す">
             <PanelLeftClose size={15} />
           </button>

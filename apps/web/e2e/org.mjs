@@ -13,6 +13,17 @@ page.setDefaultTimeout(30000);
 const shot = (n, full = false) => page.screenshot({ path: `${SHOTS}/${n}.png`, fullPage: full });
 const btn = (name, exact = false) => page.getByRole("button", { name, exact });
 
+// ファクトリー全体で1つのチャット：画面下の欄に書いて送る → 変更は承認依頼に「承認」で答える
+const chatSay = async (text) => {
+  await page.getByLabel("チャットに話す").fill(text);
+  await page.getByLabel("チャットに話す").press("Enter");
+};
+const approveLast = async () => {
+  const card = page.getByRole("group", { name: /承認依頼：/ }).last();
+  await card.getByRole("button", { name: "承認", exact: true }).click();
+  await card.getByText(/承認しました/).waitFor();
+};
+
 await page.goto(`${BASE}/register`);
 await page.fill("input[name=name]", "ORG");
 await page.fill("input[name=email]", `org-${Date.now()}@example.com`);
@@ -31,13 +42,15 @@ await btn("この内容でプロダクトをつくる").click();
 await page.waitForURL(/\/p\/[0-9a-f]+$/);
 const pid = page.url().split("/p/")[1];
 
-// ダッシュボード：3人の PM と14の担当。事業 PM に話す → ①の担当に Issue
-await page.getByRole("region", { name: "PM との対話" }).waitFor();
+// ダッシュボード：3人の PM と14の担当。画面下のチャットで「①の…」→ ①の話として事業 PM が答え、起票の承認依頼
+await page.getByRole("complementary", { name: "チャット" }).waitFor();
 await page.locator(".react-flow__node-agent").filter({ hasText: "事業PM" }).waitFor();
-await page.getByLabel("事業PMへの発言").fill("①の下書きを作って。対象は共働き世帯");
-await btn("話す", true).click();
-await page.getByRole("link", { name: "#1" }).first().waitFor({ timeout: 30000 });
+await chatSay("①の下書きを作って。対象は共働き世帯");
+const card1 = page.getByRole("group", { name: /承認依頼：①アイディエーション担当に Issue を起票する/ }).last();
+await card1.getByText("変更後").waitFor();
 await shot("o1-dashboard");
+await approveLast();
+await page.getByText(/#1 を起票しました/).first().waitFor();
 // Issue：担当が実行して工程に書き込み、PM に返し、PM が確かめて終了にする（記録が残る）
 await page.goto(`${BASE}/p/${pid}/issues/1`);
 for (let i = 0; i < 40 && !(await page.getByText("終了", { exact: true }).first().isVisible()); i++) { await page.waitForTimeout(1000); await page.reload(); }
@@ -64,28 +77,39 @@ await page.goto(`${BASE}/p/${pid}/pm/pm_biz`);
 await page.getByText("集めたこと（タスク管理の場所）").waitFor();
 await page.getByText(/状況/).first().waitFor();
 await shot("o5-pm", true);
-// 工程の画面：右は「この領域の PM と話す」。担当とは直接話さない（案タブは採用・却下だけ）
+// 工程の画面：メンションなしで話すと、この工程について領域の PM が答える。添付もできる。案タブは採用・却下だけ
 await page.goto(`${BASE}/p/${pid}/s/s01`);
-await page.getByText("この領域の PM と話す").waitFor();
+await page.getByText("答える人：事業PM").waitFor();
 await page.getByLabel("添付するファイル").setInputFiles({ name: "顧客メモ.md", mimeType: "text/markdown", buffer: Buffer.from("# 顧客\n共働きの夫婦") });
 await page.getByRole("button", { name: "顧客メモ.mdを外す" }).waitFor();
-await page.getByLabel("事業PMへの発言").fill("このメモを踏まえて顧客を見直して");
-await btn("話す", true).click();
-await page.getByText("顧客メモ.md").first().waitFor();
-await page.getByText(/承知しました/).last().waitFor();
+await chatSay("このメモを踏まえて顧客を見直して");
+await page.getByRole("complementary", { name: "チャット" }).getByText("顧客メモ.md").first().waitFor();
+await page.getByText(/（スタブ）事業PMです。①アイディエーションについて/).last().waitFor();
+// 否認すると何も起票しない
+const card2 = page.getByRole("group", { name: /承認依頼：①アイディエーション担当に Issue を起票する/ }).last();
+await card2.getByRole("button", { name: "否認", exact: true }).click();
+await card2.getByText(/否認しました/).waitFor();
 await btn("案タブ").click();
-await page.getByText(/担当エージェントとは直接話せません/).waitFor();
+await page.getByText(/話しかけるのは画面下のチャットから/).waitFor();
 await shot("o6-stage");
+// @ で別のページ・エージェントを指す（開いていなくても話せる）
+await page.getByLabel("チャットに話す").fill("@設計");
+await page.getByRole("listbox", { name: "メンションの候補" }).getByRole("button", { name: /設計PM/ }).first().click();
+await page.getByLabel("チャットに話す").press("End");
+await page.getByLabel("チャットに話す").type("⑨の進み具合は？");
+await page.getByText("答える人：設計PM").waitFor();
+await page.getByLabel("チャットに話す").press("Enter");
+await page.getByText(/（スタブ）設計PMです。設計PMについて/).last().waitFor();
 // 振り返りの会議：PM のレポートと突き合わせ → 会議の中で PM と話す
 await page.goto(`${BASE}/p/${pid}`);
 await btn("いま会議を始める").click();
 await page.getByRole("link", { name: "会議に入る" }).click({ timeout: 30000 });
 await page.getByRole("region", { name: "設計PMのレポート" }).getByText(/実行状況|スタブ/).first().waitFor({ timeout: 60000 });
 await page.getByText(/食い違いは見つかりませんでした/).first().waitFor();
-await page.getByRole("button", { name: /設計PM/ }).first().click();
-await page.getByLabel("設計PMへの発言").fill("⑨は来週までに");
-await btn("話す", true).click();
-await page.getByText(/承知しました/).last().waitFor();
+await chatSay("⑨は来週までに");
+await page.getByText(/（スタブ）設計PMです。⑨アプリケーション設計について/).last().waitFor();
+await page.reload();
+await page.getByRole("region", { name: "会議での対話" }).getByText("⑨は来週までに").waitFor();
 await shot("o7-meeting", true);
 await btn("会議を終える").click();
 // 組織：会議の予定・定期実行・顔を描く
@@ -99,9 +123,9 @@ await page.getByRole("navigation", { name: "エージェント" }).getByRole("li
 await page.waitForURL(/\/s\/s09$/);
 await page.keyboard.press("Control+k");
 await page.getByLabel("話しかける・移動する").last().fill("@⑨ 状態遷移に取消を足して");
-await page.getByRole("option", { name: /設計PMに話す（⑨アプリケーション設計について）/ }).click();
-await page.getByText(/設計PMが答えました/).waitFor();
+await page.getByRole("option", { name: /チャットで設計PMに話す（⑨アプリケーション設計について）/ }).click();
+await page.getByLabel("チャットに話す").press("Enter");
+await page.getByRole("group", { name: /承認依頼：⑨アプリケーション設計担当に Issue を起票する/ }).last().waitFor();
 await shot("o9-command");
-await page.keyboard.press("Escape");
 console.log(`ok product=${pid}`);
 await browser.close();

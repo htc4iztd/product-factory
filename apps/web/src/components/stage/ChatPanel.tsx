@@ -157,7 +157,7 @@ export function ChatPanel({ pid, sid, chat, fields, prompts, disabled, onClose, 
         {me ? <Avatar k={sid} v={me.avatar_v} size={30} state={me.state ?? "idle"} />
           : <div className="flex h-6 w-6 items-center justify-center rounded-md bg-gradient-to-br from-brand-500 to-violet-500 text-white"><Sparkles size={13} /></div>}
         <div className="min-w-0">
-          <div className="text-[13px] font-semibold">{me ? `${me.name}と話す` : "AIと詰める"}</div>
+          <div className="text-[13px] font-semibold">{disabled ? (me ? `${me.name}から届いた案` : "届いた案") : me ? `${me.name}と話す` : "AIと詰める"}</div>
           {me?.report && (
             <div className="flex items-center gap-1 text-[10px] text-zinc-500" title={me.report.summary}>
               <span className={`h-1.5 w-1.5 rounded-full ${me.report.health === "green" ? "bg-emerald-500" : me.report.health === "red" ? "bg-rose-500" : "bg-amber-400"}`} />
@@ -197,7 +197,7 @@ export function ChatPanel({ pid, sid, chat, fields, prompts, disabled, onClose, 
       <div className="flex-1 space-y-4 overflow-y-auto px-4 py-4">
         {chat.length === 0 && !sent && (
           <div className="rounded-xl border border-dashed border-zinc-300 p-4 text-[13px] text-zinc-500">
-            考えていることをそのまま書いてください。AIが質問で詰め、項目ごとの書き換え案を出します。
+            {disabled ? "まだ案は届いていません。資料の取り込みや見直しで届いた案を、ここで採用・却下します。" : "考えていることをそのまま書いてください。AIが質問で詰め、項目ごとの書き換え案を出します。"}
           </div>
         )}
         {chat.map((m) => {

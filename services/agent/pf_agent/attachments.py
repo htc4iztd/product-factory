@@ -27,7 +27,7 @@ class AttachmentError(Exception):
 
 
 def add(product: Product, user: str, agent: str, filename: str, content_b64: str) -> dict:
-    if agent not in STAGE_BY_ID and agent not in ("pm_biz", "pm_design", "pm_impl"):
+    if agent not in STAGE_BY_ID and agent not in ("pm_biz", "pm_design", "pm_impl", "assistant"):
         raise AttachmentError(422, "添付できるのは PM との対話です")
     filename = (filename or "").strip().replace("/", "_")[:300] or "添付"
     try:

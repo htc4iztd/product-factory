@@ -1,8 +1,7 @@
 "use client";
-import { useEffect, useMemo, useRef, useState, useTransition } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { ArrowRight, CornerDownLeft, Send } from "lucide-react";
-import { talkPlatform, talkPm } from "@/app/(app)/p/[id]/org-actions";
 import { Avatar } from "./Avatar";
 
 type Item =
@@ -22,8 +21,6 @@ export function CommandBar({ pid, places, agents, stages, versions }: {
   const [open, setOpen] = useState(false);
   const [q, setQ] = useState("");
   const [idx, setIdx] = useState(0);
-  const [msg, setMsg] = useState<string | null>(null);
-  const [pending, start] = useTransition();
   const input = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -36,7 +33,7 @@ export function CommandBar({ pid, places, agents, stages, versions }: {
     window.addEventListener("pf:command", onOpen);
     return () => { window.removeEventListener("keydown", onKey); window.removeEventListener("pf:command", onOpen); };
   }, []);
-  useEffect(() => { if (open) { setTimeout(() => input.current?.focus(), 10); setIdx(0); setMsg(null); } }, [open]);
+  useEffect(() => { if (open) { setTimeout(() => input.current?.focus(), 10); setIdx(0); } }, [open]);
 
   const items = useMemo<Item[]>(() => {
     const t = q.trim();
@@ -53,24 +50,22 @@ export function CommandBar({ pid, places, agents, stages, versions }: {
     const say: Item[] = [];
     if (stage) {
       const a = agents.find((x) => x.key === stage.pm)!;
-      say.push({ kind: "say", label: `${a.name}に話す（${stage.label}について）`, to: a.key, agent: a.key, text: body, stage: stage.id });
+      say.push({ kind: "say", label: `チャットで${a.name}に話す（${stage.label}について）`, to: a.key, agent: a.key, text: body, stage: stage.id });
     }
     for (const a of pm ? [pm] : agents.filter((x) => x.key !== "platform")) {
-      if (!say.some((x) => x.kind === "say" && x.to === a.key)) say.push({ kind: "say", label: `${a.name}に話す`, to: a.key, agent: a.key, text: body });
+      if (!say.some((x) => x.kind === "say" && x.to === a.key)) say.push({ kind: "say", label: `チャットで${a.name}に話す`, to: a.key, agent: a.key, text: body });
     }
     return at ? [...say, ...go] : [...go.slice(0, 3), ...say, ...go.slice(3)];
   }, [q, places, agents, stages]);
 
   function run(it: Item) {
-    if (it.kind === "go") { setOpen(false); setQ(""); router.push(it.href); return; }
-    start(async () => {
-      const r = it.to === "platform" ? await talkPlatform(pid, it.text) : await talkPm(pid, it.to, it.text, { stage_id: it.stage });
-      if (r.error) return setMsg(r.error);
-      setQ("");
-      setMsg(it.to === "platform" ? "プラットフォームが答えました。プラットフォームの画面で読めます"
-        : `${it.label.replace(/に話す.*/, "")}が答えました${r.issues?.length ? `（Issue ${r.issues.map((n) => `#${n}`).join("、")} を起票）` : ""}。ダッシュボードか PM の作業場所で読めます`);
-      router.refresh();
-    });
+    setOpen(false); setQ("");
+    if (it.kind === "go") { router.push(it.href); return; }
+    // 話すのは画面下のチャット（ファクトリー全体で1つ）。宛先をメンションにして入力欄に入れる
+    const mention = it.stage
+      ? { kind: "stage" as const, ref: it.stage, label: stages.find((s) => s.id === it.stage)?.label ?? it.stage }
+      : { kind: "agent" as const, ref: it.to, label: agents.find((a) => a.key === it.to)?.name ?? it.to };
+    window.dispatchEvent(new CustomEvent("pf:compose", { detail: { mention, text: `@${mention.label} ${it.text}` } }));
   }
 
   if (!open) return null;
@@ -80,7 +75,7 @@ export function CommandBar({ pid, places, agents, stages, versions }: {
         <div className="flex items-center gap-2 border-b border-zinc-100 px-4 py-3">
           <input ref={input} value={q} aria-label="話しかける・移動する" placeholder="行き先を探す・PM に話しかける（@⑨ ER図に申込日時を足して → 設計PMへ）"
             className="flex-1 bg-transparent text-[15px] outline-none placeholder:text-zinc-400"
-            onChange={(e) => { setQ(e.target.value); setIdx(0); setMsg(null); }}
+            onChange={(e) => { setQ(e.target.value); setIdx(0); }}
             onKeyDown={(e) => {
               if (e.key === "ArrowDown") { e.preventDefault(); setIdx((i) => Math.min(i + 1, items.length - 1)); }
               if (e.key === "ArrowUp") { e.preventDefault(); setIdx((i) => Math.max(i - 1, 0)); }
@@ -91,7 +86,7 @@ export function CommandBar({ pid, places, agents, stages, versions }: {
         <ul className="max-h-[50vh] overflow-y-auto py-1" role="listbox">
           {items.map((it, i) => (
             <li key={i} role="option" aria-selected={i === idx}>
-              <button onMouseEnter={() => setIdx(i)} onClick={() => run(it)} disabled={pending}
+              <button onMouseEnter={() => setIdx(i)} onClick={() => run(it)}
                 className={`flex w-full items-center gap-3 px-4 py-2 text-left text-[13px] ${i === idx ? "bg-brand-50" : ""}`}>
                 {it.kind === "say" ? <Avatar k={it.agent} v={versions[it.agent]} size={24} /> : <ArrowRight size={14} className="text-zinc-400" />}
                 <span className="min-w-0 flex-1">
@@ -104,7 +99,6 @@ export function CommandBar({ pid, places, agents, stages, versions }: {
           ))}
           {items.length === 0 && <li className="px-4 py-3 text-[12px] text-zinc-400">見つかりません</li>}
         </ul>
-        {(msg || pending) && <div className="border-t border-zinc-100 px-4 py-2 text-[12px] text-zinc-600">{pending ? "送っています…" : msg}</div>}
       </div>
     </div>
   );

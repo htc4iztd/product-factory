@@ -7,7 +7,7 @@ import { PM_KEYS, PM_NAME } from "@/lib/pm";
 import { PageHeader } from "@/components/PageHeader";
 import { AutoRefresh } from "@/components/autodev/AutoRefresh";
 import { Avatar } from "@/components/rail/Avatar";
-import { PmChat } from "@/components/org/PmChat";
+import { PmLog } from "@/components/org/PmChat";
 import { CloseMeeting } from "@/components/org/CloseMeeting";
 
 const HEALTH: Record<string, string> = { green: "bg-emerald-500", yellow: "bg-amber-400", red: "bg-rose-500" };
@@ -59,7 +59,7 @@ export default async function MeetingPage({ params }: { params: Promise<{ id: st
           })}
         </div>
         {m.status !== "preparing" && (
-          <div className="card"><PmChat pid={id} messages={m.messages ?? []} versions={versions} meetingId={m.id} height="max-h-[420px]" /></div>
+          <div className="card"><PmLog pid={id} messages={m.messages ?? []} versions={versions} title="会議での対話" empty="このページを開いたまま画面下のチャットで話すと、会議での発言として PM が答えます。" height="max-h-[420px]" /></div>
         )}
       </div>
     </>

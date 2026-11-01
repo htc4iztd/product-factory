@@ -13,6 +13,17 @@ page.setDefaultTimeout(30000);
 const shot = (n, full = false) => page.screenshot({ path: `${SHOTS}/${n}.png`, fullPage: full });
 const btn = (name, exact = false) => page.getByRole("button", { name, exact });
 
+// ファクトリー全体で1つのチャット：画面下の欄に書いて送る → 変更は承認依頼に「承認」で答える
+const chatSay = async (text) => {
+  await page.getByLabel("チャットに話す").fill(text);
+  await page.getByLabel("チャットに話す").press("Enter");
+};
+const approveLast = async () => {
+  const card = page.getByRole("group", { name: /承認依頼：/ }).last();
+  await card.getByRole("button", { name: "承認", exact: true }).click();
+  await card.getByText(/承認しました/).waitFor();
+};
+
 await page.goto(`${BASE}/register`);
 await page.fill("input[name=name]", "PLT");
 await page.fill("input[name=email]", `plt-${Date.now()}@example.com`);
@@ -53,16 +64,20 @@ if (await tickFix.count()) {
   await tickFix.first().click();
   await page.getByText(/定期実行を1回動かしました/).first().waitFor();
 }
-// 対話：PdM が直接話す
-await btn("いま全体はちゃんと動いてる？").click();
-await page.getByRole("region", { name: "プラットフォームとの対話" }).getByText(/（スタブ）(未解決の問題は|いま見つかっている問題はありません)/).last().waitFor();
+// このページで、メンションなしで話す → プラットフォームが答える（PdM と直接話す）
+await page.getByText("答える人：プラットフォーム").waitFor();
+await chatSay("いま全体はちゃんと動いてる？");
+await page.getByRole("complementary", { name: "チャット" }).getByText(/（スタブ）プラットフォームです。.*(未解決の問題は|いま見つかっている問題はありません)/).last().waitFor();
 await shot("p2-platform", true);
 
-// ⌘K：@プラットフォーム で話す
+// ⌘K：@プラットフォーム → チャットの入力欄に入る → 送る
+await page.goto(`${BASE}/p/${pid}`);
 await page.keyboard.press("Control+k");
 await page.getByLabel("話しかける・移動する").last().fill("@プラットフォーム 失敗しているジョブはある？");
-await page.getByRole("option", { name: /プラットフォームに話す/ }).click();
-await page.getByText(/プラットフォームが答えました/).waitFor();
+await page.getByRole("option", { name: /チャットでプラットフォームに話す/ }).click();
+await page.getByText("答える人：プラットフォーム").waitFor();
+await page.getByLabel("チャットに話す").press("Enter");
+await page.getByText(/（スタブ）プラットフォームです。プラットフォームについて/).last().waitFor();
 await shot("p3-command");
 console.log(`ok product=${pid}`);
 await browser.close();

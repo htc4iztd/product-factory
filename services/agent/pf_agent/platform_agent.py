@@ -24,6 +24,7 @@ from sqlalchemy import func, select
 from . import cron, jobs, llm, llmconf
 from .db import (
     AgentIssue,
+    AssistantMessage,
     IssueJournal,
     JobRun,
     PlatformFinding,
@@ -463,6 +464,24 @@ def detect(tenant: str, now: dt.datetime | None = None) -> dict:
                     author=NAME,
                     findings=[f.id],
                     text=f"【要対応】{f.title}{where}\n{f.suggestion}",
+                )
+            )
+            s.add(
+                AssistantMessage(
+                    tenant_id=tenant,
+                    user=None,
+                    product_id=f.product_id,
+                    role="agent",
+                    agent="platform",
+                    text=f"【要対応】{f.title}{where}\n{f.suggestion}",
+                    context={"kind": "platform", "label": "プラットフォーム", "finding": f.id},
+                    actions=[
+                        {"id": f"f{f.id}", "type": "platform_act", "status": "pending", "by": "platform",
+                         "title": f"対処を実行する：{f.action['label']}", "before": f.title,
+                         "after": f.action["label"], "args": {"finding": f.id}, "reason": f.suggestion}
+                    ]
+                    if f.action
+                    else [],
                 )
             )
         s.commit()

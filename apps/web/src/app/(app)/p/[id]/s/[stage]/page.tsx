@@ -27,11 +27,8 @@ export default async function StagePage({ params, searchParams }: Props) {
   const st: StageDetail = pp ? { ...main, draft: pp.draft, markdown: pp.markdown, chat: [] } : main;
   const canEdit = (await auth())?.user?.role !== "VIEWER";
   const panel = (await cookies()).get("pf_ai")?.value;
-  const drawer = panel === "closed" || panel === "ref" || panel === "props" ? panel : "ai";
-  const [pmMessages, versions] = await Promise.all([
-    agent<PmMessageT[]>(`/products/${id}/pm-messages?pm=${main.agent?.pm ?? "pm_biz"}`).catch(() => [] as PmMessageT[]),
-    agent<Record<string, string>>("/avatars").catch(() => ({} as Record<string, string>)),
-  ]);
+  const drawer = panel === "ref" || panel === "props" ? panel : "closed";
+  const versions = await agent<Record<string, string>>("/avatars").catch(() => ({} as Record<string, string>));
   const here = `/p/${id}/s/${stage}`;
   const awaiting = st.status === "awaiting_approval";
   const readOnly = !st.enabled || !!pp;
@@ -46,7 +43,7 @@ export default async function StagePage({ params, searchParams }: Props) {
   };
 
   return (
-    <div className="flex h-screen flex-col">
+    <div className="flex h-[calc(100vh-var(--pf-composer,0px))] flex-col">
       <header className="shrink-0 border-b border-zinc-200 bg-white px-8 pt-4">
         <div className="mb-2 flex items-center gap-1.5 text-xs text-zinc-400">
           <Link href={`/p/${id}`} className="hover:text-zinc-700">ダッシュボード</Link><span>/</span><span>{st.phase} {PHASE_NAME[st.phase]}</span>
@@ -124,7 +121,7 @@ export default async function StagePage({ params, searchParams }: Props) {
             )}
           </div>
         </section>
-        <AiDrawer initial={drawer} agent={st.agent} pmMessages={pmMessages} versions={versions} references={st.references} decisions={st.decisions} sessions={st.sessions} sessionId={st.session_id} report={st.report} pid={id} sid={stage} chat={st.chat} fields={st.framework.fields} prompts={st.framework.prompts}
+        <AiDrawer initial={drawer} agent={st.agent} versions={versions} references={st.references} decisions={st.decisions} sessions={st.sessions} sessionId={st.session_id} report={st.report} pid={id} sid={stage} chat={st.chat} fields={st.framework.fields} prompts={st.framework.prompts}
           disabled={pp ? `案（${pp.key}）を表示中です。対話は「本線」で行います` : !st.enabled ? "ステージを開くと対話できます" : null} />
       </div>
     </div>

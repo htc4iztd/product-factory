@@ -3,7 +3,7 @@ import { agent, type AgentIssueT, type PmKey, type PmWorkspace } from "@/lib/age
 import { PageHeader } from "@/components/PageHeader";
 import { AutoRefresh } from "@/components/autodev/AutoRefresh";
 import { Avatar } from "@/components/rail/Avatar";
-import { PmChat, PM_AREA } from "@/components/org/PmChat";
+import { PmLog, PM_AREA } from "@/components/org/PmChat";
 import { ISSUE_STATUS_TONE } from "@/components/org/bits";
 
 const when = (t: string | null) => (t ? new Date(t).toLocaleString("ja-JP", { timeZone: "Asia/Tokyo", month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit" }) : "—");
@@ -41,7 +41,7 @@ export default async function PmPage({ params }: { params: Promise<{ id: string;
         sub={`${PM_AREA[pm]}・状況確認 ${w.pm.cron_label}（最後：${when(w.checked_at)}）・会議でまだ伝えていないこと ${w.pending} 件`}
       />
       <div className="grid gap-6 px-8 py-6 xl:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
-        <div className="card"><PmChat pid={id} messages={w.messages} versions={versions} pm={pm as PmKey} height="max-h-[520px]" /></div>
+        <div className="card"><PmLog pid={id} messages={w.messages} versions={versions} title={`${w.pm.name}との対話の記録`} height="max-h-[520px]" /></div>
         <div className="space-y-4">
           <section className="card">
             <div className="flex items-center gap-2 border-b border-zinc-100 px-4 py-2.5">

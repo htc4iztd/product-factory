@@ -28,6 +28,17 @@ async function createProduct(name, idea) {
 const shot = (n, full = false) => page.screenshot({ path: `${SHOTS}/${n}.png`, fullPage: full });
 const btn = (name, exact = false) => page.getByRole("button", { name, exact });
 
+// ファクトリー全体で1つのチャット：画面下の欄に書いて送る → 変更は承認依頼に「承認」で答える
+const chatSay = async (text) => {
+  await page.getByLabel("チャットに話す").fill(text);
+  await page.getByLabel("チャットに話す").press("Enter");
+};
+const approveLast = async () => {
+  const card = page.getByRole("group", { name: /承認依頼：/ }).last();
+  await card.getByRole("button", { name: "承認", exact: true }).click();
+  await card.getByText(/承認しました/).waitFor();
+};
+
 await page.goto(`${BASE}/register`);
 await shot("00-register");
 await page.fill("input[name=name]", "E2E");
@@ -44,7 +55,8 @@ await shot("01-overview", true);
 // 工程の下書きは、PdM が領域の PM に頼む → PM が担当に Issue を起票 → 担当が書き込む（PdM は担当と直接話さない）
 async function askPm(sid) {
   await page.goto(`${BASE}/p/${pid}/s/${sid}`);
-  await btn("この工程の下書きを作って").click();
+  await chatSay("この工程の下書きを作って");
+  await approveLast();
   for (let i = 0; i < 60; i++) {
     await page.waitForTimeout(1000);
     await page.reload();
@@ -143,7 +155,7 @@ await page.getByPlaceholder(/理由・修正指示/).fill("撤退条件を数値
 await btn("Request Changes").click();
 await btn("案タブ").click();
 await page.getByText("承認者の修正指示：撤退条件を数値で").waitFor();
-await btn("PMタブ").click();
+await btn("案タブ").click();
 await page.getByRole("button", { name: "撤退条件を編集" }).click();
 await page.locator("textarea").first().fill("6か月で週次の締め完了世帯が100未満なら撤退");
 await btn("保存", true).click();
@@ -200,16 +212,10 @@ await page.getByText("事業フェーズの成果物").waitFor();
 await page.getByRole("button", { name: /④ プロダクト戦略/ }).click();
 await page.getByText("北極星指標").first().waitFor();
 await shot("11b-reference");
-await btn("PMタブ").click();
-await btn("AIタブを閉じる").click();
-await btn("AIタブを閉じる").waitFor({ state: "detached" });
-await btn("PMタブ").click();
-await btn("この工程の下書きを作って").waitFor();
-// 担当エージェントとは直接話さない：案タブは届いた案の採用・却下だけ
+// 担当エージェントとは直接話さない：案タブは届いた案の採用・却下だけ（話すのは画面下のチャット）
 await btn("案タブ").click();
-await page.getByText(/担当エージェントとは直接話せません/).waitFor();
+await page.getByText(/話しかけるのは画面下のチャットから/).waitFor();
 await shot("11c-props");
-await btn("PMタブ").click();
 
 await page.goto(`${BASE}/p/${pid}/g/P1`);
 await btn("進む", true).click();
@@ -217,16 +223,16 @@ await page.getByText("直近の記録").waitFor();
 await shot("12-gate", true);
 
 await page.goto(`${BASE}/p/${pid}`);
-await page.getByRole("region", { name: "PM との対話" }).waitFor();   // トップはダッシュボード（表紙はプロダクト・キャンバスに）
+await page.getByRole("complementary", { name: "チャット" }).waitFor();   // トップはダッシュボード（表紙はプロダクト・キャンバスに）
 await shot("13-overview-after", true);
 // サイドバーを隠す → 再読み込みしても隠れたまま → 表示に戻す
 await btn("サイドバーを隠す").click();
-await page.locator("aside").waitFor({ state: "detached" });
+await page.getByRole("complementary", { name: "サイドバー" }).waitFor({ state: "detached" });
 await page.reload();
 await btn("サイドバーを表示").waitFor();
 await shot("13b-nav-hidden");
 await btn("サイドバーを表示").click();
-await page.locator("aside").waitFor();
+await page.getByRole("complementary", { name: "サイドバー" }).waitFor();
 const recheck = await page.getByText("上流が更新されました").count();
 const confirmed = await page.locator("main").getByText("更新済み", { exact: true }).count();
 await page.goto(`${BASE}/p/${pid}/audit`);

@@ -13,6 +13,17 @@ page.on("dialog", (d) => d.accept(d.type() === "prompt" ? "注文" : undefined))
 const shot = (n, full = false) => page.screenshot({ path: `${SHOTS}/${n}.png`, fullPage: full });
 const btn = (name, exact = false) => page.getByRole("button", { name, exact });
 
+// ファクトリー全体で1つのチャット：画面下の欄に書いて送る → 変更は承認依頼に「承認」で答える
+const chatSay = async (text) => {
+  await page.getByLabel("チャットに話す").fill(text);
+  await page.getByLabel("チャットに話す").press("Enter");
+};
+const approveLast = async () => {
+  const card = page.getByRole("group", { name: /承認依頼：/ }).last();
+  await card.getByRole("button", { name: "承認", exact: true }).click();
+  await card.getByText(/承認しました/).waitFor();
+};
+
 await page.goto(`${BASE}/register`);
 await page.fill("input[name=name]", "DS");
 await page.fill("input[name=email]", `ds-${Date.now()}@example.com`);
@@ -35,7 +46,8 @@ const pid = page.url().split("/p/")[1];
 // 工程の下書きは、PdM が領域の PM に頼む → PM が担当に Issue を起票 → 担当が書き込む（PdM は担当と直接話さない）
 async function draft(sid) {
   await page.goto(`${BASE}/p/${pid}/s/${sid}`);
-  await btn("この工程の下書きを作って").click();
+  await chatSay("この工程の下書きを作って");
+  await approveLast();
   for (let i = 0; i < 60; i++) {
     await page.waitForTimeout(1000);
     await page.reload();

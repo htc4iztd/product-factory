@@ -320,6 +320,9 @@ def check(product: Product, pm: str, job_id: str, conn) -> tuple[list[str], str]
             post(product, pm, p.to, p.intent, p.text, p.thread or None, job_id=job_id)
     if out.to_pdm.strip():
         _say(product.id, pm, "pm", name_of(pm), out.to_pdm)
+        from . import assistant
+
+        assistant.notify(product.tenant_id, product.id, pm, out.to_pdm, {"kind": "pm", "pm": pm, "label": name_of(pm)})
     return wake, f"変化 {len(changed)}人・Issue {len(todo)}件" + (f"・{len(wake)}人に依頼" if wake else "")
 
 

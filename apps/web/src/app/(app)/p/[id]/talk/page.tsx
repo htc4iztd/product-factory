@@ -39,7 +39,7 @@ export default async function TalkPage({ params, searchParams }: { params: Promi
   const base = `/p/${id}/talk?c=${ch.id}`;
 
   return (
-    <div className="flex h-screen min-h-0">
+    <div className="flex h-[calc(100vh-var(--pf-composer,0px))] min-h-0">
       <aside className="flex w-56 shrink-0 flex-col border-r border-zinc-200 bg-white" aria-label="チャンネル">
         <div className="flex items-center justify-between px-4 pb-2 pt-5">
           <span className="text-[13px] font-semibold">議論</span>

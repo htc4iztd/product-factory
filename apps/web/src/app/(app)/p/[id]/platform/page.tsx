@@ -3,7 +3,7 @@ import { agent, type PlatformWorkspace } from "@/lib/agent";
 import { PageHeader } from "@/components/PageHeader";
 import { AutoRefresh } from "@/components/autodev/AutoRefresh";
 import { Avatar } from "@/components/rail/Avatar";
-import { FindingList, PlatformChat } from "@/components/org/PlatformPanel";
+import { FindingList } from "@/components/org/PlatformPanel";
 
 const when = (t: string | null) => (t ? new Date(t).toLocaleString("ja-JP", { timeZone: "Asia/Tokyo", month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit", second: "2-digit" }) : "—");
 const ago = (t: string | null, now: string) => {
@@ -99,7 +99,10 @@ export default async function PlatformPage({ params }: { params: Promise<{ id: s
               )}
             </section>
           </div>
-          <PlatformChat pid={id} messages={w.messages} version={versions.platform} />
+          <section className="card h-fit p-4 text-[12.5px] text-zinc-600" aria-label="プラットフォームと話す">
+            <div className="flex items-center gap-2 text-[14px] font-semibold text-zinc-900"><Avatar k="platform" v={versions.platform} size={24} />プラットフォームと話す</div>
+            <p className="mt-2">このページを開いたまま画面下のチャットで話すと、プラットフォームが答えます（ほかのページからは「@プラットフォーム」）。重い問題が出たときは、チャットに【要対応】で知らせ、対処があれば承認依頼を付けます。</p>
+          </section>
         </div>
       </div>
     </>

@@ -14,6 +14,17 @@ page.on("dialog", (d) => d.accept());
 const shot = (n, full = false) => page.screenshot({ path: `${SHOTS}/${n}.png`, fullPage: full });
 const btn = (name, exact = false) => page.getByRole("button", { name, exact });
 
+// ファクトリー全体で1つのチャット：画面下の欄に書いて送る → 変更は承認依頼に「承認」で答える
+const chatSay = async (text) => {
+  await page.getByLabel("チャットに話す").fill(text);
+  await page.getByLabel("チャットに話す").press("Enter");
+};
+const approveLast = async () => {
+  const card = page.getByRole("group", { name: /承認依頼：/ }).last();
+  await card.getByRole("button", { name: "承認", exact: true }).click();
+  await card.getByText(/承認しました/).waitFor();
+};
+
 await page.goto(`${BASE}/register`);
 await page.fill("input[name=name]", "KN");
 await page.fill("input[name=email]", `kn-${Date.now()}@example.com`);
@@ -175,8 +186,9 @@ await btn("リサーチから取り込む").click();
 await page.getByRole("combobox", { name: "ライブラリ" }).selectOption({ index: 0 });
 await page.getByLabel("論点", { exact: true }).selectOption("締め処理");
 await btn("送る", true).click();
-await page.getByText(/リサーチライブラリ RL-\d+の論点「締め処理」を根拠に/).waitFor();
-await page.getByText(/承知しました/).first().waitFor();
+await page.getByText(/RL-\d+「.+」の論点「締め処理」を取り込む。/).first().waitFor();
+await page.getByRole("group", { name: /承認依頼：②市場分析担当に Issue を起票する/ }).last().waitFor();
+await approveLast();
 await shot("k7-stage-import");
 console.log(`ok product=${pid} library=RL-${lib}`);
 await browser.close();

@@ -54,7 +54,7 @@ export default async function CodePage({ params, searchParams }: Props) {
   }
 
   return (
-    <div className="flex h-screen flex-col">
+    <div className="flex h-[calc(100vh-var(--pf-composer,0px))] flex-col">
       <header className="flex shrink-0 items-center gap-3 border-b border-zinc-200 bg-white px-6 py-2.5 text-[13px]">
         <Github size={15} />
         <a href={`https://github.com/${p.repo}`} target="_blank" rel="noreferrer" className="flex items-center gap-1 font-medium hover:underline">

@@ -527,3 +527,47 @@ def put_platform_schedule(body: PlatformEveryBody, c: Caller = Depends(caller)):
 
     _write(c)
     return schedule.set_platform_every(c.tenant, body.every_min)
+
+
+# ---------------- ファクトリー全体で1つのチャット ----------------
+class AssistantBody(BaseModel):
+    path: str = Field(default="/", max_length=500)
+    text: str = Field(min_length=1, max_length=8000)
+    mentions: list[dict] = Field(default_factory=list, max_length=10)
+    attachments: list[int] = Field(default_factory=list, max_length=5)
+    material: str = Field(default="", max_length=40000)  # 発言に添える材料（リサーチのまとめなど。画面には出さない）
+
+
+@router.post("/assistant/messages")
+def assistant_send(body: AssistantBody, c: Caller = Depends(caller)):
+    from . import assistant
+
+    _write(c)
+    return assistant.send(c.tenant, c.user, body.path, body.text, body.mentions, body.attachments, body.material)
+
+
+@router.get("/assistant/messages")
+def assistant_feed(after: int = 0, limit: int = 80, c: Caller = Depends(caller)):
+    from . import assistant
+
+    return assistant.feed(c.tenant, c.user, min(max(limit, 1), 200), after)
+
+
+class ApproveBody(BaseModel):
+    approve: bool
+
+
+@router.post("/assistant/messages/{message_id}/actions/{action_id}")
+def assistant_decide(message_id: int, action_id: str, body: ApproveBody, c: Caller = Depends(caller)):
+    from . import assistant
+
+    _write(c)
+    return assistant.decide(c.tenant, c.user, message_id, action_id, body.approve)
+
+
+@router.get("/assistant/mentions")
+def assistant_mentions(product: str = "", c: Caller = Depends(caller)):
+    from . import assistant
+
+    p = _p(c, product) if product else None
+    return assistant.mention_choices(p)

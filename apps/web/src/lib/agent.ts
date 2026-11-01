@@ -437,3 +437,15 @@ export type AgentCatalog = {
   agents: CastAgent[]; skills: SkillT[]; tools: ToolT[]; persona_fields: Record<keyof Persona, string>;
   limits: { depth: number; refs: number; chars: number };
 };
+
+// ファクトリー全体で1つのチャット
+export type MentionT = { kind: "stage" | "page" | "agent" | "issue"; ref: string; label: string };
+export type ChatActionT = {
+  id: string; type: string; status: "pending" | "approved" | "rejected" | "failed"; by: string; title: string;
+  before: string; after: string; reason?: string; result?: string; decided_by?: string;
+};
+export type AssistantMsg = {
+  id: number; role: "pdm" | "agent"; agent: string; agent_name: string; text: string; product_id: string | null;
+  context: { kind?: string; label?: string; product_name?: string; stage_id?: string; responder?: string; mentioned?: boolean };
+  mentions: MentionT[]; attachments: { id: number; filename: string; kind: string }[]; actions: ChatActionT[]; created_at: string;
+};

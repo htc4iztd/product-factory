@@ -814,6 +814,24 @@ class PlatformMessage(Base):
     created_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), default=_now)
 
 
+class AssistantMessage(Base):
+    """ファクトリー全体で1つのチャット。PdM の発言と、答えたエージェント（PM・プラットフォーム）の発言。
+    変更は actions に「変更前 → 変更後」の承認依頼として持ち、PdM が承認したものだけ実行する。"""
+    __tablename__ = "assistant_messages"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    tenant_id: Mapped[str] = mapped_column(String(64), index=True)
+    user: Mapped[str | None] = mapped_column(String(200), nullable=True, index=True)  # 空ならテナントの全員に
+    product_id: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    role: Mapped[str] = mapped_column(String(8))                              # pdm | agent
+    agent: Mapped[str] = mapped_column(String(12), default="")               # 答えたエージェント
+    text: Mapped[str] = mapped_column(Text)
+    context: Mapped[dict | None] = mapped_column(JSON, nullable=True)        # {path, kind, label, ...}
+    mentions: Mapped[list | None] = mapped_column(JSON, nullable=True)
+    attachments: Mapped[list | None] = mapped_column(JSON, nullable=True)
+    actions: Mapped[list | None] = mapped_column(JSON, nullable=True)        # 承認依頼
+    created_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), default=_now)
+
+
 class TenantSetting(Base):
     """テナントの小さな設定（プラットフォームの見回りの間隔など）。"""
     __tablename__ = "tenant_settings"

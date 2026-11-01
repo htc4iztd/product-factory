@@ -4,7 +4,6 @@ import { agent, type AgentIssueT, type Dashboard, type PmMessageT } from "@/lib/
 import { PageHeader } from "@/components/PageHeader";
 import { AutoRefresh } from "@/components/autodev/AutoRefresh";
 import { TeamGraph } from "@/components/org/TeamGraph";
-import { PmChat } from "@/components/org/PmChat";
 import { RunTeamButton } from "@/components/org/bits";
 import { MeetingCard } from "@/components/org/MeetingCard";
 
@@ -13,9 +12,8 @@ const when = (t: string | null | undefined) => (t ? new Date(t).toLocaleString("
 // ダッシュボード：工程どうしのつながりと進み具合を、各エージェントが報告する。PdM は PM と話し、毎日の会議で振り返る
 export default async function ProductPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
-  const [d, msgs, issues, team] = await Promise.all([
+  const [d, issues, team] = await Promise.all([
     agent<Dashboard>(`/products/${id}/dashboard`),
-    agent<PmMessageT[]>(`/products/${id}/pm-messages`),
     agent<AgentIssueT[]>(`/products/${id}/issues?open_only=true`),
     agent<{ beats?: Record<string, { at: string; detail: string }> }>(`/products/${id}/team`),
   ]);
@@ -66,8 +64,7 @@ export default async function ProductPage({ params }: { params: Promise<{ id: st
           ))}
         </section>
         <TeamGraph d={d} pid={id} />
-        <div className="grid gap-6 xl:grid-cols-[minmax(0,1.3fr)_minmax(0,1fr)]">
-          <div className="card"><PmChat pid={id} messages={msgs} versions={d.avatar_versions} /></div>
+        <div className="grid gap-6 xl:grid-cols-2">
           <div className="space-y-6">
             <MeetingCard pid={id} meeting={d.meeting_today} schedule={d.meeting} pending={d.pending_notes} />
             {(waiting.length > 0 || recheck.length > 0) && (
