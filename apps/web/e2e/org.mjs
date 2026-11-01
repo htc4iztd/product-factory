@@ -83,7 +83,7 @@ await page.goto(`${BASE}/p/${pid}/pm/pm_biz`);
 await page.getByText("集めたこと（タスク管理の場所）").waitFor();
 await page.getByText(/状況/).first().waitFor();
 await shot("o5-pm", true);
-// 工程の画面：メンションなしで話すと、この工程について領域の PM が答える。添付もできる。案タブは採用・却下だけ
+// 工程の画面：メンションなしで話すと、この工程について領域の PM が答える。添付もできる
 await page.goto(`${BASE}/p/${pid}/s/s01`);
 await page.getByText("答える人：事業PM").waitFor();
 await page.getByLabel("添付するファイル").setInputFiles({ name: "顧客メモ.md", mimeType: "text/markdown", buffer: Buffer.from("# 顧客\n共働きの夫婦") });
@@ -95,8 +95,6 @@ await page.getByText(/（スタブ）事業PMです。①アイディエーシ�
 const card2 = page.getByRole("group", { name: /承認依頼：①アイディエーション担当に Issue を起票する/ }).last();
 await card2.getByRole("button", { name: "否認", exact: true }).click();
 await card2.getByText(/否認しました/).waitFor();
-await btn("案タブ").click();
-await page.getByText(/話しかけるのは右のチャットから/).waitFor();
 await shot("o6-stage");
 // @ で別のページ・エージェントを指す（開いていなくても話せる）
 await page.getByLabel("チャットに話す").fill("@設計");

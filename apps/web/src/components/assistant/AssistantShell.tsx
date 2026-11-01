@@ -6,7 +6,7 @@ import type { AssistantMsg, ChatActionT, MentionT } from "@/lib/agent";
 import { decideAssistant, researchBrief, sendAssistant } from "@/lib/assistant-actions";
 import { Avatar } from "@/components/rail/Avatar";
 import { AttachButton, AttachChips, SentAttachments, useAttachments } from "@/components/chat/Attachments";
-import { ResearchImport } from "@/components/stage/ChatPanel";
+import { ResearchImport } from "@/components/chat/ResearchImport";
 
 const POLL_MS = 4000;
 const PM_OF: Record<string, string> = Object.fromEntries([

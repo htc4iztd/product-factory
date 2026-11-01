@@ -64,11 +64,9 @@ await card.getByRole("button", { name: "確定する" }).click();
 await page.getByRole("region", { name: "記録済み" }).getByText("1日の投稿は3話まで").waitFor();
 await shot("t2-decisions", true);
 
-// ⑥の参照タブに決定記録が出る
-await page.goto(`${BASE}/p/${pid}/s/s06`);
-await btn("参照タブ").click();
-await btn(/決定記録（1）/).click();
-await page.getByText("DEC-1 1日の投稿は3話まで").waitFor();
+// 決定記録の画面に出る
+await page.goto(`${BASE}/p/${pid}/decisions`);
+await page.getByText(/1日の投稿は3話まで/).first().waitFor();
 await shot("t3-stage-ref");
 
 // チケット：抜き出した宿題（仕分け待ち）と、決定から作ったチケット

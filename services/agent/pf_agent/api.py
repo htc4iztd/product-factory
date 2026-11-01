@@ -11,6 +11,7 @@ from sqlalchemy import select
 
 from . import (
     agents,
+    approvals,
     assistant,
     attachments,
     autodev,
@@ -69,6 +70,11 @@ async def _sync_error(_, exc: ghsync.SyncError):
 
 @app.exception_handler(autodev.AutodevError)
 async def _autodev_error(_, exc: autodev.AutodevError):
+    return JSONResponse(status_code=exc.status, content={"detail": exc.message})
+
+
+@app.exception_handler(approvals.ApprovalError)
+async def _approval_error(_, exc: approvals.ApprovalError):
     return JSONResponse(status_code=exc.status, content={"detail": exc.message})
 
 

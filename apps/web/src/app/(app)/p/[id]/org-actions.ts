@@ -82,3 +82,15 @@ export async function setPlatformEvery(pid: string, every_min: number): Promise<
     throw e;
   }
 }
+
+// ダッシュボードで案を承認・否認する（まとめて）
+export async function decideApprovals(pid: string, keys: string[], accept: boolean): Promise<R & { done?: string[]; failed?: string[] }> {
+  try {
+    const r = await agent<{ done: string[]; failed: string[] }>(`/products/${pid}/approvals`, { method: "POST", body: { keys, accept } });
+    revalidatePath(`/p/${pid}`, "layout");
+    return { done: r.done, failed: r.failed };
+  } catch (e) {
+    if (e instanceof AgentError) return { error: e.message };
+    throw e;
+  }
+}

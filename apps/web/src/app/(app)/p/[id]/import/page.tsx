@@ -78,8 +78,8 @@ export default async function ImportPage({ params, searchParams }: { params: Pro
                 <div key={sid} className="card p-5">
                   <div className="mb-2 flex items-center gap-2">
                     <span className="text-[14px] font-semibold">{s?.no} {s?.name}</span>
-                    <Link href={`/p/${id}/s/${sid}`} className="ml-auto flex items-center gap-1 text-[12px] font-medium text-brand-700 hover:underline">
-                      {rows.some((r) => r.action === "proposed") ? "工程を開いて案を選ぶ" : "工程を開く"}<ArrowRight size={12} />
+                    <Link href={rows.some((r) => r.action === "proposed") ? `/p/${id}#approvals` : `/p/${id}/s/${sid}`} className="ml-auto flex items-center gap-1 text-[12px] font-medium text-brand-700 hover:underline">
+                      {rows.some((r) => r.action === "proposed") ? "ダッシュボードで承認する" : "工程を開く"}<ArrowRight size={12} />
                     </Link>
                   </div>
                   <ul className="divide-y divide-zinc-100">

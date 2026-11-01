@@ -114,18 +114,22 @@ await page.getByLabel("取り込む資料").setInputFiles({
 });
 await btn("取り込む").click();
 await page.getByText("完了", { exact: true }).first().waitFor({ timeout: 60000 });
-await page.getByRole("link", { name: /工程を開いて案を選ぶ/ }).first().waitFor();
+await page.getByRole("link", { name: /ダッシュボードで承認する/ }).first().waitFor();
 // 読んでいいエージェントを割り当てる（①の担当にも読ませる）
 await page.getByRole("region", { name: "読んでいいエージェント" }).or(page.getByLabel("読んでいいエージェント")).first().waitFor();
 await page.getByRole("button", { name: /①アイディエーション$/ }).click();
 await btn("保存", true).click();
 await page.getByText(/次に動くとき・話すときから読みます/).waitFor();
 await shot("d8-import", true);
-await page.getByRole("link", { name: /工程を開いて案を選ぶ/ }).first().click();
-await page.waitForURL(/\/s\/s\d\d$/);
-await btn("案タブ").click();
-await page.getByText(/資料「運用設計.md」から 1 項目の案を作りました/).waitFor();
+// 取り込んだ案は、ダッシュボードの「承認待ちの案」で承認する（工程の画面には案・参照の欄はない）
+await page.getByRole("link", { name: /ダッシュボードで承認する/ }).first().click();
+await page.waitForURL(/\/p\/[0-9a-f]+(#approvals)?$/);
+const inbox = page.getByRole("region", { name: "承認待ちの案" });
+const prop = inbox.getByRole("group").filter({ hasText: "資料の取り込み：運用設計.md" }).first();
+await prop.getByText("変更後").waitFor();
 await shot("d9-import-proposals");
+await prop.getByRole("button", { name: "承認", exact: true }).click();
+await inbox.getByText(/1 件を承認しました/).waitFor();
 // 報告資料：⑨⑩を選び、AI の構成 → 直す → PowerPoint
 await page.goto(`${BASE}/p/${pid}/reports`);
 await page.getByLabel("⑨アプリケーション設計を使う").check();

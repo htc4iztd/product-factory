@@ -573,3 +573,23 @@ def assistant_mentions(product: str = "", c: Caller = Depends(caller)):
 
     p = _p(c, product) if product else None
     return assistant.mention_choices(p)
+
+
+# ---------------- ダッシュボードで承認する案 ----------------
+@router.get(P + "/approvals")
+def get_approvals(product_id: str, c: Caller = Depends(caller)):
+    from . import approvals
+
+    return approvals.pending(_p(c, product_id))
+
+
+class ApprovalBody(BaseModel):
+    keys: list[str] = Field(min_length=1, max_length=100)
+    accept: bool
+
+
+@router.post(P + "/approvals")
+def decide_approvals(product_id: str, body: ApprovalBody, c: Caller = Depends(caller)):
+    from . import approvals
+
+    return approvals.decide(_p(c, product_id, True), c.user, body.keys, body.accept)

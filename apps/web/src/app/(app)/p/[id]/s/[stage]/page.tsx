@@ -1,12 +1,10 @@
 import Link from "next/link";
 import { ArrowRight, Lock } from "lucide-react";
-import { agent, AgentError, type StageDetail, type VariantStage, type PmMessageT } from "@/lib/agent";
+import { agent, AgentError, type StageDetail, type VariantStage } from "@/lib/agent";
 import { auth } from "@/lib/auth";
 import { PatternStageBar } from "@/components/autodev/PatternStageBar";
 import { StatusBadge, StatusDot } from "@/components/StatusBadge";
 import { Canvas } from "@/components/stage/Canvas";
-import { cookies } from "next/headers";
-import { AiDrawer } from "@/components/stage/AiDrawer";
 import { DocEditor } from "@/components/stage/DocEditor";
 import { ApprovalPanel, ClosedBanner, CommitButton, RecheckBanner } from "@/components/stage/StageActions";
 import { AutodevButton } from "@/components/autodev/AutodevButton";
@@ -27,9 +25,6 @@ export default async function StagePage({ params, searchParams }: Props) {
     : null;
   const st: StageDetail = pp ? { ...main, draft: pp.draft, markdown: pp.markdown, chat: [] } : main;
   const canEdit = (await auth())?.user?.role !== "VIEWER";
-  const panel = (await cookies()).get("pf_ai")?.value;
-  const drawer = panel === "ref" || panel === "props" ? panel : "closed";
-  const versions = await agent<Record<string, string>>("/avatars").catch(() => ({} as Record<string, string>));
   const here = `/p/${id}/s/${stage}`;
   const awaiting = st.status === "awaiting_approval";
   const readOnly = !st.enabled || !!pp;
@@ -123,8 +118,6 @@ export default async function StagePage({ params, searchParams }: Props) {
             )}
           </div>
         </section>
-        <AiDrawer initial={drawer} agent={st.agent} versions={versions} references={st.references} decisions={st.decisions} sessions={st.sessions} sessionId={st.session_id} report={st.report} pid={id} sid={stage} chat={st.chat} fields={st.framework.fields} prompts={st.framework.prompts}
-          disabled={pp ? `案（${pp.key}）を表示中です。対話は「本線」で行います` : !st.enabled ? "ステージを開くと対話できます" : null} />
       </div>
     </div>
   );

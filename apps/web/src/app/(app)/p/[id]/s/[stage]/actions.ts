@@ -15,22 +15,6 @@ async function call(pid: string, path: string, method: string, body?: unknown): 
   return {};
 }
 
-export async function makeReport(pid: string, sid: string) {
-  return call(pid, `/stages/${sid}/report`, "POST");
-}
-
-export async function decideProposal(pid: string, sid: string, messageId: number, proposalId: string, accept: boolean) {
-  return call(pid, `/stages/${sid}/proposals`, "POST", { message_id: messageId, proposal_id: proposalId, accept });
-}
-
-export async function acceptAll(pid: string, sid: string, messageId: number, proposalIds: string[]) {
-  for (const id of proposalIds) {
-    const r = await call(pid, `/stages/${sid}/proposals`, "POST", { message_id: messageId, proposal_id: id, accept: true });
-    if (r.error) return r;
-  }
-  return {};
-}
-
 export async function setField(pid: string, sid: string, field: string, value: FieldValue) {
   return call(pid, `/stages/${sid}/draft`, "PUT", { field, value });
 }

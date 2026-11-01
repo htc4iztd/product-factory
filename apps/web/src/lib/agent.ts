@@ -449,3 +449,9 @@ export type AssistantMsg = {
   context: { kind?: string; label?: string; product_name?: string; stage_id?: string; responder?: string; mentioned?: boolean };
   mentions: MentionT[]; attachments: { id: number; filename: string; kind: string }[]; actions: ChatActionT[]; created_at: string;
 };
+
+// ダッシュボードで承認する案（工程に届いた案・定期の仕事の案）
+export type ApprovalItem = {
+  kind: "stage" | "finding"; key: string; stage_id: string; stage_label: string; field_label: string;
+  before: string; after: string; reason: string; source: string; created_at: string;
+};

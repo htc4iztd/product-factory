@@ -153,9 +153,10 @@ await btn("Request Changes").click();
 await page.getByText("理由が必須").waitFor();
 await page.getByPlaceholder(/理由・修正指示/).fill("撤退条件を数値で");
 await btn("Request Changes").click();
-await btn("案タブ").click();
-await page.getByText("承認者の修正指示：撤退条件を数値で").waitFor();
-await btn("案タブ").click();
+// 修正指示は、領域の PM から担当への Issue になる
+await page.goto(`${BASE}/p/${pid}/issues?all=1`);
+await page.getByText(/承認者の修正指示に対応する：撤退条件を数値で/).first().waitFor();
+await page.goto(`${BASE}/p/${pid}/s/s04`);
 await page.getByRole("button", { name: "撤退条件を編集" }).click();
 await page.locator("textarea").first().fill("6か月で週次の締め完了世帯が100未満なら撤退");
 await btn("保存", true).click();
@@ -206,16 +207,8 @@ await page.getByRole("button", { name: "⑥の受入基準を取り込み直す"
 await shot("11e-test-coverage", true);
 await page.goto(`${BASE}/p/${pid}/s/s06`);
 
-// 右のパネル：参照タブで事業フェーズの成果物を見る → AIタブを閉じる・開く
-await btn("参照タブ").click();
-await page.getByText("事業フェーズの成果物").waitFor();
-await page.getByRole("button", { name: /④ プロダクト戦略/ }).click();
-await page.getByText("北極星指標").first().waitFor();
-await shot("11b-reference");
-// 担当エージェントとは直接話さない：案タブは届いた案の採用・却下だけ（話すのは右のチャット）
-await btn("案タブ").click();
-await page.getByText(/話しかけるのは右のチャットから/).waitFor();
-await shot("11c-props");
+// 工程の画面には「案」「参照」の欄はない（案はダッシュボードで承認、話すのは右のチャット）
+if (await btn("案タブ").count() || await btn("参照タブ").count()) throw new Error("工程の画面に案・参照の欄が残っている");
 
 await page.goto(`${BASE}/p/${pid}/g/P1`);
 await btn("進む", true).click();

@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { agent, type AgentIssueT, type PmKey, type PmWorkspace } from "@/lib/agent";
+import { agent, type AgentIssueT, type PmWorkspace } from "@/lib/agent";
 import { PageHeader } from "@/components/PageHeader";
 import { AutoRefresh } from "@/components/autodev/AutoRefresh";
 import { Avatar } from "@/components/rail/Avatar";

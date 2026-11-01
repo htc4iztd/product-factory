@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { AlertTriangle, CalendarClock, CheckCircle2, CircleDashed, Clock, ListChecks } from "lucide-react";
-import { agent, type AgentIssueT, type Dashboard, type PmMessageT } from "@/lib/agent";
+import { agent, type AgentIssueT, type ApprovalItem, type Dashboard } from "@/lib/agent";
+import { ApprovalInbox } from "@/components/org/ApprovalInbox";
 import { PageHeader } from "@/components/PageHeader";
 import { AutoRefresh } from "@/components/autodev/AutoRefresh";
 import { TeamGraph } from "@/components/org/TeamGraph";
@@ -12,10 +13,11 @@ const when = (t: string | null | undefined) => (t ? new Date(t).toLocaleString("
 // ダッシュボード：工程どうしのつながりと進み具合を、各エージェントが報告する。PdM は PM と話し、毎日の会議で振り返る
 export default async function ProductPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
-  const [d, issues, team] = await Promise.all([
+  const [d, issues, team, approvals] = await Promise.all([
     agent<Dashboard>(`/products/${id}/dashboard`),
     agent<AgentIssueT[]>(`/products/${id}/issues?open_only=true`),
     agent<{ beats?: Record<string, { at: string; detail: string }> }>(`/products/${id}/team`),
+    agent<ApprovalItem[]>(`/products/${id}/approvals`).catch(() => [] as ApprovalItem[]),
   ]);
   const active = d.stages.filter((s) => s.enabled);
   const done = active.filter((s) => s.status === "completed").length;
@@ -63,6 +65,7 @@ export default async function ProductPage({ params }: { params: Promise<{ id: st
             </div>
           ))}
         </section>
+        <ApprovalInbox pid={id} items={approvals} />
         <TeamGraph d={d} pid={id} />
         <div className="grid gap-6 xl:grid-cols-2">
           <div className="space-y-6">
