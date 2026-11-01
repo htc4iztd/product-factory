@@ -1,6 +1,6 @@
 import { cookies } from "next/headers";
 import { SidebarShell } from "@/components/SidebarShell";
-import { agent, type Overview } from "@/lib/agent";
+import { agent, type Overview, type PlatformSummary } from "@/lib/agent";
 import { UserMenu } from "@/components/UserMenu";
 import { AgentRail, type RailAgent } from "@/components/rail/AgentRail";
 import { CommandBar } from "@/components/rail/CommandBar";
@@ -10,12 +10,13 @@ export default async function ProductLayout({ children, params }: { children: Re
   const { id } = await params;
   const [ov, team, versions] = await Promise.all([
     agent<Overview>(`/products/${id}`),
-    agent<{ agents: RailAgent[] }>(`/products/${id}/team`),
+    agent<{ agents: RailAgent[]; platform?: PlatformSummary; beats?: Record<string, { at: string }> }>(`/products/${id}/team`),
     agent<Record<string, string>>("/avatars").catch(() => ({} as Record<string, string>)),
   ]);
   const navOpen = (await cookies()).get("pf_nav")?.value !== "closed";
   const places = [
     { label: "ダッシュボード", href: `/p/${id}`, hint: "工程とエージェントの状況・PM との対話", keys: "dashboard トップ 全体 状況" },
+    { label: "プラットフォーム", href: `/p/${id}/platform`, hint: "ファクトリー全体の稼働・問題と対処", keys: "platform 稼働 障害 エラー 失敗 定期実行" },
     { label: "掲示板", href: `/p/${id}/board`, hint: "エージェント同士のやり取り", keys: "board 履歴 やり取り" },
     { label: "Issue", href: `/p/${id}/issues`, hint: "エージェントの間で動く必要があること", keys: "issue チケット 課題" },
     { label: "振り返りの会議", href: `/p/${id}/meetings-daily`, hint: "PdM と PM の毎日の会議", keys: "meeting 会議 振り返り レポート" },
@@ -40,6 +41,7 @@ export default async function ProductLayout({ children, params }: { children: Re
     ...ov.stages.map((s) => ({ label: `${s.no} ${s.name}`, href: `/p/${id}/s/${s.id}`, hint: `${s.framework}`, keys: `${s.id} ${s.name}` })),
   ];
   const agents = [
+    { key: "platform", name: "プラットフォーム", keys: "プラットフォーム 稼働 platform" },
     { key: "pm_biz", name: "事業PM", keys: "事業PM 事業 pm_biz" },
     { key: "pm_design", name: "設計PM", keys: "設計PM 設計 pm_design" },
     { key: "pm_impl", name: "実装PM", keys: "実装PM 実装 pm_impl" },
@@ -48,7 +50,7 @@ export default async function ProductLayout({ children, params }: { children: Re
   const stageKeys = ov.stages.map((s) => ({ id: s.id, label: `${s.no}${s.name}`, keys: `${s.no} ${s.name} ${s.id}`, pm: pmOf[s.id] ?? "pm_biz" }));
   return (
     <SidebarShell initialOpen={navOpen} sidebar={
-      <AgentRail pid={id} product={ov.product} agents={team.agents} versions={versions} stages={ov.stages} phases={ov.phases}
+      <AgentRail pid={id} product={ov.product} agents={team.agents} platform={team.platform} tickAt={team.beats?.tick?.at ?? null} versions={versions} stages={ov.stages} phases={ov.phases}
         footer={<div className="border-t border-zinc-200 p-3"><UserMenu stacked /></div>} />
     }>
       {children}

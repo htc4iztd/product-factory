@@ -262,6 +262,8 @@ def start_ticker(every: int = 60) -> None:
                 from . import team
                 tick()
                 team.tick()
+                from . import platform_agent
+                platform_agent.tick()
             except Exception:  # noqa: BLE001, S110  次の回で拾う
                 pass
 

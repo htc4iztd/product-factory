@@ -2,14 +2,15 @@
 import { useEffect, useMemo, useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { ArrowRight, CornerDownLeft, Send } from "lucide-react";
-import { talkPm } from "@/app/(app)/p/[id]/org-actions";
+import { talkPlatform, talkPm } from "@/app/(app)/p/[id]/org-actions";
 import { Avatar } from "./Avatar";
 
 type Item =
   | { kind: "go"; label: string; href: string; hint: string; keys: string }
   | { kind: "say"; label: string; to: string; agent: string; text: string; stage?: string };
 
-// 話して移動する：⌘K（どこからでも）。言葉で行き先を探すか、そのまま PM に話しかける（PdM が話せるのは PM だけ。
+// 話して移動する：⌘K（どこからでも）。言葉で行き先を探すか、そのまま PM に話しかける（PdM が話せるのは PM と、
+// 稼働を見張るプラットフォームだけ。
 // 工程の名前・番号が出てきたら、その工程の領域の PM に「その工程について」話す）。
 // 読み違えないよう、行き先も話しかける相手も候補として見せ、選んだものだけを実行する
 export function CommandBar({ pid, places, agents, stages, versions }: {
@@ -54,7 +55,7 @@ export function CommandBar({ pid, places, agents, stages, versions }: {
       const a = agents.find((x) => x.key === stage.pm)!;
       say.push({ kind: "say", label: `${a.name}に話す（${stage.label}について）`, to: a.key, agent: a.key, text: body, stage: stage.id });
     }
-    for (const a of pm ? [pm] : agents) {
+    for (const a of pm ? [pm] : agents.filter((x) => x.key !== "platform")) {
       if (!say.some((x) => x.kind === "say" && x.to === a.key)) say.push({ kind: "say", label: `${a.name}に話す`, to: a.key, agent: a.key, text: body });
     }
     return at ? [...say, ...go] : [...go.slice(0, 3), ...say, ...go.slice(3)];
@@ -63,10 +64,11 @@ export function CommandBar({ pid, places, agents, stages, versions }: {
   function run(it: Item) {
     if (it.kind === "go") { setOpen(false); setQ(""); router.push(it.href); return; }
     start(async () => {
-      const r = await talkPm(pid, it.to, it.text, { stage_id: it.stage });
+      const r = it.to === "platform" ? await talkPlatform(pid, it.text) : await talkPm(pid, it.to, it.text, { stage_id: it.stage });
       if (r.error) return setMsg(r.error);
       setQ("");
-      setMsg(`${it.label.replace(/に話す.*/, "")}が答えました${r.issues?.length ? `（Issue ${r.issues.map((n) => `#${n}`).join("、")} を起票）` : ""}。ダッシュボードか PM の作業場所で読めます`);
+      setMsg(it.to === "platform" ? "プラットフォームが答えました。プラットフォームの画面で読めます"
+        : `${it.label.replace(/に話す.*/, "")}が答えました${r.issues?.length ? `（Issue ${r.issues.map((n) => `#${n}`).join("、")} を起票）` : ""}。ダッシュボードか PM の作業場所で読めます`);
       router.refresh();
     });
   }

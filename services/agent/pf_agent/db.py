@@ -749,6 +749,39 @@ class SystemBeat(Base):
     detail: Mapped[str] = mapped_column(String(500), default="")
 
 
+class PlatformFinding(Base):
+    """プラットフォームエージェントが見つけた、ファクトリーの稼働上の問題（同じ問題は fingerprint で1件にまとめる）。"""
+    __tablename__ = "platform_findings"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    tenant_id: Mapped[str] = mapped_column(String(64), index=True)
+    product_id: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    fingerprint: Mapped[str] = mapped_column(String(64), index=True)
+    kind: Mapped[str] = mapped_column(String(24))                           # scheduler | job | llm | issue | agent ...
+    severity: Mapped[str] = mapped_column(String(8), default="medium")      # high | medium | low
+    title: Mapped[str] = mapped_column(String(300))
+    detail: Mapped[str] = mapped_column(Text, default="")
+    suggestion: Mapped[str] = mapped_column(Text, default="")
+    action: Mapped[dict | None] = mapped_column(JSON, nullable=True)        # PdM が承認して実行できる安全な対処
+    count: Mapped[int] = mapped_column(Integer, default=1)
+    status: Mapped[str] = mapped_column(String(10), default="open")         # open | ack | resolved
+    first_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), default=_now)
+    last_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), default=_now)
+    resolved_at: Mapped[dt.datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+class PlatformMessage(Base):
+    """PdM とプラットフォームエージェントの対話（プラットフォームから先に知らせる発言も持つ）。"""
+    __tablename__ = "platform_messages"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    tenant_id: Mapped[str] = mapped_column(String(64), index=True)
+    role: Mapped[str] = mapped_column(String(8))                            # pdm | platform
+    author: Mapped[str] = mapped_column(String(200))
+    text: Mapped[str] = mapped_column(Text)
+    findings: Mapped[list | None] = mapped_column(JSON, nullable=True)      # 触れた問題の id
+    proposals: Mapped[list | None] = mapped_column(JSON, nullable=True)     # [{kind: ops|code, title, detail}]
+    created_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), default=_now)
+
+
 class TenantSecret(Base):
     """テナントの秘密情報（GitHub のトークンなど）。値は暗号化して置く。"""
     __tablename__ = "tenant_secrets"

@@ -1,11 +1,12 @@
 "use client";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import { useEffect, useState } from "react";
 import {
   Activity, BookText, Bot, Boxes, ChevronLeft, Code2, Command, Diamond, FileInput, FileText, ImageIcon, KanbanSquare,
   CalendarCheck, LayoutDashboard, ListChecks, Megaphone, MessagesSquare, Network, Presentation, ScrollText, Settings2, Video,
 } from "lucide-react";
-import type { Phase, Product, StageSummary, TeamMember } from "@/lib/agent";
+import type { Phase, PlatformSummary, Product, StageSummary, TeamMember } from "@/lib/agent";
 import { GROUPS } from "@/lib/groups";
 import { Avatar, STATE_LABEL, type AgentState } from "./Avatar";
 
@@ -13,11 +14,52 @@ export type RailAgent = TeamMember & { state: AgentState };
 const GROUP_TONE: Record<string, string> = { 事業: "pf-g-biz", "要求・設計": "pf-g-design", 構築: "pf-g-build", リリース: "pf-g-release" };
 
 // 左のレール：ページではなく「人」を並べる。事業・設計・実装の PM と、各工程の担当（顔・状態・自分宛ての Issue）。道具は下に小さく
-export function AgentRail({ pid, product, agents, versions, stages, phases, footer }: {
-  pid: string; product: Product; agents: RailAgent[]; versions: Record<string, string>; stages: StageSummary[]; phases: Phase[];
-  footer: React.ReactNode;
+const POLL_MS = 5000;
+const hms = (d: Date) => d.toLocaleTimeString("ja-JP", { timeZone: "Asia/Tokyo", hour: "2-digit", minute: "2-digit", second: "2-digit" });
+
+// エージェントの状態を数秒ごとに読み直す（画面を開いている間だけ。どのページにいてもレールは最新）
+function useLiveTeam(pid: string, initial: RailAgent[], initialPlatform: PlatformSummary | undefined, initialTick: string | null) {
+  const [agents, setAgents] = useState(initial);
+  const [platform, setPlatform] = useState(initialPlatform);
+  const [tickAt, setTickAt] = useState(initialTick);
+  const [at, setAt] = useState<Date | null>(null);
+  const [failed, setFailed] = useState(false);
+  useEffect(() => { setAgents(initial); }, [initial]);
+  useEffect(() => {
+    let alive = true;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const load = async () => {
+      if (document.visibilityState !== "visible") return;
+      try {
+        const r = await fetch(`/api/p/${pid}/team-status`, { cache: "no-store" });
+        if (!r.ok) throw new Error(String(r.status));
+        const t = await r.json();
+        if (!alive) return;
+        setAgents(t.agents); setPlatform(t.platform); setTickAt(t.beats?.tick?.at ?? null); setAt(new Date()); setFailed(false);
+      } catch {
+        if (alive) setFailed(true);
+      }
+    };
+    const loop = async () => { await load(); if (alive) timer = setTimeout(loop, POLL_MS); };
+    loop();
+    const onVis = () => { if (document.visibilityState === "visible") load(); };
+    document.addEventListener("visibilitychange", onVis);
+    return () => { alive = false; clearTimeout(timer); document.removeEventListener("visibilitychange", onVis); };
+  }, [pid]);
+  return { agents, platform, tickAt, at, failed };
+}
+
+export function AgentRail({ pid, product, agents: initial, platform: initialPlatform, tickAt: initialTick = null, versions, stages, phases, footer }: {
+  pid: string; product: Product; agents: RailAgent[]; platform?: PlatformSummary; tickAt?: string | null;
+  versions: Record<string, string>; stages: StageSummary[]; phases: Phase[]; footer: React.ReactNode;
 }) {
   const path = usePathname();
+  const { agents, platform, tickAt, at, failed } = useLiveTeam(pid, initial, initialPlatform, initialTick);
+  const [, setNow] = useState(0);
+  useEffect(() => { const t = setInterval(() => setNow((n) => n + 1), 15000); return () => clearInterval(t); }, []);
+  const tickMin = tickAt ? Math.floor((Date.now() - new Date(tickAt).getTime()) / 60000) : null;
+  const tickOk = tickMin !== null && tickMin <= 5;
+  const working = agents.filter((a) => a.state === "working").length;
   const by = Object.fromEntries(agents.map((a) => [a.key, a]));
   const st = Object.fromEntries(stages.map((s) => [s.id, s]));
   const ph = Object.fromEntries(phases.map((p) => [p.id, p]));
@@ -38,13 +80,14 @@ export function AgentRail({ pid, product, agents, versions, stages, phases, foot
 
   const Person = ({ a, href, big, label, sub, muted }: { a?: RailAgent; href: string; big?: boolean; label: string; sub?: string; muted?: boolean }) => {
     const state: AgentState = muted ? "off" : a?.state ?? "idle";
+    const live = a?.state === "working" ? "作業中" : a?.state === "stuck" ? "詰まっている" : "";
     return (
       <Link href={href} title={a ? `${a.name}：${STATE_LABEL[state]}${a.report?.summary ? `\n${a.report.summary}` : ""}` : label}
         className={`group flex items-center gap-2 rounded-lg px-1.5 ${big ? "py-1.5" : "py-1"} transition ${on(href) ? "bg-white shadow-card ring-1 ring-zinc-200" : "hover:bg-white/70"}`}>
         <Avatar k={a?.key ?? "pm_biz"} v={versions[a?.key ?? ""]} size={big ? 34 : 26} state={state} />
         <span className="min-w-0 flex-1">
           <span className={`block truncate ${big ? "text-[13px] font-semibold" : "text-[12.5px]"} ${muted ? "text-zinc-400" : "text-zinc-800"}`}>{label}</span>
-          {sub && <span className="block truncate text-[10.5px] text-zinc-500">{sub}</span>}
+          {(live || sub) && <span className={`block truncate text-[10.5px] ${a?.state === "working" ? "font-medium text-brand-700" : a?.state === "stuck" ? "text-rose-600" : "text-zinc-500"}`}>{live && !big ? `${live}・` : ""}{sub}</span>}
         </span>
         {!!a?.open_issues && <span className="rounded-full bg-violet-500 px-1.5 text-[10px] font-bold text-white" title="自分宛ての終わっていない Issue">{a.open_issues}</span>}
         {a?.state === "waiting" && <span className="h-1.5 w-1.5 rounded-full bg-amber-500" title="PdM の返事待ち" />}
@@ -67,7 +110,27 @@ export function AgentRail({ pid, product, agents, versions, stages, phases, foot
           <Command size={13} className="text-brand-600" /><span className="flex-1">話しかける・移動する</span><span className="kbd">⌘K</span>
         </button>
       </div>
+      <div className="mx-2.5 mb-1 flex items-center gap-1.5 rounded-md px-1.5 py-1 text-[10.5px] text-zinc-500" role="status" aria-label="エージェントのライブ表示"
+        title={`エージェントの状態を ${POLL_MS / 1000} 秒ごとに読み直しています`}>
+        <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${failed ? "bg-rose-500" : at ? "bg-emerald-500 animate-pulse" : "bg-zinc-300"}`} />
+        <span className="truncate">{failed ? "状態を読めません（再試行中）" : at ? `状態の更新 ${hms(at)}` : "状態を読んでいます…"}</span>
+        <span className={`ml-auto shrink-0 ${tickOk ? "text-zinc-500" : "font-medium text-rose-600"}`} title="定期実行（tick）が最後に来た時刻">
+          {tickMin === null ? "定期実行：記録なし" : `定期実行 ${tickMin < 1 ? "1分以内" : `${tickMin}分前`}`}
+        </span>
+      </div>
+      {working > 0 && <div className="mx-2.5 mb-1 px-1.5 text-[10.5px] font-medium text-brand-700">{working} 人が作業中</div>}
       <nav className="flex-1 space-y-4 overflow-y-auto px-2.5 py-2" aria-label="エージェント">
+        <Link href={`/p/${pid}/platform`} title="プラットフォーム：ファクトリー全体の稼働を見張り、PdM と直接話します"
+          className={`flex items-center gap-2 rounded-lg px-1.5 py-1.5 transition ${on(`/p/${pid}/platform`) ? "bg-white shadow-card ring-1 ring-zinc-200" : "hover:bg-white/70"}`}>
+          <Avatar k="platform" v={versions.platform} size={30} state={platform?.high ? "stuck" : "idle"} />
+          <span className="min-w-0 flex-1">
+            <span className="block truncate text-[12.5px] font-semibold text-zinc-800">プラットフォーム</span>
+            <span className={`block truncate text-[10.5px] ${platform?.high ? "text-rose-600" : "text-zinc-500"}`}>
+              {platform?.open ? `稼働の問題 ${platform.open} 件${platform.high ? `（重い ${platform.high}）` : ""}` : "未対応の稼働の問題はありません"}
+            </span>
+          </span>
+          {!!platform?.open && <span className={`rounded-full px-1.5 text-[10px] font-bold text-white ${platform.high ? "bg-rose-500" : "bg-amber-500"}`} title="未対応の稼働の問題">{platform.open}</span>}
+        </Link>
         <div className="space-y-0.5">
           {(["pm_biz", "pm_design", "pm_impl"] as const).map((k) => (
             <Person key={k} a={by[k]} href={`/p/${pid}/pm/${k}`} big label={by[k]?.name ?? k}

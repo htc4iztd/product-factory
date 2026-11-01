@@ -23,6 +23,7 @@ from . import (
     llm,
     llmconf,
     ontology,
+    platform_agent,
     reports,
     research,
     team,
@@ -66,6 +67,11 @@ async def _sync_error(_, exc: ghsync.SyncError):
 
 @app.exception_handler(autodev.AutodevError)
 async def _autodev_error(_, exc: autodev.AutodevError):
+    return JSONResponse(status_code=exc.status, content={"detail": exc.message})
+
+
+@app.exception_handler(platform_agent.PlatformError)
+async def _platform_error(_, exc: platform_agent.PlatformError):
     return JSONResponse(status_code=exc.status, content={"detail": exc.message})
 
 
@@ -157,7 +163,9 @@ def scheduler_tick(x_pf_internal_token: str = Header(default="")):
     on_cloud_run = bool(os.environ.get("K_SERVICE"))
     if not on_cloud_run and x_pf_internal_token != os.environ.get("PF_INTERNAL_TOKEN", "dev-internal-token"):
         raise HTTPException(401, "invalid internal token")
-    return {"started": agents.tick() + team.tick()}
+    started = agents.tick() + team.tick()
+    platform_agent.tick()
+    return {"started": started}
 
 
 app.include_router(collab_router)

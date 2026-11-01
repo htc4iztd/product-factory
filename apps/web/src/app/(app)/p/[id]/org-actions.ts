@@ -42,3 +42,20 @@ export async function drawAvatars(keys: string[], redo: boolean): Promise<R> {
     throw e;
   }
 }
+
+// プラットフォーム（ファクトリー全体の稼働）：PdM が直接話す。対処は PdM が承認したものだけ実行する
+async function platformCall(pid: string, path: string, method: string, body?: unknown): Promise<R & { done?: string }> {
+  try {
+    const r = await agent<Record<string, unknown>>(`/platform${path}`, { method, body });
+    revalidatePath(`/p/${pid}`, "layout");
+    return { done: r?.done as string };
+  } catch (e) {
+    if (e instanceof AgentError) return { error: e.message };
+    throw e;
+  }
+}
+export async function talkPlatform(pid: string, text: string) { return platformCall(pid, "/talk", "POST", { text }); }
+export async function actPlatform(pid: string, findingId: number) { return platformCall(pid, `/findings/${findingId}/act`, "POST"); }
+export async function setPlatformFinding(pid: string, findingId: number, status: "open" | "ack" | "resolved") {
+  return platformCall(pid, `/findings/${findingId}`, "PUT", { status });
+}

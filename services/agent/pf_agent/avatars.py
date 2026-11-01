@@ -1,4 +1,4 @@
-"""エージェントの顔：司令塔・PM・①〜⑭の担当を、同じ画風のイラストにする（テナントで共通の配役）。
+"""エージェントの顔：プラットフォーム・PM・①〜⑭の担当を、同じ画風のイラストにする（テナントで共通の配役）。
 
 描くのは画像生成AI（Gemini）。描けない環境（スタブ・キーなし）や、まだ描いていない担当は、役割から決まる
 幾何学模様の顔（SVG）を返す。画面は顔がなくても崩れない。
@@ -15,7 +15,7 @@ from . import images, jobs, llmconf
 from .db import AgentAvatar, JobRun, session
 from .stages import STAGE_BY_ID, STAGES
 
-KEYS = ("pm_biz", "pm_design", "pm_impl", *(s.id for s in STAGES))
+KEYS = ("platform", "pm_biz", "pm_design", "pm_impl", *(s.id for s in STAGES))
 
 STYLE = (
     "Character portrait for a product-development team app. Friendly modern flat illustration, soft gradients, "
@@ -25,6 +25,8 @@ STYLE = (
 )
 # 役割ごとの人物像と持ち物（顔だけで役割が分かるように）
 CHARACTERS = {
+    "platform": ("calm platform operations engineer in a control room, tablet showing heartbeat lines and gears, "
+                 "watchful and reassuring", "steel blue"),
     "pm_biz": ("business project manager in a smart blazer holding a roadmap with coins and a target, decisive smile",
                "amber"),
     "pm_design": ("design project manager with a headset and a tablet showing connected diagrams, attentive", "violet"),
@@ -64,7 +66,8 @@ class AvatarError(Exception):
 
 def prompt_for(key: str) -> str:
     who, color = CHARACTERS[key]
-    role = "project manager" if key.startswith("pm_") else f"owner of the stage '{key}'"
+    role = ("platform operator who watches the whole factory" if key == "platform"
+            else "project manager" if key.startswith("pm_") else f"owner of the stage '{key}'")
     return f"{STYLE} Character: {who}. Role: {role}. Background color: {color}."
 
 
@@ -72,7 +75,7 @@ def geometric(key: str) -> bytes:
     """役割から決まる幾何学模様の顔（描いていないときの代わり）。"""
     h = hashlib.sha256(key.encode()).digest()
     c1, c2 = PALETTE[h[0] % len(PALETTE)], PALETTE[h[1] % len(PALETTE)]
-    label = {"pm_biz": "事", "pm_design": "設", "pm_impl": "実"}.get(key)
+    label = {"platform": "基", "pm_biz": "事", "pm_design": "設", "pm_impl": "実"}.get(key)
     label = label or (STAGE_BY_ID[key].no if key in STAGE_BY_ID else "?")
     shapes = "".join(
         f'<circle cx="{20 + (h[i] % 60)}" cy="{20 + (h[i + 1] % 60)}" r="{8 + h[i + 2] % 18}" fill="#fff" '

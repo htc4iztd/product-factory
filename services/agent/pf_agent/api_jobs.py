@@ -5,7 +5,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import Response
 from pydantic import BaseModel, Field
 
-from . import agents, autodev, imports, issues, jobs, meetings, pms, reports, team
+from . import agents, autodev, imports, issues, jobs, meetings, platform_agent, pms, reports, team
 from .api_collab import _p
 from .authz import Caller, caller
 from .stages import STAGE_BY_ID
@@ -190,7 +190,7 @@ class IssueBody(BaseModel):
 
 @router.get(P + "/team")
 def team_overview(product_id: str, c: Caller = Depends(caller)):
-    return {**team.overview(_p(c, product_id)), "beats": team.beats()}
+    return {**team.overview(_p(c, product_id)), "beats": team.beats(), "platform": platform_agent.summary(c.tenant)}
 
 
 @router.put(P + "/team/{key}")
@@ -346,3 +346,47 @@ def cancel_job(job_id: str, c: Caller = Depends(caller)):
     if c.base_role == "VIEWER":
         raise HTTPException(403, "閲覧のみの権限では取り消せません")
     return jobs.cancel(job_id, c.tenant, c.user)
+
+
+# ---------------- プラットフォームエージェント（テナント全体。PdM と直接話す） ----------------
+def _write(c: Caller) -> None:
+    from .authz import BASE_ORDER
+
+    if BASE_ORDER[c.base_role] < BASE_ORDER["MEMBER"]:
+        raise HTTPException(403, "閲覧のみの権限では操作できません")
+
+
+@router.get("/platform")
+def platform_workspace(c: Caller = Depends(caller)):
+    return platform_agent.workspace(c.tenant)
+
+
+@router.get("/platform/summary")
+def platform_summary(c: Caller = Depends(caller)):
+    return platform_agent.summary(c.tenant)
+
+
+class PlatformTalkBody(BaseModel):
+    text: str = Field(min_length=1, max_length=8000)
+
+
+@router.post("/platform/talk")
+def platform_talk(body: PlatformTalkBody, c: Caller = Depends(caller)):
+    _write(c)
+    return platform_agent.talk(c.tenant, c.user, body.text)
+
+
+@router.post("/platform/findings/{finding_id}/act")
+def platform_act(finding_id: int, c: Caller = Depends(caller)):
+    _write(c)
+    return platform_agent.act(c.tenant, c.user, finding_id)
+
+
+class FindingStatusBody(BaseModel):
+    status: str
+
+
+@router.put("/platform/findings/{finding_id}")
+def platform_finding_status(finding_id: int, body: FindingStatusBody, c: Caller = Depends(caller)):
+    _write(c)
+    return platform_agent.set_status(c.tenant, finding_id, body.status)

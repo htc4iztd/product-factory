@@ -109,7 +109,27 @@ export type TeamMember = {
 export type TeamInfo = {
   agents: TeamMember[]; meeting: { cron: string; cron_label: string; enabled: boolean; next_run_at: string | null };
   beats?: Record<string, { at: string; detail: string }>;
+  platform?: PlatformSummary;
 };
+export type PlatformSummary = { open: number; high: number; tick_at: string | null };
+export type PlatformAction = { type: "tick" | "run_team" | "enable_agent" | "reschedule"; label: string; product_id?: string; keys?: string[]; key?: string };
+export type PlatformFindingT = {
+  id: number; product_id: string | null; product_name: string; kind: string; severity: "high" | "medium" | "low"; severity_label: string;
+  title: string; detail: string; suggestion: string; action: PlatformAction | null; count: number;
+  status: "open" | "ack" | "resolved"; first_at: string; last_at: string; resolved_at: string | null;
+};
+export type PlatformMessageT = {
+  id: number; role: "pdm" | "platform"; author: string; text: string; findings: number[];
+  proposals: { kind: "ops" | "code" | string; title: string; detail: string }[]; created_at: string;
+};
+export type PlatformStatus = {
+  now: string;
+  scheduler: { healthy: boolean; beats: Record<string, { at: string; detail: string }> };
+  jobs: { kind: string; name: string; done: number; failed: number; running: number; other: number }[];
+  running: { id: string; kind: string; name: string; product_name: string; status: string; created_at: string }[];
+  products: { id: string; name: string; agents: Record<string, number>; open_issues: number; next_run_at: string | null; meeting: TeamInfo["meeting"] }[];
+};
+export type PlatformWorkspace = { status: PlatformStatus; findings: PlatformFindingT[]; messages: PlatformMessageT[]; summary: PlatformSummary };
 export type BoardPostT = {
   id: number; thread: number; title: string; sender: string; sender_name: string; recipient: string; recipient_name: string;
   intent: string; text: string; author: string; read: boolean; job_id: string | null; created_at: string;
