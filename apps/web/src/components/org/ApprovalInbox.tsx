@@ -4,6 +4,7 @@ import { useState, useTransition } from "react";
 import { Check, CheckCheck, Inbox, X } from "lucide-react";
 import type { ApprovalItem } from "@/lib/agent";
 import { decideApprovals } from "@/app/(app)/p/[id]/org-actions";
+import { ValueDiff, summarize } from "@/components/diff/ValueDiff";
 
 const when = (t: string) => new Date(t).toLocaleString("ja-JP", { timeZone: "Asia/Tokyo", month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit" });
 
@@ -46,10 +47,26 @@ export function ApprovalInbox({ pid, items }: { pid: string; items: ApprovalItem
                     <span className="text-[11px] text-zinc-500">{x.source}・{when(x.created_at)}</span>
                   </div>
                   {x.reason && <div className="mt-0.5 text-[11.5px] text-zinc-600">{x.reason}</div>}
-                  <div className="mt-1.5 grid gap-1.5 text-[11.5px] md:grid-cols-2">
-                    <div><div className="text-[10px] text-zinc-400">変更前</div><div className="max-h-40 overflow-y-auto whitespace-pre-wrap rounded bg-zinc-50 px-2 py-1 text-zinc-600">{x.before}</div></div>
-                    <div><div className="text-[10px] text-zinc-400">変更後</div><div className="max-h-40 overflow-y-auto whitespace-pre-wrap rounded bg-emerald-50 px-2 py-1 text-zinc-900">{x.after}</div></div>
-                  </div>
+                  {x.changes?.length ? (
+                    <div className="mt-2 space-y-2">
+                      {x.changes.map((c, j) => (
+                        <div key={j}>
+                          {x.changes!.length > 1 && <div className="mb-0.5 text-[11.5px] font-medium text-zinc-700">{c.label}</div>}
+                          <div className="mb-1 flex items-center gap-2 text-[11px] text-zinc-500">
+                            <span className="rounded bg-amber-50 px-1.5 font-medium text-amber-800">{summarize(c)}</span>
+                            <span className="flex items-center gap-1"><span className="inline-block h-2.5 w-2.5 rounded-sm bg-emerald-100 ring-1 ring-emerald-300" />追加・変更後</span>
+                            <span className="flex items-center gap-1"><span className="inline-block h-2.5 w-2.5 rounded-sm bg-rose-100 ring-1 ring-rose-300" />削除・変更前</span>
+                          </div>
+                          <ValueDiff c={c} />
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <div className="mt-1.5 grid gap-1.5 text-[11.5px] md:grid-cols-2">
+                      <div><div className="text-[10px] text-zinc-400">変更前</div><div className="max-h-40 overflow-y-auto whitespace-pre-wrap rounded bg-zinc-50 px-2 py-1 text-zinc-600">{x.before}</div></div>
+                      <div><div className="text-[10px] text-zinc-400">変更後</div><div className="max-h-40 overflow-y-auto whitespace-pre-wrap rounded bg-emerald-50 px-2 py-1 text-zinc-900">{x.after}</div></div>
+                    </div>
+                  )}
                   <div className="mt-2 flex gap-1.5">
                     <button className="btn-primary btn-sm" disabled={pending} onClick={() => run([x.key], true)}><Check size={12} />承認</button>
                     <button className="btn-secondary btn-sm" disabled={pending} onClick={() => run([x.key], false)}><X size={12} />否認</button>

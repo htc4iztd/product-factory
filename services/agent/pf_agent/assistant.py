@@ -219,11 +219,14 @@ def prepare_action(tenant: str, product: Product | None, responder: str, a: Acti
         new = fx.coerce(f, _value(f, a.value))
         old = repo.draft(product.id, sid).get(f.key)
         st = STAGE_BY_ID[sid]
+        from .approvals import change
+
         return {
             **base,
             "title": f"{st.no}{st.name}の「{f.label}」を書き換える",
             "before": _show(old),
             "after": _show(new),
+            "changes": [change(f, f.label, old, new)],
             "args": {"stage_id": sid, "field": f.key, "value": new},
         }
     if a.type == "issue_create":

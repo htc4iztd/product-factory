@@ -8,6 +8,7 @@ import { Avatar } from "@/components/rail/Avatar";
 import { AttachButton, AttachChips, SentAttachments, useAttachments } from "@/components/chat/Attachments";
 import { ResearchImport } from "@/components/chat/ResearchImport";
 import { srcDoc } from "@/lib/uikit";
+import { ValueDiff, summarize } from "@/components/diff/ValueDiff";
 
 const POLL_MS = 4000;
 const PM_OF: Record<string, string> = Object.fromEntries([
@@ -163,10 +164,18 @@ function ActionCard({ m, a, onChanged }: { m: AssistantMsg; a: ChatActionT; onCh
         {a.title}
       </div>
       {a.reason && <div className="mt-0.5 text-[11px] text-zinc-500">{a.reason}</div>}
+      {a.changes?.length ? (
+        <div className="mt-1.5 space-y-1.5">
+          {a.changes.map((c, j) => (
+            <div key={j}><div className="mb-0.5 text-[10.5px]"><span className="rounded bg-amber-50 px-1.5 font-medium text-amber-800">{summarize(c)}</span></div><ValueDiff c={c} /></div>
+          ))}
+        </div>
+      ) : (
       <div className="mt-1.5 grid gap-1.5 text-[11.5px] sm:grid-cols-2">
-        <div><div className="text-[10px] text-zinc-400">変更前</div><div className="max-h-40 overflow-y-auto whitespace-pre-wrap rounded bg-zinc-50 px-2 py-1 text-zinc-600">{a.before}</div></div>
-        <div><div className="text-[10px] text-zinc-400">変更後</div><div className="max-h-40 overflow-y-auto whitespace-pre-wrap rounded bg-emerald-50 px-2 py-1 text-zinc-900">{a.after}</div></div>
-      </div>
+          <div><div className="text-[10px] text-zinc-400">変更前</div><div className="max-h-40 overflow-y-auto whitespace-pre-wrap rounded bg-zinc-50 px-2 py-1 text-zinc-600">{a.before}</div></div>
+          <div><div className="text-[10px] text-zinc-400">変更後</div><div className="max-h-40 overflow-y-auto whitespace-pre-wrap rounded bg-emerald-50 px-2 py-1 text-zinc-900">{a.after}</div></div>
+        </div>
+      )}
       {(a as ChatActionT & { preview?: { html: string; css: string } }).preview && (
         <div className="mt-1.5 overflow-hidden rounded border border-zinc-200 bg-zinc-50">
           <div className="px-2 py-0.5 text-[10px] text-zinc-400">下見（変更後）</div>

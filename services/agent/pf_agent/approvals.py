@@ -10,6 +10,7 @@ from __future__ import annotations
 from sqlalchemy import select
 
 from . import agents, fwlib, repo
+from . import frameworks as fx
 from .assistant import _show
 from .db import AgentFinding, ChatMessage, ChatSession, Product, session
 from .stages import STAGE_BY_ID
@@ -24,6 +25,24 @@ class ApprovalError(Exception):
 def _label(sid: str) -> str:
     st = STAGE_BY_ID.get(sid)
     return f"{st.no}{st.name}" if st else sid
+
+
+def change(f, label: str, before, after) -> dict:
+    """差分を画面で描くための材料：項目の種類・列・変更前と変更後の値（そろえた形）。"""
+    if f is not None:
+        try:
+            after = fx.coerce(f, after)
+        except (ValueError, TypeError, KeyError):
+            pass
+    return {
+        "label": label,
+        "kind": f.kind if f else "text",
+        "columns": [{"key": c.key, "label": c.label} for c in f.columns] if f else [],
+        "id_key": (f.columns[0].key if f and (f.id_prefix or f.rows) and f.columns else ""),
+        "config": (f.config or {}) if f else {},
+        "before": before,
+        "after": after,
+    }
 
 
 def pending(product: Product) -> list[dict]:
@@ -76,6 +95,11 @@ def pending(product: Product) -> list[dict]:
                     "field_label": f.label if f else p.get("field"),
                     "before": _show(before(m.stage_id, p.get("field"))),
                     "after": _show(p.get("value")),
+                    "changes": [
+                        change(
+                            f, f.label if f else p.get("field", ""), before(m.stage_id, p.get("field")), p.get("value")
+                        )
+                    ],
                     "reason": p.get("reason", ""),
                     "source": titles.get(m.session_id or "", "") or m.actor,
                     "created_at": m.created_at.isoformat(),
@@ -98,6 +122,15 @@ def pending(product: Product) -> list[dict]:
                     for p in props
                 ),
                 "after": "\n\n".join(f"【{p.get('label') or p.get('field')}】\n{_show(p.get('value'))}" for p in props),
+                "changes": [
+                    change(
+                        fwlib.of(product.id, f.stage_id).get(p.get("field", "")),
+                        p.get("label") or p.get("field", ""),
+                        before(f.stage_id, p.get("field")),
+                        p.get("value"),
+                    )
+                    for p in props
+                ],
                 "reason": f"{f.title}　{f.body}".strip()[:600],
                 "source": "定期の仕事",
                 "created_at": f.created_at.isoformat(),

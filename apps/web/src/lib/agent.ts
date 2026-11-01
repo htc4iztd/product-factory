@@ -459,7 +459,7 @@ export type AgentCatalog = {
 export type MentionT = { kind: "stage" | "page" | "agent" | "issue"; ref: string; label: string };
 export type ChatActionT = {
   id: string; type: string; status: "pending" | "approved" | "rejected" | "failed"; by: string; title: string;
-  before: string; after: string; reason?: string; result?: string; decided_by?: string;
+  before: string; after: string; reason?: string; result?: string; decided_by?: string; changes?: import("@/components/diff/ValueDiff").Change[];
 };
 export type AssistantMsg = {
   id: number; role: "pdm" | "agent"; agent: string; agent_name: string; text: string; product_id: string | null;
@@ -470,5 +470,5 @@ export type AssistantMsg = {
 // ダッシュボードで承認する案（工程に届いた案・定期の仕事の案）
 export type ApprovalItem = {
   kind: "stage" | "finding"; key: string; stage_id: string; stage_label: string; field_label: string;
-  before: string; after: string; reason: string; source: string; created_at: string;
+  before: string; after: string; reason: string; source: string; created_at: string; changes?: import("@/components/diff/ValueDiff").Change[];
 };

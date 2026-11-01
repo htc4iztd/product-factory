@@ -60,6 +60,10 @@ def test_dashboard_approvals(client):
         and "モノリスで作る" in fd["after"]
         and fd["source"] == "定期の仕事"
     )
+    # 差分を描く材料（項目の種類・列・そろえた値）
+    ch = st[0]["changes"][0]
+    assert ch["kind"] in ("text", "list", "table") and ch["label"]
+    assert fd["changes"][0] == {**fd["changes"][0], "kind": "text", "before": "", "after": "モノリスで作る"}
     # 閲覧のみの人は答えられない
     assert (
         c.post(f"/products/{pid}/approvals", headers=VIEWER, json={"keys": [st[0]["key"]], "accept": True}).status_code
