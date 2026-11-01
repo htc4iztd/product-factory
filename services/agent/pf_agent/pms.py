@@ -217,6 +217,9 @@ def check(product: Product, pm: str, job_id: str, conn) -> tuple[list[str], str]
         s.commit()
     if not changed and not todo:
         return [], "変化なし（AI は使っていない）"
+    from . import agentrun
+
+    prep = agentrun.prepare(product.tenant_id, product, pm)
     if conn.provider == "stub":
         llm._record("stub", 0, 0)
         out = PmCheckOut(
@@ -242,7 +245,8 @@ def check(product: Product, pm: str, job_id: str, conn) -> tuple[list[str], str]
         prompt = (
             f"あなたはプロダクト「{product.name}」の{name_of(pm)}です。"
             f"領域：{'、'.join(f'{k}={name_of(k)}' for k in DOMAIN[pm])}。\n"
-            "1時間ごとの状況確認です。担当の状況を読み、PM のタスク管理の場所に残すこと（notes）と、"
+            + prep.header()
+            + "\n\n1時間ごとの状況確認です。担当の状況を読み、PM のタスク管理の場所に残すこと（notes）と、"
             "手を打つことを決めます。\n"
             "- notes：遅れ・止まっていること・工程間の食い違い・決めるべきことを、"
             "担当ごとに短く（kind は risk・decision・memo）。"
@@ -263,7 +267,12 @@ def check(product: Product, pm: str, job_id: str, conn) -> tuple[list[str], str]
             )
             + "\n"
         )
-        out = llm._json(conn, conn.chat_model, prompt, PmCheckOut)
+        out = agentrun.think(conn, prep, prompt, PmCheckOut)
+    # 割り当てていない書くツールの欄は捨てる
+    out.notes = out.notes if prep.can("pm_note") else []
+    out.issue_updates = out.issue_updates if prep.can("issue_update") else []
+    out.new_issues = out.new_issues if prep.can("issue_create") else []
+    out.posts = out.posts if prep.can("board_post") else []
     wake: list[str] = []
     for n in out.notes[:10]:
         if n.text.strip():
@@ -388,6 +397,9 @@ def talk(
     extra, images = attachments.material([f["id"] for f in files])
     mine = _say(product.id, pm, "pdm", user, text, stage_id, meeting_id, files)
     conn = llmconf.resolve(product.tenant_id)
+    from . import agentrun
+
+    prep = agentrun.prepare(product.tenant_id, product, pm)
     history = messages(product, pm, limit=16)
     rs = repo.runs(product.id)
     if conn.provider == "stub":
@@ -431,6 +443,8 @@ def talk(
         prompt = (
             f"あなたはプロダクト「{product.name}」（{product.idea}）の{name_of(pm)}です。PdM（人）と話しています。"
             "PdM が話せるのは PM だけで、担当には PM が Issue で伝えます。\n"
+            + prep.header()
+            + "\n\n## 出力\n"
             "- reply：日本語で短く直接答える。前置きや称賛は書かない。根拠の弱い意図には率直に指摘する。\n"
             "- issues：PdM の意思を担当に伝える必要があるときだけ起票する。宛先は自分の領域の担当（"
             + "、".join(DOMAIN[pm])
@@ -451,7 +465,9 @@ def talk(
             + "\n"
             + (f"\n{extra}\n" if extra else "")
         )
-        out = llm._json(conn, conn.chat_model, prompt, PmReply, images)
+        out = agentrun.think(conn, prep, prompt, PmReply, images)
+    out.issues = out.issues if prep.can("issue_create") else []
+    out.notes = out.notes if prep.can("pm_note") else []
     made = []
     for n in out.issues[:5]:
         try:

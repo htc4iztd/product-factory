@@ -24,6 +24,7 @@ export default async function ProductLayout({ children, params }: { children: Re
     { label: "設計PMの作業場所", href: `/p/${id}/pm/pm_design`, hint: "⑥〜⑪", keys: "設計PM pm" },
     { label: "実装PMの作業場所", href: `/p/${id}/pm/pm_impl`, hint: "⑫〜⑭", keys: "実装PM pm" },
     { label: "エージェントの組織", href: `/p/${id}/team`, hint: "使命・動く時刻・タスク・顔", keys: "team 組織 タスク 顔" },
+    { label: "ペルソナ・スキル・ツール", href: `/p/${id}/cast`, hint: "エージェントの人物像と、使えるスキル・ツール", keys: "persona ペルソナ skill スキル tool ツール 割り当て" },
     { label: "プロダクト・キャンバス", href: `/p/${id}/canvas`, hint: "プロダクトのイメージ画像", keys: "canvas 画像 絵 イメージ" },
     { label: "資料の取り込み", href: `/p/${id}/import`, hint: "Excel・Word・PowerPoint を工程に入れる", keys: "import 取り込み excel word powerpoint" },
     { label: "報告資料", href: `/p/${id}/reports`, hint: "範囲を選んでスライドに", keys: "report 報告 スライド pptx" },

@@ -137,7 +137,7 @@ def test_import_rejects_bad_input(client):
 
 
 def test_agents_read_imported_docs(client):
-    from pf_agent import imports, repo, team
+    from pf_agent import imports
     c = client
     pid = c.post("/products", headers=H, json={"name": "取込", "idea": "申込の受付"}).json()["id"]
     body = {"filename": "仕様.xlsx", "content_b64": base64.b64encode(xlsx()).decode(), "mode": "propose"}
@@ -155,4 +155,10 @@ def test_agents_read_imported_docs(client):
     with session() as s:
         p = s.get(Product, pid)
         s.expunge(p)
-    assert "## 取り込んだ資料" in team._material(p, "s09", repo.runs(pid), [])
+    # エージェントはツールで読む（読んでいいと割り当てた資料だけ）
+    from pf_agent import tools
+
+    ctx = tools.Ctx(p, "s09", "tenant-a")
+    assert "受付はAPIで行う" in tools.call(ctx, "docs_read", {})
+    assert "受付はAPIで行う" in tools.call(ctx, "docs_search", {"query": "API"})
+    assert "ありません" in tools.call(tools.Ctx(p, "s01", "tenant-a"), "docs_search", {"query": "API"})

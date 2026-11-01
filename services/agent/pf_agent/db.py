@@ -749,6 +749,38 @@ class SystemBeat(Base):
     detail: Mapped[str] = mapped_column(String(500), default="")
 
 
+class AgentProfile(Base):
+    """エージェントのペルソナと、割り当てたスキル・ツール（テナントで共通の配役。既定から変えたものだけ持つ）。"""
+    __tablename__ = "agent_profiles"
+    __table_args__ = (UniqueConstraint("tenant_id", "key"),)
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    tenant_id: Mapped[str] = mapped_column(String(64), index=True)
+    key: Mapped[str] = mapped_column(String(12))                            # platform | pm_* | sNN
+    persona: Mapped[dict | None] = mapped_column(JSON, nullable=True)       # {title, character, values, tone, ...}
+    skills: Mapped[list | None] = mapped_column(JSON, nullable=True)        # エージェントに直結するスキルの id
+    tools: Mapped[list | None] = mapped_column(JSON, nullable=True)         # 使ってよいツールの名前
+    updated_by: Mapped[str] = mapped_column(String(200), default="")
+    updated_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), default=_now, onupdate=_now)
+
+
+class TenantSkill(Base):
+    """テナントが作った・上書きしたスキル（同じ id の標準スキルより優先する）。"""
+    __tablename__ = "tenant_skills"
+    __table_args__ = (UniqueConstraint("tenant_id", "skill_id"),)
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    tenant_id: Mapped[str] = mapped_column(String(64), index=True)
+    skill_id: Mapped[str] = mapped_column(String(60))
+    name: Mapped[str] = mapped_column(String(200))
+    kind: Mapped[str] = mapped_column(String(10), default="reference")      # agent | reference
+    description: Mapped[str] = mapped_column(Text, default="")
+    refs: Mapped[list | None] = mapped_column(JSON, nullable=True)
+    tools: Mapped[list | None] = mapped_column(JSON, nullable=True)
+    prefetch: Mapped[list | None] = mapped_column(JSON, nullable=True)
+    body: Mapped[str] = mapped_column(Text, default="")
+    updated_by: Mapped[str] = mapped_column(String(200), default="")
+    updated_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), default=_now, onupdate=_now)
+
+
 class PlatformFinding(Base):
     """プラットフォームエージェントが見つけた、ファクトリーの稼働上の問題（同じ問題は fingerprint で1件にまとめる）。"""
     __tablename__ = "platform_findings"

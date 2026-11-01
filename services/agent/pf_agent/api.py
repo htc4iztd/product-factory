@@ -23,6 +23,7 @@ from . import (
     llm,
     llmconf,
     ontology,
+    personas,
     platform_agent,
     reports,
     research,
@@ -67,6 +68,11 @@ async def _sync_error(_, exc: ghsync.SyncError):
 
 @app.exception_handler(autodev.AutodevError)
 async def _autodev_error(_, exc: autodev.AutodevError):
+    return JSONResponse(status_code=exc.status, content={"detail": exc.message})
+
+
+@app.exception_handler(personas.ProfileError)
+async def _profile_error(_, exc: personas.ProfileError):
     return JSONResponse(status_code=exc.status, content={"detail": exc.message})
 
 

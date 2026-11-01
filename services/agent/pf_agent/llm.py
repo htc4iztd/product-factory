@@ -542,3 +542,118 @@ def _wrap(fn):
 def _http_error(e: urllib.error.HTTPError) -> LLMError:
     detail = e.read().decode("utf-8", "replace")[:300]
     return LLMError(f"OpenAI 互換 API がエラーを返しました（{e.code}）：{detail}")
+
+
+# ---------------- ツールを呼ばせる（読むツールだけ） ----------------
+ToolSpec = tuple[str, str, dict]  # 名前・説明・引数の JSON スキーマ
+LOOP_HINT = (
+    "\n\n## いまの段階\n答えを書く前の下調べです。足りない情報があれば、使えるツールで読んでください"
+    "（1回に複数呼んでよい）。十分に読めたら、ツールを呼ばずに「準備完了」とだけ答えてください。"
+)
+
+
+def tool_loop(conn: Conn, model: str, prompt: str, specs: list[ToolSpec], runner, max_calls: int = 6) -> str:
+    """読むツールを AI に呼ばせ、読んだ結果を記録して返す（最後の答えは _json で別に作る）。
+    runner(name, args) -> str。呼べる回数を超えたら打ち切る。ツールに対応しない接続では何もしない。"""
+    if not specs or max_calls <= 0 or conn.provider == "stub":
+        return ""
+    log: list[str] = []
+
+    def run(name: str, args: dict) -> str:
+        out = runner(name, args or {})
+        log.append(f"### {name}({json.dumps(args or {}, ensure_ascii=False)})\n{out}")
+        return out
+
+    text = prompt + LOOP_HINT
+    if _is_claude(conn, model):
+        _claude_loop(conn, model, text, specs, run, max_calls)
+    elif conn.provider in ("gemini", "vertex"):
+        _gemini_loop(conn, model, text, specs, run, max_calls)
+    elif conn.provider == "openai":
+        _openai_loop(conn, model, text, specs, run, max_calls)
+    return "\n\n".join(log)
+
+
+def _claude_loop(conn: Conn, model: str, text: str, specs: list[ToolSpec], run, max_calls: int) -> None:
+    client = _anthropic(conn)
+    tools = [{"name": n, "description": d, "input_schema": s} for n, d, s in specs]
+    messages: list[dict] = [{"role": "user", "content": text}]
+    calls = 0
+    while calls < max_calls:
+        resp = client.messages.create(model=model, max_tokens=2000, tools=tools, messages=messages)
+        _record_claude(model, resp)
+        uses = [b for b in resp.content if b.type == "tool_use"]
+        if resp.stop_reason != "tool_use" or not uses:
+            return
+        messages.append({"role": "assistant", "content": [b.model_dump() for b in resp.content]})
+        results = []
+        for b in uses:
+            calls += 1
+            out = run(b.name, b.input) if calls <= max_calls else "呼べる回数の上限に達しました"
+            results.append({"type": "tool_result", "tool_use_id": b.id, "content": out})
+        messages.append({"role": "user", "content": results})
+
+
+def _gemini_loop(conn: Conn, model: str, text: str, specs: list[ToolSpec], run, max_calls: int) -> None:
+    from google.genai import types
+
+    client = _genai(conn)
+    tool = types.Tool(function_declarations=[
+        types.FunctionDeclaration(name=n, description=d, parameters_json_schema=s) for n, d, s in specs])
+    config = types.GenerateContentConfig(
+        tools=[tool], automatic_function_calling=types.AutomaticFunctionCallingConfig(disable=True))
+    contents: list = [types.Content(role="user", parts=[types.Part.from_text(text=text)])]
+    calls = 0
+    while calls < max_calls:
+        resp = client.models.generate_content(model=model, contents=contents, config=config)
+        _record_gemini(model, resp)
+        fcs = resp.function_calls or []
+        if not fcs or not resp.candidates:
+            return
+        contents.append(resp.candidates[0].content)
+        parts = []
+        for fc in fcs:
+            calls += 1
+            out = run(fc.name, dict(fc.args or {})) if calls <= max_calls else "呼べる回数の上限に達しました"
+            parts.append(types.Part.from_function_response(name=fc.name, response={"result": out}))
+        contents.append(types.Content(role="user", parts=parts))
+
+
+def _openai_loop(conn: Conn, model: str, text: str, specs: list[ToolSpec], run, max_calls: int) -> None:
+    if not conn.base_url:
+        return
+    _guard_host(conn)
+    url = conn.base_url.rstrip("/") + "/chat/completions"
+    headers = {"content-type": "application/json"}
+    if conn.api_key:
+        headers["authorization"] = f"Bearer {conn.api_key}"
+    tools = [{"type": "function", "function": {"name": n, "description": d, "parameters": s}} for n, d, s in specs]
+    messages: list[dict] = [{"role": "user", "content": text}]
+    calls = 0
+    while calls < max_calls:
+        body = {"model": model, "messages": messages, "tools": tools}
+        req = urllib.request.Request(url, data=json.dumps(body).encode(), headers=headers, method="POST")
+        try:
+            with urllib.request.urlopen(req, timeout=180) as r:  # noqa: S310 - URL は保存時と呼び出し時に検査済み
+                data = json.loads(r.read())
+        except urllib.error.HTTPError as e:
+            if e.code in (400, 422):  # ツールに対応しない実装：下調べなしで進める
+                return
+            raise _http_error(e) from None
+        except urllib.error.URLError as e:
+            raise LLMError(f"接続できません：{e.reason}") from None
+        u = data.get("usage") or {}
+        _record(model, u.get("prompt_tokens"), u.get("completion_tokens"))
+        msg = data["choices"][0]["message"]
+        tcs = msg.get("tool_calls") or []
+        if not tcs:
+            return
+        messages.append({"role": "assistant", "content": msg.get("content") or "", "tool_calls": tcs})
+        for tc in tcs:
+            calls += 1
+            try:
+                args = json.loads(tc["function"].get("arguments") or "{}")
+            except json.JSONDecodeError:
+                args = {}
+            out = run(tc["function"]["name"], args) if calls <= max_calls else "呼べる回数の上限に達しました"
+            messages.append({"role": "tool", "tool_call_id": tc["id"], "content": out})

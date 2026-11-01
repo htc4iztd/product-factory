@@ -27,7 +27,7 @@ export default async function PreProductsPage({ params, searchParams }: { params
       <PageHeader crumbs={<span>プロダクト</span>} title="プリプロダクト"
         sub="上流で決めたことに従って、AI がパターンごとに後工程と動く試作を作ったプロダクト案です。比べて1つを採用すると、その内容が各ステージの下書きに入ります。各ステージの「以降の工程を自動開発する」から作ります。" />
       <div className="space-y-6 px-8 py-6">
-        {runs.length === 0 && <p className="card p-6 text-[13px] text-zinc-500">まだありません。ステージ（例：⑥プロダクト仕様）の右上の「以降の工程を自動開発する」から始めます。</p>}
+        {runs.length === 0 && <p className="card p-6 text-[13px] text-zinc-500">まだありません。ステージ（例：⑥UXデザイン）の右上の「以降の工程を自動開発する」から始めます。</p>}
         {runs.map((r) => (
           <section key={r.id} className="card space-y-4 p-5" aria-label={`自動開発 ${r.id}`}>
             <div className="flex flex-wrap items-center gap-2 text-[13px]">

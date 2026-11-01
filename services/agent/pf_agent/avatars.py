@@ -37,7 +37,7 @@ CHARACTERS = {
     "s03": ("competitive researcher with binoculars around the neck, sharp look", "orange"),
     "s04": ("strategist with a chess knight piece in hand, composed", "royal blue"),
     "s05": ("business planner with a calculator and coins, practical expression", "emerald green"),
-    "s06": ("product designer with a stylus and a wireframe card, creative vibe", "pink"),
+    "s06": ("UX designer with a sketchbook of user journeys and wireframes, empathetic and observant", "pink"),
     "s07": ("business process expert holding a flowchart clipboard, kind", "sky blue"),
     "s08": ("systems requirement engineer with a checklist and a gear badge, precise", "slate blue"),
     "s09": ("software architect with a blueprint scroll of connected boxes, focused", "indigo"),

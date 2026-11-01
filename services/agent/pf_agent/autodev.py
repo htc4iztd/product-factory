@@ -261,9 +261,9 @@ def prototype(conn: Conn, product: Product, title: str, concept: str, spec: dict
         extra = fx.to_markdown(STAGE_BY_ID["s09"], fx.FRAMEWORK_BY_STAGE["s09"], drafts["s09"])[:20000]
     prompt = (
         f"プロダクト「{product.name}」の「{title}」の試作を作ります。考え方：{concept}\n"
-        "下のプロダクト仕様（ストーリーと画面）を、ブラウザで触れる試作にしてください。\n" + PROTO_RULES
+        "下のUXデザイン（ストーリー・ユーザーフロー・画面）を、ブラウザで触れる試作にしてください。\n" + PROTO_RULES
         + "HTML だけを返す（説明やコードブロックの印は付けない）。\n\n"
-        f"## プロダクト仕様\n{spec_md[:40000]}\n\n## アプリケーション設計（あれば）\n{extra}\n"
+        f"## UXデザイン\n{spec_md[:40000]}\n\n## アプリケーション設計（あれば）\n{extra}\n"
     )
     text = llm._strip_fence(llm._text(conn, conn.chat_model, prompt))
     if "<html" not in text.lower() and "<body" not in text.lower():

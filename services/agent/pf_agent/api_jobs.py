@@ -390,3 +390,89 @@ class FindingStatusBody(BaseModel):
 def platform_finding_status(finding_id: int, body: FindingStatusBody, c: Caller = Depends(caller)):
     _write(c)
     return platform_agent.set_status(c.tenant, finding_id, body.status)
+
+
+# ---------------- ペルソナ・スキル・ツール（テナントで共通の配役） ----------------
+def _admin(c: Caller) -> None:
+    from .authz import BASE_ORDER
+
+    if BASE_ORDER[c.base_role] < BASE_ORDER["ADMIN"]:
+        raise HTTPException(403, "ペルソナ・スキル・ツールを変えられるのは管理者だけです")
+
+
+@router.get("/agent-catalog")
+def agent_catalog(c: Caller = Depends(caller)):
+    from . import personas
+    from . import tools as tl
+    from .team import name_of
+
+    profs = personas.profiles(c.tenant)
+    sk = personas.skills(c.tenant)
+    used: dict[str, list[str]] = {}
+    for k, p in profs.items():
+        for s in p["skills"]:
+            used.setdefault(s, []).append(k)
+    return {
+        "agents": [
+            {
+                **p,
+                "name": name_of(k),
+                "role": "platform" if k == "platform" else "pm" if k.startswith("pm_") else "stage",
+                "loadout": personas.loadout_dict(personas.loadout(c.tenant, k)),
+            }
+            for k, p in profs.items()
+        ],
+        "skills": [
+            {
+                **s,
+                "used_by": used.get(s["id"], []),
+                "referenced_by": [x["id"] for x in sk.values() if s["id"] in x["refs"]],
+            }
+            for s in sk.values()
+        ],
+        "tools": tl.catalog(),
+        "persona_fields": personas.PERSONA_FIELDS,
+        "limits": {"depth": personas.MAX_DEPTH, "refs": personas.MAX_REFS, "chars": personas.MAX_CHARS},
+    }
+
+
+class ProfileBody(BaseModel):
+    persona: dict[str, str] | None = None
+    skills: list[str] | None = Field(default=None, max_length=20)
+    tools: list[str] | None = Field(default=None, max_length=40)
+    reset: bool = False
+
+
+@router.put("/agent-profiles/{key}")
+def put_agent_profile(key: str, body: ProfileBody, c: Caller = Depends(caller)):
+    from . import personas
+
+    _admin(c)
+    return personas.save_profile(c.tenant, c.user, key, body.persona, body.skills, body.tools, body.reset)
+
+
+class SkillBody(BaseModel):
+    name: str = Field(min_length=1, max_length=200)
+    kind: str = "reference"
+    description: str = Field(default="", max_length=2000)
+    refs: list[str] = Field(default_factory=list, max_length=20)
+    tools: list[str] = Field(default_factory=list, max_length=30)
+    prefetch: list[str] = Field(default_factory=list, max_length=10)
+    body: str = Field(default="", max_length=8000)
+
+
+@router.put("/skills/{skill_id}")
+def put_skill(skill_id: str, body: SkillBody, c: Caller = Depends(caller)):
+    from . import personas
+
+    _admin(c)
+    return personas.save_skill(c.tenant, c.user, {"id": skill_id, **body.model_dump()})
+
+
+@router.delete("/skills/{skill_id}")
+def delete_skill(skill_id: str, c: Caller = Depends(caller)):
+    from . import personas
+
+    _admin(c)
+    personas.delete_skill(c.tenant, skill_id)
+    return {"ok": True}

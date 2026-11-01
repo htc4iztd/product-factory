@@ -261,7 +261,7 @@ function BusinessReq({ c }: { c: Ctx }) {
   );
 }
 
-// ---------- ⑥ プロダクト仕様 ----------
+// ---------- ⑥ UXデザイン ----------
 const RELEASES = ["MVP", "次", "後で"];
 const RELEASE_STYLE: Record<string, string> = { MVP: "border-brand-200 bg-brand-50", 次: "border-sky-200 bg-sky-50", 後で: "border-zinc-200 bg-zinc-50" };
 
@@ -376,6 +376,11 @@ function ProductSpec({ c }: { c: Ctx }) {
         <EditTable c={c} k="personas" />
       </Panel>
       <Panel>
+        <Title c={c} k="journeys" label="カスタマージャーニー" note="ペルソナごとに、段階の行動・接点・感情・機会" />
+        <Journey rows={(c.st.draft.journeys as Row[]) ?? []} />
+        <EditTable c={c} k="journeys" />
+      </Panel>
+      <Panel>
         <Title c={c} k="stories" label="ストーリーマップ" note="横：行動 → ステップ　縦：リリース（MVP／次／後で）" />
         <StoryMap rows={(c.st.draft.stories as Row[]) ?? []} acCount={acCount} />
         <EditTable c={c} k="stories" label="ストーリーを表で編集する（IDは自動で振ります）" />
@@ -388,7 +393,46 @@ function ProductSpec({ c }: { c: Ctx }) {
         )}
         <F c={c} k="acceptance" />
       </Panel>
+      <Panel><F c={c} k="userflows" /></Panel>
       <Panel><F c={c} k="screens" /></Panel>
+      <Panel><F c={c} k="usability" /></Panel>
+    </div>
+  );
+}
+
+const EMOTION_STYLE: Record<string, string> = { うれしい: "bg-emerald-50 border-emerald-200", ふつう: "bg-white border-zinc-200", 不安: "bg-amber-50 border-amber-200", 不満: "bg-rose-50 border-rose-200" };
+// ジャーニー：横に段階、縦にペルソナ。感情で色を分け、体験の課題・機会を下に出す
+function Journey({ rows }: { rows: Row[] }) {
+  const items = rows.filter((r) => String(r.action ?? "").trim() || String(r.phase ?? "").trim());
+  if (!items.length) return <p className="text-[13px] text-zinc-400">ペルソナごとに、知る→始める→使う→続ける などの段階で、行動・接点・感情を並べるとここに地図ができます。</p>;
+  const phases = Array.from(new Set(items.map((r) => String(r.phase ?? ""))));
+  const personas = Array.from(new Set(items.map((r) => String(r.persona ?? ""))));
+  return (
+    <div className="overflow-x-auto">
+      <table className="border-separate border-spacing-1.5 text-[12px]">
+        <thead><tr><th />{phases.map((p) => <th key={p} className="min-w-[180px] rounded-md bg-zinc-800 px-3 py-1.5 text-left font-semibold text-white">{p || "（段階なし）"}</th>)}</tr></thead>
+        <tbody>
+          {personas.map((who) => (
+            <tr key={who}>
+              <th className="whitespace-nowrap px-2 text-left align-top text-[11px] font-semibold text-zinc-600">{who || "（ペルソナなし）"}</th>
+              {phases.map((p) => (
+                <td key={p} className="min-w-[180px] align-top">
+                  <div className="space-y-1">
+                    {items.filter((r) => String(r.persona ?? "") === who && String(r.phase ?? "") === p).map((r, i) => (
+                      <div key={i} className={`rounded-md border px-2 py-1.5 ${EMOTION_STYLE[String(r.emotion ?? "")] ?? "border-zinc-200 bg-white"}`}>
+                        <div>{String(r.action ?? "")}</div>
+                        {String(r.touchpoint ?? "") && <div className="text-[10.5px] text-zinc-500">接点：{String(r.touchpoint)}</div>}
+                        {String(r.emotion ?? "") && <div className="text-[10.5px] text-zinc-500">感情：{String(r.emotion)}</div>}
+                        {String(r.opportunity ?? "") && <div className="mt-0.5 text-[11px] font-medium text-brand-700">{String(r.opportunity)}</div>}
+                      </div>
+                    ))}
+                  </div>
+                </td>
+              ))}
+            </tr>
+          ))}
+        </tbody>
+      </table>
     </div>
   );
 }

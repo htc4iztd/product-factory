@@ -14,6 +14,7 @@ dependencies = [
   "anthropic[vertex]>=2.3",
   "cryptography>=43",
   "rdflib>=7",
+  "pyyaml>=6",
 ]
 
 [project.optional-dependencies]
@@ -21,6 +22,9 @@ dev = ["pytest>=8", "httpx>=0.27", "ruff>=0.6"]
 
 [tool.setuptools]
 packages = ["pf_agent"]
+
+[tool.setuptools.package-data]
+pf_agent = ["skills/*.md"]
 
 [tool.pytest.ini_options]
 pythonpath = ["."]

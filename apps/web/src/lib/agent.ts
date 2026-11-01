@@ -420,3 +420,20 @@ export type ResearchReport = {
 export type ResearchData = ResearchDetail & {
   players: ResearchPlayer[]; questions: Record<string, ResearchQuestion[]>; reports: ResearchReport[];
 };
+
+// ペルソナ・スキル・ツール（テナントで共通の配役）
+export type Persona = { title: string; character: string; values: string; tone: string; strengths: string; cautions: string };
+export type SkillT = {
+  id: string; name: string; kind: "agent" | "reference"; description: string; refs: string[]; tools: string[]; prefetch: string[];
+  body: string; source: "builtin" | "override" | "custom"; used_by: string[]; referenced_by: string[];
+};
+export type ToolT = { name: string; label: string; kind: "read" | "write"; description: string; roles: string[]; params: Record<string, unknown> | null };
+export type LoadoutT = { key: string; agent_skills: string[]; ref_skills: string[]; reads: string[]; writes: string[]; prefetch: string[]; warnings: string[]; chars: number };
+export type CastAgent = {
+  key: string; name: string; role: "platform" | "pm" | "stage"; persona: Persona; skills: string[]; tools: string[];
+  customized: { persona: boolean; skills: boolean; tools: boolean }; loadout: LoadoutT;
+};
+export type AgentCatalog = {
+  agents: CastAgent[]; skills: SkillT[]; tools: ToolT[]; persona_fields: Record<keyof Persona, string>;
+  limits: { depth: number; refs: number; chars: number };
+};

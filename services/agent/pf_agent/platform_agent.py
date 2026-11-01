@@ -707,6 +707,9 @@ def talk(tenant: str, user: str, text: str) -> dict:
     fs = [f for f in findings(tenant, include_resolved=5)]
     live = [f for f in fs if f["status"] != "resolved"]
     conn = llmconf.resolve(tenant)
+    from . import agentrun
+
+    prep = agentrun.prepare(tenant, None, "platform")
     if conn.provider == "stub":
         llm._record("stub", 0, 0)
         if live:
@@ -726,7 +729,8 @@ def talk(tenant: str, user: str, text: str) -> dict:
     else:
         st = status(tenant)
         prompt = (
-            "あなたはプロダクト開発ファクトリーのプラットフォームエージェントです。PdM（人）と直接話します。"
+            prep.header()
+            + "\n\nあなたはプロダクト開発ファクトリーのプラットフォームエージェントです。PdM（人）と直接話します。"
             "プロダクトの中身ではなく、ファクトリーの処理系"
             "（定期実行・ジョブ・エージェントの実行・Issue の流れ・LLM 接続）"
             "が正しく動いているかを見る役割です。\n"
@@ -753,7 +757,9 @@ def talk(tenant: str, user: str, text: str) -> dict:
             + "\n\n## これまでの対話\n"
             + "\n".join(f"{'PdM' if m['role'] == 'pdm' else NAME}：{m['text'][:600]}" for m in messages(tenant, 12))
         )
-        out = llm._json(conn, conn.chat_model, prompt, PlatformReply)
+        out = agentrun.think(conn, prep, prompt, PlatformReply)
+    if not prep.can("propose_fix"):
+        out.proposals = []
     ids = {f["id"] for f in fs}
     reply = _say(
         tenant,

@@ -17,7 +17,6 @@
 from __future__ import annotations
 
 import datetime as dt
-import json
 
 from pydantic import BaseModel
 from sqlalchemy import func, or_, select, update
@@ -63,6 +62,7 @@ def name_of(key: str) -> str:
         "pm_biz": "事業PM",
         "pm_design": "設計PM",
         "pm_impl": "実装PM",
+        "platform": "プラットフォーム",
         "pdm": "PdM",
         "all": "全員",
         "director": "司令塔（廃止）",
@@ -581,88 +581,59 @@ def _issue_brief(i: AgentIssue, journals: list[IssueJournal]) -> str:
     )
 
 
-def _material(product: Product, key: str, rs: dict, issues: list[AgentIssue]) -> str:
-    from .imports import docs_context
-
+def _issues_md(product: Product, issues: list[AgentIssue]) -> str:
+    """実行する Issue（これは仕事の入力なので、ツールではなく毎回渡す）。"""
     with session() as s:
-        posts = _context_posts(s, product.id, key)
         journals = {
             i.id: list(
                 s.execute(select(IssueJournal).where(IssueJournal.issue_id == i.id).order_by(IssueJournal.id)).scalars()
             )
             for i in issues
         }
-        sent = list(
-            s.execute(
-                select(AgentIssue).where(
-                    AgentIssue.product_id == product.id, AgentIssue.author == key, AgentIssue.status.in_(OPEN)
-                )
-            ).scalars()
-        )
-    parts = []
-    st, fw = STAGE_BY_ID[key], fx.FRAMEWORK_BY_STAGE[key]
-    d = repo.draft(product.id, key)
-    miss = fx.check(fw, d)
-    parts.append(
-        f"## 自分の工程（状態：{rs[key].status}、版 v{rs[key].current_version}）"
-        + (f"\n必須が空：{'、'.join(miss)}" if miss else "")
-        + "\n"
-        + fx.to_markdown(st, fw, d)[:20000]
-    )
-    ups = repo.confirmed_artifacts(product.id, st.inputs)
-    if ups:
-        parts.append("## 上流の最新版\n" + "\n\n".join(f"### {k}\n{v[:6000]}" for k, v in ups.items()))
-    parts.append("## 下流の工程\n" + "、".join(f"{x.id}={x.no}{x.name}" for x in STAGES if key in x.inputs))
-    docs = docs_context(product.id, key)
-    if docs:
-        parts.append("## 取り込んだ資料（自分の工程に関係する箇所）\n" + docs)
-    parts.append("## 自分宛ての Issue（これを実行する）\n" + "\n".join(_issue_brief(i, journals[i.id]) for i in issues))
-    if sent:
-        parts.append(
-            "## 自分が起票して終わっていない Issue\n"
-            + "\n".join(f"- #{i.number}［{i.status}］{i.subject} → {name_of(i.assignee)}" for i in sent)
-        )
-    parts.append(
-        "## 掲示板（自分宛て・自分の投稿・全員宛て。古い順。[スレッド番号]）\n"
-        + (
-            "\n".join(
-                f"[{p.thread}] {_iso(p.created_at)[:16]} {name_of(p.sender)}→{name_of(p.recipient)}"
-                f"（{INTENT_LABEL.get(p.intent, p.intent)}）：{p.text[:600]}"
-                for p in posts
-            )
-            or "（なし）"
-        )
-    )
-    return "\n\n".join(parts)
+    return "\n".join(_issue_brief(i, journals[i.id]) for i in issues)
 
 
-def _prompt(product: Product, key: str, mission: str, material: str) -> str:
-    fw = fx.FRAMEWORK_BY_STAGE[key]
+# 書くツールごとの、最後の出力の欄の決まり（形はコードで固定。いつ・何を書くかはスキルが決める）
+OUTPUT_RULES = {
+    "set_field": "changes：自分の工程の項目に書く値（field は項目の key、value は型に合わせた値、reason は理由）。",
+    "issue_update": "issue_updates：Issue ごとに notes（計画・やったこと・残ったこと）、status、done_ratio、"
+    "assign_to（返す相手。そのままなら空。PdM は宛先にできない）。",
+    "issue_create": "new_issues：他のエージェントに動いてもらうことだけ"
+    "（assignee・tracker・subject・description・priority）。",
+    "board_post": "posts：掲示板（to・intent は confirm/answer/notice・text・thread は返信先の番号か 0）。",
+}
+
+
+def turn_schema(writes: list[str]) -> type[BaseModel]:
+    """割り当てた書くツールの欄だけを持つ出力の形。"""
+    from pydantic import create_model
+
+    cols = {"set_field": ("changes", list[ChangeOut]), "issue_update": ("issue_updates", list[IssueUpdateOut]),
+            "issue_create": ("new_issues", list[NewIssueOut]), "board_post": ("posts", list[PostOut])}
+    fields = {"report": (ReportOut, ...)}
+    for w in writes:
+        if w in cols:
+            name, typ = cols[w]
+            fields[name] = (typ, ...)
+    return create_model("TurnOut", **fields)
+
+
+def _prompt(product: Product, key: str, mission: str, header: str, issues_md: str, writes: list[str]) -> str:
     pm = PM_OF[key]
     return (
-        f"プロダクト「{product.name}」（{product.idea}）の「{name_of(key)}」として、自分宛ての Issue を実行します。\n"
-        f"## 使命\n{mission}\n\n"
-        "## やること\n"
-        "- Issue ごとに実行計画を立て、実行する。自分の工程の項目を書き換えるときは changes に入れる"
-        "（field は項目の key。そのまま工程の下書きに入る）。\n"
-        "- issue_updates：Issue ごとに、notes に実行計画と結果（何をどう変えたか、残ったこと）を書き、状態を決める。"
-        "終わったら resolved（起票した人に確かめてもらう）、相手の答えが要るなら feedback、続くなら in_progress。"
-        "assign_to は返す相手（起票したエージェント、または確認が要るエージェント）。PdM は宛先にできない。"
-        f"PdM に聞きたいことがあるときは {pm}（{name_of(pm)}）に返す。\n"
-        "- new_issues：他のエージェントに動いてもらう必要があることだけ起票する（宛先は pm_biz・pm_design・pm_impl・"
-        "s01〜s14。tracker は task・feature・bug・question・support、"
-        "priority は low・normal・high・urgent・immediate）。\n"
-        "- posts：掲示板。プロダクトの進み具合について、他のエージェントに確認が要ること（confirm）・答え（answer）・"
-        "共有（notice）だけ。動いてもらう必要があることは掲示板ではなく Issue にする。宛先は pm_*・s01〜s14・all。"
-        "thread は返信するスレッドの番号（新しい話題は 0）。\n"
+        f"プロダクト「{product.name}」（{product.idea}）の「{name_of(key)}」として、自分宛ての Issue を実行します。"
+        f"PdM には直接話しかけず、聞きたいことは {pm}（{name_of(pm)}）に返します。\n"
+        f"## 使命（このプロダクトで）\n{mission}\n\n{header}\n\n"
+        f"## 自分宛ての Issue（これを実行する）\n{issues_md}\n\n"
+        "## 最後の出力\n"
         "- report：health は green・yellow・red、progress は 0〜100、summary は2文、blockers と next は短く。\n"
-        "- 資料にない数値や事実を作らない。決まっていないことは決まっていないと書く。\n\n"
-        f"## 自分の工程の項目\n{json.dumps(fx.spec(fw), ensure_ascii=False)[:8000]}\n" + llm.value_rules(fw) + "\n"
-        f"## 読むもの\n{material[:120000]}\n"
+        + "".join(f"- {OUTPUT_RULES[w]}\n" for w in writes if w in OUTPUT_RULES)
+        + "割り当てられていない欄はありません。資料にない数値や事実を作らない。\n"
     )
 
 
-def _stub_turn(product: Product, key: str, issues: list[AgentIssue]) -> TurnOut:
+def _stub_turn(product: Product, key: str, issues: list[AgentIssue], writes: list[str] | None = None) -> BaseModel:
+    writes = list(writes if writes is not None else ("set_field", "issue_update", "issue_create", "board_post"))
     fw = fx.FRAMEWORK_BY_STAGE[key]
     d = repo.draft(product.id, key)
     empty = [f for f in fw.fields if not fx.is_filled(f, d.get(f.key))]
@@ -670,8 +641,10 @@ def _stub_turn(product: Product, key: str, issues: list[AgentIssue]) -> TurnOut:
         ChangeOut(field=f.key, value=str(llm._stub_value(f, product.idea)), reason="Issue に沿って仮置き（スタブ）")
         for f in empty
     ]
+    if "set_field" not in writes:
+        changes = []
     total = len([f for f in fw.fields if f.required]) or 1
-    return TurnOut(
+    full = TurnOut(
         report=ReportOut(
             health="green",
             progress=100 if total else 0,
@@ -702,9 +675,11 @@ def _stub_turn(product: Product, key: str, issues: list[AgentIssue]) -> TurnOut:
             if key in x.inputs
         ][:1],
     )
+    schema = turn_schema(writes)
+    return schema(**{k: getattr(full, k) for k in schema.model_fields})
 
 
-def _apply(product: Product, key: str, out: TurnOut, job_id: str, model: str) -> list[str]:
+def _apply(product: Product, key: str, out: BaseModel, job_id: str, model: str) -> list[str]:
     """出力を反映する。返り値は、この実行で Issue を受けた（すぐ動かす）エージェント。"""
     from . import issues as iss
 
@@ -725,7 +700,7 @@ def _apply(product: Product, key: str, out: TurnOut, job_id: str, model: str) ->
     # 工程の下書きに書き込む（どの項目を変えたかは Issue の記録と監査ログに残る）
     changed = []
     fw = fx.FRAMEWORK_BY_STAGE[key]
-    for c in out.changes[:12]:
+    for c in getattr(out, "changes", [])[:12]:
         f = fw.get(c.field)
         if f is None:
             continue
@@ -735,7 +710,7 @@ def _apply(product: Product, key: str, out: TurnOut, job_id: str, model: str) ->
         except (ValueError, TypeError, KeyError):
             continue
     wake: list[str] = []
-    for u in out.issue_updates[:10]:
+    for u in getattr(out, "issue_updates", [])[:10]:
         try:
             notes = u.notes + (f"\n（工程の下書きに書き込んだ項目：{'、'.join(changed)}）" if changed else "")
             iss.update(
@@ -752,7 +727,7 @@ def _apply(product: Product, key: str, out: TurnOut, job_id: str, model: str) ->
                 wake.append(u.assign_to)
         except iss.IssueError:
             continue
-    for n in out.new_issues[:5]:
+    for n in getattr(out, "new_issues", [])[:5]:
         try:
             i = iss.create(
                 product,
@@ -768,7 +743,7 @@ def _apply(product: Product, key: str, out: TurnOut, job_id: str, model: str) ->
             wake.append(i["assignee"])
         except iss.IssueError:
             continue
-    for p in out.posts[:6]:
+    for p in getattr(out, "posts", [])[:6]:
         if p.to == key or p.to not in (*KEYS, "all") or not p.text.strip():
             continue
         post(product, key, p.to, p.intent, p.text, p.thread or None, author=model, job_id=job_id)
@@ -815,23 +790,22 @@ def run(job_id: str) -> None:
             with session() as s:
                 mission = _agent(s, product.id, key).mission
             with jobs.task(job_id, tid):
+                from . import agentrun
+
+                prep = agentrun.prepare(product.tenant_id, product, key)
                 if conn.provider == "stub":
                     llm._record("stub", 0, 0)
-                    out = _stub_turn(product, key, issues)
+                    out = _stub_turn(product, key, issues, prep.lo.writes)
                 else:
-                    rs = repo.runs(product.id)
-                    out = llm._json(
-                        conn,
-                        conn.chat_model,
-                        _prompt(product, key, mission, _material(product, key, rs, issues)),
-                        TurnOut,
-                    )
+                    prompt = _prompt(product, key, mission, prep.header(), _issues_md(product, issues), prep.lo.writes)
+                    out = agentrun.think(conn, prep, prompt, turn_schema(prep.lo.writes))
                 wake = _apply(product, key, out, job_id, conn.chat_model)
                 jobs.set_task(
                     job_id,
                     tid,
-                    detail=f"Issue {len(issues)} 件・書き込み {len(out.changes)} 項目"
-                    + (f"・{'、'.join(name_of(w) for w in dict.fromkeys(wake))}へ" if wake else ""),
+                    detail=f"Issue {len(issues)} 件・書き込み {len(getattr(out, 'changes', []))} 項目"
+                    + (f"・{'、'.join(name_of(w) for w in dict.fromkeys(wake))}へ" if wake else "")
+                    + f"／{prep.summary()}",
                 )
         turns += 1
         done.append(key)
