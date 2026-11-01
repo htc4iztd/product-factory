@@ -7,7 +7,7 @@ export type Sched =
   | { mode: "custom"; cron: string };
 
 export const MODES: [Sched["mode"], string][] = [
-  ["every", "◯分ごと"], ["hourly", "◯時間ごと"], ["daily", "毎日"], ["weekdays", "平日"], ["weekly", "曜日を選ぶ"], ["custom", "詳しい設定（cron）"],
+  ["every", "分単位でくり返す"], ["hourly", "時間単位でくり返す"], ["daily", "毎日、決まった時刻"], ["weekdays", "平日、決まった時刻"], ["weekly", "曜日を選んで、決まった時刻"], ["custom", "詳しい設定（cron）"],
 ];
 export const EVERY_MIN = [5, 10, 15, 20, 30];
 export const EVERY_HOURS = [1, 2, 3, 4, 6, 8, 12];

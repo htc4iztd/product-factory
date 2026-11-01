@@ -69,10 +69,10 @@ export function ScheduleInput({ value, onChange, label = "予定" }: { value: st
 
 export type SchedAgent = {
   key: string; name: string; group: string; group_label: string; what: string; cron: string; label: string; enabled: boolean;
-  next: string[]; last_run_at: string | null; hours: number[];
+  next: string[]; last_run_at: string | null; hours: number[]; runs: number[];
 };
 export type ScheduleView = {
-  start: string; hours: number; groups: { key: string; label: string }[]; agents: SchedAgent[];
+  start: string; now: string; hours: number; groups: { key: string; label: string }[]; agents: SchedAgent[];
   platform: { every_min: number; label: string; last_at: string | null; choices: number[]; what: string };
 };
 export type OverviewRow = { id: string; name: string; set_up: boolean; groups: { key: string; label: string; schedules: string[]; stopped: number; total: number; next_run_at: string | null }[] };
@@ -106,62 +106,100 @@ export function ScheduleBoard({ pid, v, versions }: { pid: string; v: ScheduleVi
           <PlatformEvery pid={pid} p={v.platform} />
         </div>
       </section>
-      <section className="card overflow-x-auto" aria-label="時間割">
-        <div className="flex items-center gap-2 border-b border-zinc-100 px-4 py-2.5">
-          <CalendarClock size={15} className="text-brand-600" />
-          <h2 className="text-[14px] font-semibold">これから24時間の時間割</h2>
-          <span className="text-[11px] text-zinc-500">マスの数字はその1時間に動く回数。Issue が来たときは予定を待たずにすぐ動きます</span>
-        </div>
-        <table className="text-[11.5px]">
-          <thead>
-            <tr className="text-zinc-500">
-              <th className="sticky left-0 z-10 bg-white px-3 py-1.5 text-left font-medium">エージェント</th>
-              <th className="px-2 text-left font-medium">予定</th>
-              {Array.from({ length: v.hours }, (_, i) => <th key={i} className="w-7 text-center font-normal">{hourJst(v.start, i)}</th>)}
-            </tr>
-          </thead>
-          <tbody>
-            {v.groups.map((g) => {
-              const rows = v.agents.filter((a) => a.group === g.key);
-              const keys = rows.map((a) => a.key);
-              return [
-                <tr key={g.key} className="bg-zinc-50">
-                  <td colSpan={2 + v.hours} className="sticky left-0 px-3 py-1">
-                    <label className="flex items-center gap-1.5 text-[11.5px] font-semibold text-zinc-600">
-                      <input type="checkbox" checked={keys.every((k) => sel.includes(k))} onChange={() => toggle(keys)} aria-label={`${g.label}をまとめて選ぶ`} />{g.label}
-                    </label>
-                  </td>
-                </tr>,
-                ...rows.map((a) => (
-                  <tr key={a.key} className={`border-t border-zinc-100 ${a.enabled ? "" : "opacity-50"}`} data-key={a.key}>
-                    <td className="sticky left-0 z-10 bg-white px-3 py-1">
-                      <label className="flex items-center gap-1.5 whitespace-nowrap" title={a.what}>
-                        <input type="checkbox" checked={sel.includes(a.key)} onChange={() => toggle([a.key])} aria-label={`${a.name}を選ぶ`} />
-                        {a.key !== "meeting" && <Avatar k={a.key} v={versions[a.key]} size={20} />}
-                        <span>{a.name}</span>
-                      </label>
-                    </td>
-                    <td className="whitespace-nowrap px-2 text-zinc-600" title={a.next.length ? `次：${a.next.map(when).join("／")}` : ""}>
-                      {a.enabled ? a.label : "止めています"}
-                    </td>
-                    {a.hours.map((n, i) => (
-                      <td key={i} className="p-0.5 text-center">
-                        {n > 0 && <span className="block rounded text-[10px] font-medium text-white" style={{ background: `color-mix(in srgb, var(--color-brand, #6366f1) ${30 + Math.round((n / max) * 70)}%, white)` }}>{n}</span>}
-                      </td>
-                    ))}
-                  </tr>
-                )),
-              ];
-            })}
-            <tr className="border-t border-zinc-200 bg-zinc-50">
-              <td className="sticky left-0 z-10 bg-zinc-50 px-3 py-1 font-medium">プラットフォームの見回り</td>
-              <td className="px-2 text-zinc-600">{v.platform.label}</td>
-              {Array.from({ length: v.hours }, (_, i) => <td key={i} className="p-0.5 text-center"><span className="block rounded bg-zinc-300 text-[10px] text-white">{Math.floor(60 / v.platform.every_min)}</span></td>)}
-            </tr>
-          </tbody>
-        </table>
-      </section>
+      <Timeline v={v} versions={versions} sel={sel} toggle={toggle} />
     </div>
+  );
+}
+
+const hm = (t: number) => `${Math.floor(t / 60) % 24}:${String(t % 60).padStart(2, "0")}`;
+
+// これから24時間の時間割：横が時刻、行がエージェント。動く時刻を細い縦線で打つ（頻繁な予定は帯に、まばらな予定は点に見える）
+function Timeline({ v, versions, sel, toggle }: { v: ScheduleView; versions: Record<string, string>; sel: string[]; toggle: (k: string[]) => void }) {
+  const total = v.hours * 60;
+  const startJst = (() => { const d = new Date(new Date(v.start).toLocaleString("en-US", { timeZone: "Asia/Tokyo" })); return d.getHours() * 60 + d.getMinutes(); })();
+  const nowMin = Math.max(0, Math.min(total, (new Date(v.now).getTime() - new Date(v.start).getTime()) / 60000));
+  const [hover, setHover] = useState<number | null>(null);
+  const pct = (m: number) => `${(m / total) * 100}%`;
+  const ticks = Array.from({ length: v.hours / 3 + 1 }, (_, i) => i * 180);
+  const LABEL_W = 350; // 名前と予定の列の幅
+  const onMove = (e: React.MouseEvent<HTMLDivElement>) => {
+    const r = e.currentTarget.getBoundingClientRect();
+    const x = e.clientX - r.left - LABEL_W;
+    setHover(x < 0 ? null : Math.max(0, Math.min(total - 1, Math.round((x / (r.width - LABEL_W)) * total))));
+  };
+  const Row = ({ a }: { a: SchedAgent }) => (
+    <div className={`grid grid-cols-[230px_120px_minmax(0,1fr)] items-center border-t border-zinc-100 ${a.enabled ? "" : "opacity-45"}`} data-key={a.key}>
+      <label className="flex items-center gap-2 py-1.5 pl-4 text-[12.5px]" title={a.what}>
+        <input type="checkbox" checked={sel.includes(a.key)} onChange={() => toggle([a.key])} aria-label={`${a.name}を選ぶ`} className="accent-brand-600" />
+        {a.key !== "meeting" && <Avatar k={a.key} v={versions[a.key]} size={22} />}
+        <span className="truncate">{a.name}</span>
+      </label>
+      <div className="pr-3 text-[12px] text-zinc-500" title={a.next.length ? `次：${a.next.map(when).join("／")}` : ""}>{a.enabled ? a.label : "止めています"}</div>
+      <div className="relative h-7">
+        <div className="absolute inset-x-0 top-1/2 h-px bg-zinc-100" />
+        {a.runs.length >= v.hours * 4 ? (
+          // 頻繁な予定（1時間に4回以上）は、細い線を並べず帯で見せる
+          <span className="absolute top-1/2 h-2.5 -translate-y-1/2 rounded-full bg-brand-500/30 ring-1 ring-inset ring-brand-500/40"
+            style={{ left: pct(a.runs[0]), width: pct(a.runs[a.runs.length - 1] - a.runs[0]) }} />
+        ) : a.runs.map((m) => (
+          <span key={m} className="absolute top-1.5 h-4 w-[2px] -translate-x-1/2 rounded-full bg-brand-600" style={{ left: pct(m) }} />
+        ))}
+      </div>
+    </div>
+  );
+  return (
+    <section className="card" aria-label="時間割">
+      <div className="flex flex-wrap items-center gap-2 border-b border-zinc-100 px-4 py-2.5">
+        <CalendarClock size={15} className="text-brand-600" />
+        <h2 className="text-[14px] font-semibold">これから24時間の時間割</h2>
+        <span className="text-[11px] text-zinc-500">縦線は動く時刻、帯は1時間に4回以上動く予定。Issue が来たときは予定を待たずにすぐ動きます</span>
+      </div>
+      <div className="relative">
+        {/* 時刻の目盛り（3時間ごと）と、いま・カーソルの位置 */}
+        <div className="grid grid-cols-[230px_120px_minmax(0,1fr)] text-[10.5px] text-zinc-400">
+          <div className="py-1.5 pl-4">エージェント</div><div>予定</div>
+          <div className="relative h-7">
+            {ticks.map((m) => (
+              <span key={m} className={`absolute top-1.5 tabular-nums ${m === 0 ? "" : m >= total ? "-translate-x-full" : "-translate-x-1/2"}`} style={{ left: pct(m) }}>{hm(startJst + m)}</span>
+            ))}
+          </div>
+        </div>
+        <div className="pointer-events-none absolute bottom-0 left-[350px] right-0 top-7">
+          {ticks.map((m) => <span key={m} className="absolute inset-y-0 w-px bg-zinc-100" style={{ left: pct(m) }} />)}
+          <span className="absolute inset-y-0 w-px bg-rose-400" style={{ left: pct(nowMin) }}><span className="absolute -top-1 left-1 whitespace-nowrap rounded bg-rose-500 px-1 text-[9.5px] text-white">いま</span></span>
+          {hover !== null && (
+            <span className="absolute inset-y-0 w-px bg-zinc-400" style={{ left: pct(hover) }}>
+              <span className="absolute -top-1 left-1 whitespace-nowrap rounded bg-zinc-800 px-1 text-[10px] tabular-nums text-white">{hm(startJst + hover)}</span>
+            </span>
+          )}
+        </div>
+        <div onMouseMove={onMove} onMouseLeave={() => setHover(null)}>
+          {v.groups.map((g) => {
+            const rows = v.agents.filter((a) => a.group === g.key);
+            const keys = rows.map((a) => a.key);
+            return (
+              <div key={g.key}>
+                <label className="flex items-center gap-2 border-t border-zinc-200 bg-zinc-50/70 py-1 pl-4 text-[11.5px] font-semibold text-zinc-600">
+                  <input type="checkbox" checked={keys.every((k) => sel.includes(k))} onChange={() => toggle(keys)} aria-label={`${g.label}をまとめて選ぶ`} className="accent-brand-600" />{g.label}
+                </label>
+                {rows.map((a) => <Row key={a.key} a={a} />)}
+              </div>
+            );
+          })}
+          <div className="grid grid-cols-[230px_120px_minmax(0,1fr)] items-center border-t border-zinc-200 bg-zinc-50/70">
+            <div className="py-1.5 pl-4 text-[12.5px] font-medium">プラットフォームの見回り</div>
+            <div className="pr-3 text-[12px] text-zinc-500">{v.platform.label}</div>
+            <div className="relative h-7">
+              {v.platform.every_min <= 15 ? (
+                <span className="absolute inset-x-0 top-1/2 h-2.5 -translate-y-1/2 rounded-full bg-zinc-300/60 ring-1 ring-inset ring-zinc-400/40" />
+              ) : Array.from({ length: Math.floor(total / v.platform.every_min) }, (_, i) => i * v.platform.every_min).map((m) => (
+                <span key={m} className="absolute top-1.5 h-4 w-[2px] -translate-x-1/2 rounded-full bg-zinc-400" style={{ left: pct(m) }} />
+              ))}
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
   );
 }
 

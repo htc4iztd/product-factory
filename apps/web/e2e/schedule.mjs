@@ -34,7 +34,7 @@ const pid = page.url().split("/p/")[1];
 await page.getByRole("navigation", { name: "エージェント" }).getByRole("link", { name: "スケジュール" }).click();
 await page.waitForURL(/\/schedule$/);
 const grid = page.getByRole("region", { name: "時間割" });
-const row = (k) => grid.locator(`tr[data-key="${k}"]`);
+const row = (k) => grid.locator(`[data-key="${k}"]`);
 await row("s01").getByText("10分ごと").waitFor();
 await row("pm_biz").getByText("毎時 0分").waitFor();
 await row("meeting").getByText("平日 18:00").waitFor();

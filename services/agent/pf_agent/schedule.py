@@ -50,17 +50,20 @@ def preview(expr: str, tz: str = "Asia/Tokyo") -> dict:
     }
 
 
-def _hours(expr: str, tz: str, start: dt.datetime) -> list[int]:
-    """start（時の頭）から24時間、1時間ごとに何回動くか。"""
-    counts = [0] * HOURS
+def _runs(expr: str, tz: str, start: dt.datetime) -> list[int]:
+    """start（時の頭）から24時間に動く時刻（start からの分）。"""
     try:
         runs = cron.next_runs(expr, start - dt.timedelta(minutes=1), 60 * HOURS, tz, start + dt.timedelta(hours=HOURS))
     except cron.CronError:
-        return counts
-    for t in runs:
-        i = int((t - start).total_seconds() // 3600)
-        if 0 <= i < HOURS:
-            counts[i] += 1
+        return []
+    return [m for m in (int((t - start).total_seconds() // 60) for t in runs) if 0 <= m < 60 * HOURS]
+
+
+def _hours(expr: str, tz: str, start: dt.datetime) -> list[int]:
+    """start（時の頭）から24時間、1時間ごとに何回動くか。"""
+    counts = [0] * HOURS
+    for m in _runs(expr, tz, start):
+        counts[m // 60] += 1
     return counts
 
 
@@ -94,10 +97,12 @@ def view(product: Product) -> dict:
                     "next": nxt,
                     "last_run_at": _iso(a.last_run_at),
                     "hours": _hours(a.cron, a.timezone, start) if a.enabled else [0] * HOURS,
+                    "runs": _runs(a.cron, a.timezone, start) if a.enabled else [],
                 }
             )
     return {
         "start": _iso(start),
+        "now": _iso(now),
         "hours": HOURS,
         "groups": [{"key": g, "label": lb} for g, lb, _ in GROUPS],
         "agents": agents,
