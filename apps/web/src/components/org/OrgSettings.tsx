@@ -4,6 +4,7 @@ import { useState, useTransition } from "react";
 import { Play, Save, Users } from "lucide-react";
 import type { TeamInfo, TeamMember } from "@/lib/agent";
 import { drawAvatars, editTeamAgent, runTeam } from "@/app/(app)/p/[id]/org-actions";
+import { ScheduleInput } from "./Schedule";
 import { Avatar } from "@/components/rail/Avatar";
 
 const HEALTH: Record<string, string> = { green: "bg-emerald-500", yellow: "bg-amber-400", red: "bg-rose-500" };
@@ -35,8 +36,8 @@ function MemberRow({ pid, m, v }: { pid: string; m: TeamMember; v?: string }) {
           <label className="block"><span className="label">使命</span>
             <textarea className="input text-[12px]" rows={3} value={mission} aria-label={`${m.name}の使命`} onChange={(e) => setMission(e.target.value)} /></label>
           <div className="flex flex-wrap items-end gap-2">
-            <label className="block"><span className="label">動く時刻（cron・日本時間）</span>
-              <input className="input h-8 w-44 font-mono text-[12px]" value={cronExpr} aria-label={`${m.name}の cron`} onChange={(e) => setCron(e.target.value)} /></label>
+            <div className="block"><span className="label">動く予定（日本時間）</span>
+              <ScheduleInput value={m.cron} onChange={setCron} label={m.name} /></div>
             <label className="mb-1.5 flex items-center gap-1.5"><input type="checkbox" checked={m.enabled} onChange={(e) => act(() => editTeamAgent(pid, m.key, { enabled: e.target.checked }))} />予定で動かす</label>
             <button className="btn-primary btn-sm mb-0.5" disabled={pending} onClick={() => act(() => editTeamAgent(pid, m.key, { mission, cron: cronExpr }), "保存しました")}><Save size={12} />保存</button>
             <Link href={`/p/${pid}/board?agent=${m.key}`} className="mb-1.5 text-[11px] text-brand-700 hover:underline">掲示板で見る</Link>
@@ -83,8 +84,8 @@ export function MeetingSchedule({ pid, meeting, beats }: { pid: string; meeting:
           <h2 className="text-[14px] font-semibold">振り返りの会議の予定</h2>
           <p className="text-[11px] text-zinc-500">PdM と3人の PM が1日1回振り返ります。時刻になると PM がレポートと突き合わせを準備します。次：{meeting.enabled ? when(meeting.next_run_at) : "止めています"}</p>
         </div>
-        <label className="block"><span className="label">cron（日本時間）</span>
-          <input className="input h-8 w-40 font-mono text-[12px]" value={cronExpr} aria-label="会議の cron" onChange={(e) => setCron(e.target.value)} /></label>
+        <div className="block"><span className="label">予定（日本時間）</span>
+          <ScheduleInput value={meeting.cron} onChange={setCron} label="会議" /></div>
         <button className="btn-primary btn-sm mb-0.5" disabled={pending} onClick={() => start(async () => { const r = await editTeamAgent(pid, "meeting", { cron: cronExpr }); setMsg(r.error ?? "保存しました"); })}>保存</button>
       </div>
       <p className={`text-[11px] ${tick ? "text-zinc-500" : "text-rose-600"}`}>

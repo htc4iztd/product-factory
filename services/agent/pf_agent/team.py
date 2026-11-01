@@ -254,6 +254,7 @@ def post(
     title: str = "",
     author: str = "",
     job_id: str | None = None,
+    read: bool = False,
 ) -> dict:
     if sender not in KEYS or recipient not in (*KEYS, "all"):
         raise TeamError(422, "掲示板はエージェント同士のやり取りの場です（PdM は PM と話してください）")
@@ -276,6 +277,7 @@ def post(
             text=text.strip()[:8000],
             author=author[:200],
             job_id=job_id,
+            read=read,
         )
         s.add(p)
         s.flush()

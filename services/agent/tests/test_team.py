@@ -81,6 +81,18 @@ def test_pdm_talks_to_pm_and_issue_flows(client):
     w = c.get(f"/products/{pid}/pm/pm_biz", headers=H).json()
     assert [m["role"] for m in w["messages"]][:2] == ["pdm", "pm"] and w["checked_at"]
     assert any(n["agent"] == "s01" and n["kind"] == "status" for n in w["notes"])
+    # 定時の状況確認：領域の担当は全員が返事をする（変わっていない担当も、今の状況を自分で返す）
+    th = [t for t in b["threads"] if "事業PM 定時の状況確認" in t["title"]]
+    assert th
+    replies = [p for p in th[0]["posts"] if p["intent"] == "answer"]
+    assert sorted(p["sender"] for p in replies) == ["s01", "s02", "s03", "s04", "s05"]
+    assert all(p["recipient"] == "pm_biz" and p["read"] and "工程の状態" in p["text"] for p in replies)
+    assert "全員（5人）から返事をもらいました" in th[0]["posts"][-1]["text"]
+    c.post(f"/products/{pid}/team/run", headers=H, json={"keys": ["pm_biz"]})
+    wait_idle(c, pid)
+    th = [t for t in c.get(f"/products/{pid}/board", headers=H).json()["threads"] if "定時の状況確認" in t["title"]]
+    again = [p for p in th[0]["posts"] if p["intent"] == "answer"]
+    assert len(again) == 5 and all(p["text"].startswith("前回から変化なし。工程の状態") for p in again)
 
 
 def test_issue_rules(client):
@@ -195,3 +207,41 @@ def test_avatars(client):
     job = c.post("/avatars/generate", headers=H, json={"keys": ["pm_biz", "s01"]}).json()
     assert wait_job(c, job["id"])["status"] == "done"
     assert set(c.get("/avatars", headers=H).json()) == {"pm_biz", "s01"}
+
+
+def test_schedule_view_bulk_preview_and_overview(client):
+    """予定は cron を見せずに読める形で返し、まとめて変え、すべてのプロダクトを並べて確かめられる。"""
+    c = client
+    pid = new_product(c)
+    v = c.get(f"/products/{pid}/schedule", headers=H).json()
+    by = {a["key"]: a for a in v["agents"]}
+    assert len(v["agents"]) == 18 and v["hours"] == 24
+    assert by["pm_biz"]["label"] == "毎時 0分" and by["s01"]["label"] == "10分ごと"
+    assert by["meeting"]["label"] == "平日 18:00" and by["meeting"]["group"] == "meeting"
+    assert sum(by["s01"]["hours"]) == 144 and sum(by["pm_biz"]["hours"]) == 24 and len(by["s01"]["next"]) == 3
+    assert v["platform"]["every_min"] == 5
+    # 読み方と次の3回を、保存の前に確かめる
+    p = c.post("/schedule/preview", headers=H, json={"cron": "30 9 * * 1,3,5"}).json()
+    assert p["label"] == "毎週月・水・金曜 9:30" and len(p["next"]) == 3
+    assert c.post("/schedule/preview", headers=H, json={"cron": "x y"}).status_code == 422
+    assert c.post("/schedule/preview", headers=H, json={"cron": "*/5 * * * *"}).json()["warning"]
+    # まとめて変える（事業の担当を30分ごと）・止める。読めない予定は1人も変えない
+    keys = ["s01", "s02", "s03", "s04", "s05"]
+    assert c.put(f"/products/{pid}/schedule", headers=H, json={"keys": keys, "cron": "bad"}).status_code == 422
+    v = c.put(f"/products/{pid}/schedule", headers=H, json={"keys": keys, "cron": "*/30 * * * *"}).json()
+    assert {a["label"] for a in v["agents"] if a["key"] in keys} == {"30分ごと"}
+    assert by["s06"]["label"] == "10分ごと"
+    v = c.put(f"/products/{pid}/schedule", headers=H, json={"keys": ["s14"], "enabled": False}).json()
+    s14 = next(a for a in v["agents"] if a["key"] == "s14")
+    assert not s14["enabled"] and s14["next"] == [] and sum(s14["hours"]) == 0
+    r = c.put(f"/products/{pid}/schedule", headers=VIEWER, json={"keys": ["s01"], "enabled": False})
+    assert r.status_code == 403
+    # すべてのプロダクトを並べる
+    o = c.get("/schedule-overview", headers=H).json()
+    g = {x["key"]: x for x in o["products"][0]["groups"]}
+    assert g["biz"]["schedules"] == ["30分ごと"] and g["impl"]["stopped"] == 1
+    assert g["meeting"]["schedules"] == ["平日 18:00"]
+    # プラットフォームの見回りの間隔
+    assert c.put("/platform/schedule", headers=H, json={"every_min": 15}).json()["label"] == "15分ごと"
+    assert c.put("/platform/schedule", headers=H, json={"every_min": 7}).status_code == 422
+    assert c.put("/platform/schedule", headers=VIEWER, json={"every_min": 15}).status_code == 403

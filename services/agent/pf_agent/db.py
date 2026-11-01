@@ -814,6 +814,15 @@ class PlatformMessage(Base):
     created_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), default=_now)
 
 
+class TenantSetting(Base):
+    """テナントの小さな設定（プラットフォームの見回りの間隔など）。"""
+    __tablename__ = "tenant_settings"
+    tenant_id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    name: Mapped[str] = mapped_column(String(40), primary_key=True)
+    value: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    updated_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), default=_now, onupdate=_now)
+
+
 class TenantSecret(Base):
     """テナントの秘密情報（GitHub のトークンなど）。値は暗号化して置く。"""
     __tablename__ = "tenant_secrets"

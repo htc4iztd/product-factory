@@ -4,7 +4,7 @@ import { usePathname } from "next/navigation";
 import { useEffect, useState } from "react";
 import {
   Activity, BookText, Bot, Boxes, ChevronLeft, Code2, Command, Diamond, FileInput, FileText, ImageIcon, KanbanSquare,
-  CalendarCheck, UserCog, LayoutDashboard, ListChecks, Megaphone, MessagesSquare, Network, Presentation, ScrollText, Settings2, Video,
+  CalendarCheck, CalendarClock, UserCog, LayoutDashboard, ListChecks, Megaphone, MessagesSquare, Network, Presentation, ScrollText, Settings2, Video,
 } from "lucide-react";
 import type { Phase, PlatformSummary, Product, StageSummary, TeamMember } from "@/lib/agent";
 import { GROUPS } from "@/lib/groups";
@@ -67,7 +67,7 @@ export function AgentRail({ pid, product, agents: initial, platform: initialPlat
   const tools: [string, string, typeof Bot][] = [
     [`/p/${pid}`, "ダッシュボード", LayoutDashboard], [`/p/${pid}/issues`, "Issue", ListChecks],
     [`/p/${pid}/meetings-daily`, "振り返りの会議", CalendarCheck], [`/p/${pid}/board`, "掲示板", Megaphone],
-    [`/p/${pid}/team`, "エージェントの組織", Network], [`/p/${pid}/cast`, "ペルソナ・スキル", UserCog], [`/p/${pid}/canvas`, "プロダクト・キャンバス", ImageIcon],
+    [`/p/${pid}/team`, "エージェントの組織", Network], [`/p/${pid}/cast`, "ペルソナ・スキル", UserCog], [`/p/${pid}/schedule`, "スケジュール", CalendarClock], [`/p/${pid}/canvas`, "プロダクト・キャンバス", ImageIcon],
     [`/p/${pid}/import`, "資料の取り込み", FileInput], [`/p/${pid}/reports`, "報告資料", Presentation],
     [`/p/${pid}/agents`, "定期の仕事", Bot], [`/p/${pid}/preproducts`, "プリプロダクト", Boxes],
     [`/jobs?product=${pid}`, "ジョブ", Activity], [`/p/${pid}/talk`, "議論", MessagesSquare],

@@ -1,8 +1,9 @@
 """PM（事業 PM・設計 PM・実装 PM）の仕事：PdM との対話、1時間ごとの状況確認、PM のタスク管理の場所（PmNote）。
 
 状況確認（check）
-1. 領域の担当ごとに、報告・自分宛ての Issue・工程の状態を集める（AI を使わない）。前回から変わった担当だけ
-   掲示板で返事をもらい（「定時の状況確認」スレッド）、PM のタスク管理の場所に記録する
+1. 領域の担当ごとに、報告・自分宛ての Issue・工程の状態を集める（AI を使わない）。担当は全員が掲示板で返事をし
+   （「定時の状況確認」スレッド。変わっていない担当も今の状況を返す）、変わった担当の状況を
+   PM のタスク管理の場所に記録する
 2. PM 宛ての Issue（担当からの質問・PdM の指示・解決した Issue の確かめ）と、変わったことがあるときだけ AI を呼ぶ：
    リスクを記録し、Issue を返す・起票する。PdM に急いで伝えることは PM との対話に書く
 """
@@ -164,19 +165,24 @@ def check(product: Product, pm: str, job_id: str, conn) -> tuple[list[str], str]
         title=f"{name_of(pm)} 定時の状況確認 {now_jst:%m/%d %H:%M}",
         job_id=job_id,
     )
-    for key, snap in changed.items():
-        post(product, key, pm, "answer", snap, root["thread"], job_id=job_id)
-        add_note(product.id, pm, key, "status", snap)
-    if unchanged:
-        post(
-            product,
-            pm,
-            "all",
-            "notice",
-            f"前回から変化なし：{'、'.join(name_of(k) for k in unchanged)}",
-            root["thread"],
-            job_id=job_id,
-        )
+    # 領域の担当は全員が返事をする（変わっていない担当も、今の状況を自分で返す）。PM はこの場で読むので既読にする
+    for key in DOMAIN[pm]:
+        snap = changed.get(key) or snapshot(product.id, key, rs)
+        text = snap if key in changed else f"前回から変化なし。{snap}"
+        post(product, key, pm, "answer", text, root["thread"], job_id=job_id, read=True)
+        if key in changed:
+            add_note(product.id, pm, key, "status", snap)
+    post(
+        product,
+        pm,
+        "all",
+        "notice",
+        f"全員（{len(DOMAIN[pm])}人）から返事をもらいました。"
+        + (f"変化あり：{'、'.join(name_of(k) for k in changed)}" if changed else "前回から変化はありません")
+        + (f"／変化なし：{'、'.join(name_of(k) for k in unchanged)}" if changed and unchanged else ""),
+        root["thread"],
+        job_id=job_id,
+    )
     # PM 宛ての Issue（まだ自分が手を付けていないか、誰かが書き足したもの）
     with session() as s:
         mine = list(

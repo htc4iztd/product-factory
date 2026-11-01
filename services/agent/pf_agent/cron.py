@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 import datetime as dt
+import re
 from zoneinfo import ZoneInfo
 
 RANGES = ((0, 59), (0, 23), (1, 31), (1, 12), (0, 7))
@@ -84,22 +85,45 @@ def next_after(expr: str, after: dt.datetime, tz: str = "Asia/Tokyo") -> dt.date
 
 
 def describe(expr: str) -> str:
-    """よく使う形だけ日本語にする（それ以外は式のまま）。"""
+    """よく使う形を日本語にする（それ以外は式のまま）。"""
     try:
         m, h, d, mo, w = expr.split()
     except ValueError:
         return expr
     days = "日月火水木金土日"
-    if m.isdigit() and h.isdigit() and mo == "*":
-        at = f"{int(h)}:{int(m):02d}"
+    step = re.fullmatch(r"\*/(\d+)", m)
+    if step and h == d == mo == w == "*":
+        return f"{int(step.group(1))}分ごと"
+    if m == h == d == mo == w == "*":
+        return "毎分"
+    hstep = re.fullmatch(r"\*/(\d+)", h)
+    if m.isdigit() and hstep and d == mo == w == "*":
+        return f"{int(hstep.group(1))}時間ごと（{int(m)}分）"
+    if m.isdigit() and h == "*" and d == mo == w == "*":
+        return f"毎時 {int(m)}分"
+    if m.isdigit() and re.fullmatch(r"\d+(,\d+)*", h) and mo == "*":
+        at = "・".join(f"{int(x)}:{int(m):02d}" for x in h.split(","))
         if d == "*" and w == "*":
             return f"毎日 {at}"
         if d == "*" and w == "1-5":
             return f"平日 {at}"
-        if d == "*" and w.isdigit():
-            return f"毎週{days[int(w)]}曜 {at}"
+        if d == "*" and w in ("0,6", "6,0"):
+            return f"土日 {at}"
+        if d == "*" and re.fullmatch(r"\d(,\d)*", w):
+            return f"毎週{'・'.join(days[int(x)] for x in w.split(','))}曜 {at}"
         if d.isdigit() and w == "*":
             return f"毎月{int(d)}日 {at}"
-    if m.isdigit() and h == "*" and d == mo == w == "*":
-        return f"毎時 {int(m)}分"
     return expr
+
+
+def next_runs(expr: str, after: dt.datetime, n: int = 3, tz: str = "Asia/Tokyo",
+              until: dt.datetime | None = None) -> list[dt.datetime]:
+    """次の n 回（until を渡すとその時刻まで。多すぎる予定でも n で打ち切る）。"""
+    out: list[dt.datetime] = []
+    t = after
+    while len(out) < n:
+        t = next_after(expr, t, tz)
+        if until is not None and t > until:
+            break
+        out.append(t)
+    return out

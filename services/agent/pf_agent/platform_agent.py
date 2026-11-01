@@ -42,7 +42,6 @@ WAIT_MIN = {"stage": 30, "pm": 120}  # 担当が Issue を拾うまでの目安�
 PINGPONG = 12
 STALE_DAYS = 3
 MISSED_MIN = 15
-EVERY_MIN = 5
 JST = cron.ZoneInfo("Asia/Tokyo")
 
 
@@ -471,22 +470,26 @@ def detect(tenant: str, now: dt.datetime | None = None) -> dict:
 
 
 def tick(now: dt.datetime | None = None) -> int:
-    """定期実行から呼ぶ。5分に1回だけ、製品のあるテナントすべてを確かめる。"""
-    now = now or _now()
-    with session() as s:
-        b = s.get(SystemBeat, "platform")
-        if b is not None and now - _aware(b.at) < dt.timedelta(minutes=EVERY_MIN):
-            return 0
-        tenants = list(s.execute(select(Product.tenant_id).distinct()).scalars())
-    for t in tenants:
-        try:
-            detect(t, now)
-        except Exception:  # noqa: BLE001, S112  1つのテナントの失敗で他を止めない
-            continue
+    """定期実行から呼ぶ。テナントごとの間隔（画面で決める。既定5分）が来たテナントだけを確かめる。"""
+    from . import schedule
     from .team import beat
 
-    beat("platform", f"{len(tenants)} テナントを確かめました")
-    return len(tenants)
+    now = now or _now()
+    with session() as s:
+        tenants = list(s.execute(select(Product.tenant_id).distinct()).scalars())
+    done = 0
+    for t in tenants:
+        try:
+            if not schedule.platform_due(t, now):
+                continue
+            detect(t, now)
+            schedule.platform_ran(t, now)
+            done += 1
+        except Exception:  # noqa: BLE001, S112  1つのテナントの失敗で他を止めない
+            continue
+    if done:
+        beat("platform", f"{done} テナントを確かめました")
+    return done
 
 
 # ---------------- 見せる ----------------

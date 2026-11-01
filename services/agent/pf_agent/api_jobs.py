@@ -476,3 +476,54 @@ def delete_skill(skill_id: str, c: Caller = Depends(caller)):
     _admin(c)
     personas.delete_skill(c.tenant, skill_id)
     return {"ok": True}
+
+
+# ---------------- 定期実行の予定（画面では cron を見せずに選ぶ） ----------------
+@router.get(P + "/schedule")
+def get_schedule(product_id: str, c: Caller = Depends(caller)):
+    from . import schedule
+
+    return schedule.view(_p(c, product_id))
+
+
+class ScheduleBody(BaseModel):
+    keys: list[str] = Field(min_length=1, max_length=20)
+    cron: str | None = Field(default=None, max_length=100)
+    enabled: bool | None = None
+
+
+@router.put(P + "/schedule")
+def put_schedule(product_id: str, body: ScheduleBody, c: Caller = Depends(caller)):
+    from . import schedule
+
+    return schedule.bulk(_p(c, product_id, True), body.keys, body.cron, body.enabled)
+
+
+class PreviewBody(BaseModel):
+    cron: str = Field(min_length=1, max_length=100)
+
+
+@router.post("/schedule/preview")
+def preview_schedule(body: PreviewBody, c: Caller = Depends(caller)):
+    from . import schedule
+
+    return schedule.preview(body.cron)
+
+
+@router.get("/schedule-overview")
+def schedule_overview(c: Caller = Depends(caller)):
+    from . import schedule
+
+    return {"products": schedule.overview(c.tenant), "platform": schedule.platform_setting(c.tenant)}
+
+
+class PlatformEveryBody(BaseModel):
+    every_min: int
+
+
+@router.put("/platform/schedule")
+def put_platform_schedule(body: PlatformEveryBody, c: Caller = Depends(caller)):
+    from . import schedule
+
+    _write(c)
+    return schedule.set_platform_every(c.tenant, body.every_min)

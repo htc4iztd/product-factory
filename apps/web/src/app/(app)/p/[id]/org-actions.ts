@@ -59,3 +59,26 @@ export async function actPlatform(pid: string, findingId: number) { return platf
 export async function setPlatformFinding(pid: string, findingId: number, status: "open" | "ack" | "resolved") {
   return platformCall(pid, `/findings/${findingId}`, "PUT", { status });
 }
+
+// 定期実行の予定：読み方と次の3回を確かめる・まとめて変える・プラットフォームの見回りの間隔
+export async function previewSchedule(cron: string): Promise<{ error?: string; label?: string; next?: string[]; warning?: string }> {
+  try {
+    return await agent<{ label: string; next: string[]; warning: string }>("/schedule/preview", { method: "POST", body: { cron } });
+  } catch (e) {
+    if (e instanceof AgentError) return { error: e.message };
+    throw e;
+  }
+}
+export async function saveSchedule(pid: string, keys: string[], body: { cron?: string; enabled?: boolean }) {
+  return call(pid, "/schedule", "PUT", { keys, ...body });
+}
+export async function setPlatformEvery(pid: string, every_min: number): Promise<R> {
+  try {
+    await agent("/platform/schedule", { method: "PUT", body: { every_min } });
+    revalidatePath(`/p/${pid}`, "layout");
+    return {};
+  } catch (e) {
+    if (e instanceof AgentError) return { error: e.message };
+    throw e;
+  }
+}
