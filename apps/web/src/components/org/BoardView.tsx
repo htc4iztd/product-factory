@@ -42,11 +42,14 @@ export function Threads({ pid, threads, versions = {} }: { pid: string; threads:
         <article key={t.thread} className="card p-4" aria-label={t.title}>
           <div className="mb-2 flex flex-wrap items-center gap-2">
             <Link href={`/p/${pid}/board?thread=${t.thread}`} className="text-[14px] font-semibold hover:underline">{t.title}</Link>
-            <span className="text-[11px] text-zinc-400">#{t.thread}・{t.posts.length}件・{t.participants.length}者</span>
+            <span className="text-[11px] text-zinc-400">#{t.thread}・{t.total ?? t.posts.length}件・{t.participants.length}者</span>
           </div>
           <ol className="space-y-2">
             {t.posts.map((p, i) => (
-              <li key={p.id} className={`flex gap-2 text-[12px] ${i ? "pl-4" : ""}`}>
+              <li key={p.id} className={`flex flex-wrap gap-2 text-[12px] ${i ? "pl-4" : ""}`}>
+                {i === 1 && (t.omitted ?? 0) > 0 && (
+                  <Link href={`/p/${pid}/board?thread=${t.thread}`} className="w-full pb-1 text-[11px] text-brand-700 hover:underline">途中の {t.omitted} 件を省いています（スレッドを開く）</Link>
+                )}
                 {i > 0 && <CornerDownRight size={12} className="mt-1 shrink-0 text-zinc-300" />}
                 {["pdm", "director", "pm"].includes(p.sender)
                   ? <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-zinc-300 text-[9px] font-bold text-white">旧</span>

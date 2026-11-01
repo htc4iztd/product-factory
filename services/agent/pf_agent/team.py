@@ -313,15 +313,23 @@ def post(
         return post_dict(p)
 
 
+BOARD_THREADS = 80  # 画面に出すスレッド（最後の投稿が新しい順）
+THREAD_POSTS = 30  # 1スレッドで見せる投稿（最初の投稿と、新しいもの）。それより古い途中の投稿は「ほか n 件」
+
+
 def board(
     product: Product,
     agent: str | None = None,
     intent: str | None = None,
     q: str | None = None,
     thread: int | None = None,
-    limit: int = 300,
+    limit: int = THREAD_POSTS,
 ) -> dict:
-    """スレッドごとにまとめた掲示板。agent を渡すとその人が送った・受けた投稿のあるスレッドだけ。"""
+    """スレッドごとにまとめた掲示板。agent を渡すとその人が送った・受けた投稿のあるスレッドだけ。
+    投稿の多いスレッドがあっても新しいスレッドが切り落とされないよう、スレッドごとに件数を区切る
+    （全体の件数で区切ると、古い投稿で枠が埋まり、新しいスレッドが画面に出なくなる）。"""
+    if thread is not None:  # スレッドを1本だけ開いたときは全部見せる
+        limit = max(limit, 2000)
     with session() as s:
         cond = [BoardPost.product_id == product.id]
         if thread is not None:
@@ -338,17 +346,37 @@ def board(
                 .where(*cond)
                 .group_by(BoardPost.thread)
                 .order_by(func.max(BoardPost.id).desc())
-                .limit(80)
+                .limit(BOARD_THREADS)
             )
             .scalars()
             .all()
         )
+        if not hits:
+            return {"threads": []}
+        counts = dict(
+            s.execute(
+                select(BoardPost.thread, func.count())
+                .where(BoardPost.product_id == product.id, BoardPost.thread.in_(hits))
+                .group_by(BoardPost.thread)
+            ).all()
+        )
+        # スレッドごとに、新しい順に limit 件（行番号で区切る）と、スレッドの最初の投稿
+        rn = (
+            func.row_number()
+            .over(partition_by=BoardPost.thread, order_by=BoardPost.id.desc())
+            .label("rn")
+        )
+        inner = (
+            select(BoardPost.id, rn)
+            .where(BoardPost.product_id == product.id, BoardPost.thread.in_(hits))
+            .subquery()
+        )
+        keep = select(inner.c.id).where(inner.c.rn <= limit)
         posts = list(
             s.execute(
                 select(BoardPost)
-                .where(BoardPost.product_id == product.id, BoardPost.thread.in_(hits))
+                .where(or_(BoardPost.id.in_(keep), BoardPost.id.in_(hits)))
                 .order_by(BoardPost.id)
-                .limit(limit)
             ).scalars()
         )
     threads: dict[int, dict] = {}
@@ -363,6 +391,8 @@ def board(
         t["title"] = t["title"] or ps[0]["text"][:60]
         t["participants"] = list(dict.fromkeys([x["sender"] for x in ps] + [x["recipient"] for x in ps]))
         t["last_at"] = ps[-1]["created_at"]
+        t["total"] = counts.get(t["thread"], len(ps))
+        t["omitted"] = max(0, t["total"] - len(ps))
     return {"threads": out}
 
 

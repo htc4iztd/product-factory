@@ -134,7 +134,7 @@ export type BoardPostT = {
   id: number; thread: number; title: string; sender: string; sender_name: string; recipient: string; recipient_name: string;
   intent: string; text: string; author: string; read: boolean; job_id: string | null; created_at: string;
 };
-export type BoardThread = { thread: number; title: string; posts: BoardPostT[]; participants: string[]; last_at: string };
+export type BoardThread = { thread: number; title: string; posts: BoardPostT[]; participants: string[]; last_at: string; total?: number; omitted?: number };
 export type IssueJournalT = { id: number; author: string; author_name: string; notes: string; details: { prop: string; label: string; old: unknown; new: unknown }[]; created_at: string };
 export type AgentIssueT = {
   number: number; key: string; tracker: string; tracker_label: string; subject: string; description: string;

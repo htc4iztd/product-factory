@@ -238,3 +238,22 @@ def test_stage_complete_via_chat(env):
     with pytest.raises(ValueError):
         assistant.prepare_action("tenant-a", p, "pm_design",
                                  ActionOut(type="set_field", stage_id="s09", field="status", value="完了"))
+
+
+def test_board_keeps_new_threads_when_old_threads_are_long(env):
+    """投稿の多い古いスレッドがあっても、新しいスレッドは必ず出る（スレッドごとに件数を区切る）。"""
+    from pf_agent import team
+
+    c, p = env
+    team.ensure(p)
+    old = team.post(p, "pm_biz", "all", "confirm", "古い確認", title="古いスレッド")
+    for i in range(400):
+        team.post(p, "s01", "pm_biz", "answer", f"返事 {i}", old["thread"], read=True)
+    new = team.post(p, "pm_design", "all", "confirm", "新しい確認", title="新しいスレッド")
+    b = c.get(f"/products/{p.id}/board", headers=H).json()["threads"]
+    assert b[0]["thread"] == new["thread"]
+    o = next(t for t in b if t["thread"] == old["thread"])
+    assert o["total"] == 401 and o["omitted"] == 401 - len(o["posts"]) and o["posts"][0]["text"] == "古い確認"
+    assert o["posts"][-1]["text"] == "返事 399"
+    one = c.get(f"/products/{p.id}/board?thread={old['thread']}", headers=H).json()["threads"][0]
+    assert len(one["posts"]) == 401 and one["omitted"] == 0

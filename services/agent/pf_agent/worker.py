@@ -12,7 +12,15 @@ def main() -> int:
         print("usage: python -m pf_agent.worker <job_id>", file=sys.stderr)
         return 2
     init_db()
-    jobs.execute(sys.argv[1])
+    # Cloud Run Jobs のログで、どのジョブを動かしたかを追えるように
+    print(f"pf-worker: start job={sys.argv[1]}", flush=True)
+    try:
+        jobs.execute(sys.argv[1])
+    finally:
+        with jobs.session() as s:
+            j = s.get(jobs.JobRun, sys.argv[1])
+            print(f"pf-worker: end job={sys.argv[1]} kind={getattr(j, 'kind', '?')} status={getattr(j, 'status', '?')}",
+                  flush=True)
     return 0
 
 
