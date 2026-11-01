@@ -201,7 +201,8 @@ def test_schedule_always_runs(client):
 def test_avatars(client):
     c = client
     r = c.get("/avatars/pm_biz", headers=H)
-    assert r.headers["content-type"].startswith("image/svg") and r.headers["x-avatar-version"] == "0"
+    assert r.headers["content-type"].startswith("image/svg") and r.headers["x-avatar-version"] == "p1"
+    assert "<ellipse" in r.text  # 描いていないときも人物のイラスト
     assert c.get("/avatars/director", headers=H).status_code == 404
     assert c.post("/avatars/generate", headers=VIEWER, json={}).status_code == 403
     job = c.post("/avatars/generate", headers=H, json={"keys": ["pm_biz", "s01"]}).json()

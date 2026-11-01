@@ -172,4 +172,5 @@ def test_talk_and_manual_status(client):
 
 def test_platform_avatar(client):
     r = client.get("/avatars/platform", headers=H)
-    assert r.status_code == 200 and "基" in r.text
+    # 描いていないときも人物のイラスト（ヘッドセットの運用エンジニア）
+    assert r.status_code == 200 and "<ellipse" in r.text and "#c7d7ea" in r.text

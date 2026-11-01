@@ -7,7 +7,7 @@ export function Avatar({ k, v, size = 28, state = "idle", title }: { k: string; 
   return (
     <span className={`relative inline-flex shrink-0 rounded-full ${ring} ${state === "off" ? "opacity-40 grayscale" : ""}`} style={{ width: size, height: size }} title={title}>
       {/* eslint-disable-next-line @next/next/no-img-element */}
-      <img src={`/api/avatars/${k}?v=${v ?? "0"}`} alt="" width={size} height={size} className="h-full w-full rounded-full object-cover" loading="lazy" />
+      <img src={`/api/avatars/${k}?v=${v ?? "p1"}`} alt="" width={size} height={size} className="h-full w-full rounded-full object-cover" loading="lazy" />
     </span>
   );
 }

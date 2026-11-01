@@ -1,19 +1,16 @@
 """エージェントの顔：プラットフォーム・PM・①〜⑭の担当を、同じ画風のイラストにする（テナントで共通の配役）。
 
 描くのは画像生成AI（Gemini）。描けない環境（スタブ・キーなし）や、まだ描いていない担当は、役割から決まる
-幾何学模様の顔（SVG）を返す。画面は顔がなくても崩れない。
+人物のイラスト（SVG。肌・髪型・服・持ち物を役割ごとに決めてある）を返す。画面は顔がなくても崩れない。
 """
 
 from __future__ import annotations
-
-import hashlib
-from xml.sax.saxutils import escape
 
 from sqlalchemy import select
 
 from . import images, jobs, llmconf
 from .db import AgentAvatar, JobRun, session
-from .stages import STAGE_BY_ID, STAGES
+from .stages import STAGES
 
 KEYS = ("platform", "pm_biz", "pm_design", "pm_impl", *(s.id for s in STAGES))
 
@@ -71,28 +68,93 @@ def prompt_for(key: str) -> str:
     return f"{STYLE} Character: {who}. Role: {role}. Background color: {color}."
 
 
-def geometric(key: str) -> bytes:
-    """役割から決まる幾何学模様の顔（描いていないときの代わり）。"""
-    h = hashlib.sha256(key.encode()).digest()
-    c1, c2 = PALETTE[h[0] % len(PALETTE)], PALETTE[h[1] % len(PALETTE)]
-    label = {"platform": "基", "pm_biz": "事", "pm_design": "設", "pm_impl": "実"}.get(key)
-    label = label or (STAGE_BY_ID[key].no if key in STAGE_BY_ID else "?")
-    shapes = "".join(
-        f'<circle cx="{20 + (h[i] % 60)}" cy="{20 + (h[i + 1] % 60)}" r="{8 + h[i + 2] % 18}" fill="#fff" '
-        f'opacity="{0.10 + (h[i + 3] % 20) / 100:.2f}"/>'
-        for i in range(2, 18, 4)
+# 描いていないときの顔：役割ごとに決まった人物のイラスト（肌・髪型・髪色・服・持ち物・背景）
+SKIN = ("#f6d7c3", "#eac0a2", "#d9a47f", "#b97f5a", "#8d5a3b")
+HAIR = {"black": "#2b2523", "dark": "#4a3226", "brown": "#6b4a32", "auburn": "#8a4b2a", "gray": "#8f8f95",
+        "blonde": "#c9a063"}
+LOOK = {  # key: (肌, 髪型, 髪色, 服, 背景, 持ち物)
+    "platform": (1, "side", "dark", "#2f4b6e", "#c7d7ea", "headset"),
+    "pm_biz": (0, "bob", "black", "#b45309", "#fde68a", ""),
+    "pm_design": (2, "long", "brown", "#6d28d9", "#ddd6fe", "headset"),
+    "pm_impl": (3, "short", "black", "#047857", "#a7f3d0", ""),
+    "s01": (0, "curly", "auburn", "#ca8a04", "#fef08a", ""),
+    "s02": (1, "side", "black", "#0f766e", "#99f6e4", "glasses"),
+    "s03": (4, "buzz", "black", "#c2410c", "#fed7aa", ""),
+    "s04": (2, "side", "dark", "#1d4ed8", "#bfdbfe", ""),
+    "s05": (1, "bun", "brown", "#15803d", "#bbf7d0", "glasses"),
+    "s06": (0, "long", "blonde", "#be185d", "#fbcfe8", ""),
+    "s07": (3, "bob", "dark", "#0369a1", "#bae6fd", ""),
+    "s08": (2, "short", "black", "#334155", "#cbd5e1", "glasses"),
+    "s09": (1, "side", "brown", "#3730a3", "#c7d2fe", "glasses"),
+    "s10": (4, "curly", "black", "#0e7490", "#a5f3fc", ""),
+    "s11": (0, "short", "auburn", "#4d7c0f", "#d9f99d", "headset"),
+    "s12": (2, "buzz", "dark", "#3f3f46", "#e4e4e7", ""),
+    "s13": (3, "bun", "black", "#b45309", "#fde68a", "glasses"),
+    "s14": (1, "curly", "blonde", "#dc2626", "#fecaca", ""),
+}
+FRINGE = {
+    "short": "M32 42 C31 26 42 21 50 21 C60 21 70 26 68 42 C63 33 55 31 50 31 C44 31 37 33 32 42 Z",
+    "side": "M31 44 C30 25 44 20 52 21 C64 22 71 30 69 44 C65 36 58 30 46 32 C40 33 34 37 31 44 Z",
+    "bob": "M32 42 C32 26 42 22 50 22 C58 22 68 26 68 42 C62 36 56 34 50 34 C44 34 38 36 32 42 Z",
+    "long": "M32 42 C32 26 42 22 50 22 C58 22 68 26 68 42 C62 36 56 34 50 34 C44 34 38 36 32 42 Z",
+    "bun": "M32 42 C31 26 42 22 50 22 C60 22 70 26 68 42 C63 33 55 31 50 31 C44 31 37 33 32 42 Z",
+    "buzz": "M33 40 C33 27 42 24 50 24 C58 24 67 27 67 40 C62 34 56 32 50 32 C44 32 38 34 33 40 Z",
+}
+
+
+OPACITY = ' opacity=".9"'
+
+
+def person(key: str) -> bytes:
+    """役割から決まる人物のイラスト（画像生成で描くまでの顔。描けない環境でもこれを出す）。"""
+    skin_i, style, hair_name, cloth, bg, extra = LOOK.get(key, (1, "short", "dark", "#52525b", "#e4e4e7", ""))
+    skin, hair = SKIN[skin_i], HAIR[hair_name]
+    back = ""
+    if style == "long":
+        back = f'<path d="M29 44 C29 30 38 24 50 24 C62 24 71 30 71 44 L73 80 C64 84 36 84 27 80 Z" fill="{hair}"/>'
+    elif style == "bob":
+        back = f'<ellipse cx="50" cy="48" rx="25" ry="23" fill="{hair}"/>'
+    top = (
+        "".join(f'<circle cx="{x}" cy="{y}" r="7.5" fill="{hair}"/>'
+                for x, y in ((35, 34), (42, 26), (51, 23), (60, 26), (66, 34), (33, 42), (68, 42)))
+        if style == "curly"
+        else f'<path d="{FRINGE[style]}" fill="{hair}"{OPACITY if style == "buzz" else ""}/>'
     )
+    if style == "bun":
+        top += f'<circle cx="50" cy="18" r="8" fill="{hair}"/>'
+    acc = ""
+    if extra == "glasses":
+        acc = ('<g fill="none" stroke="#27272a" stroke-width="1.6"><circle cx="43" cy="47" r="5"/>'
+               '<circle cx="57" cy="47" r="5"/><path d="M48 47 L52 47"/></g>')
+    elif extra == "headset":
+        acc = ('<path d="M30 46 C30 20 70 20 70 46" fill="none" stroke="#27272a" stroke-width="2.6"/>'
+               '<rect x="26.5" y="41" width="6" height="11" rx="2.5" fill="#27272a"/>'
+               '<rect x="67.5" y="41" width="6" height="11" rx="2.5" fill="#27272a"/>'
+               '<path d="M30 51 Q33 60 43 59" fill="none" stroke="#27272a" stroke-width="1.6"/>'
+               '<circle cx="44" cy="59" r="1.8" fill="#27272a"/>')
     return (
-        f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" width="256" height="256">'
-        f'<defs><linearGradient id="g" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="{c1}"/>'
-        f'<stop offset="1" stop-color="{c2}"/></linearGradient></defs><rect width="100" height="100" fill="url(#g)"/>'
-        f'{shapes}<text x="50" y="62" text-anchor="middle" font-family="sans-serif" font-size="'
-        f'{30 if len(label) > 1 else 38}" font-weight="700" fill="#fff">{escape(label)}</text></svg>'
+        '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" width="256" height="256">'
+        f'<rect width="100" height="100" fill="{bg}"/>{back}'
+        f'<path d="M14 100 C14 79 30 70 50 70 C70 70 86 79 86 100 Z" fill="{cloth}"/>'
+        f'<rect x="44" y="58" width="12" height="14" rx="4" fill="{skin}"/>'
+        '<path d="M42 70.5 L50 79 L58 70.5" fill="#ffffff" opacity=".85"/>'
+        f'<circle cx="32" cy="47" r="4" fill="{skin}"/><circle cx="68" cy="47" r="4" fill="{skin}"/>'
+        f'<ellipse cx="50" cy="45" rx="18" ry="20" fill="{skin}"/>{top}'
+        f'<path d="M39.5 41.5 Q43 39.5 46.5 41.5 M53.5 41.5 Q57 39.5 60.5 41.5" fill="none" stroke="{hair}" '
+        'stroke-width="1.6" stroke-linecap="round"/>'
+        '<circle cx="43" cy="47" r="2" fill="#2b2523"/><circle cx="57" cy="47" r="2" fill="#2b2523"/>'
+        '<circle cx="40" cy="53" r="2.6" fill="#f08a7a" opacity=".35"/>'
+        '<circle cx="60" cy="53" r="2.6" fill="#f08a7a" opacity=".35"/>'
+        '<path d="M45 55 Q50 59 55 55" fill="none" stroke="#8a4b3c" stroke-width="1.6" stroke-linecap="round"/>'
+        f"{acc}</svg>"
     ).encode()
 
 
+geometric = person  # 古い名前（呼び出し元の互換）
+
+
 def get(tenant: str, key: str) -> tuple[bytes, str, str]:
-    """（画像, MIME, 版）。描いていなければ幾何学模様。"""
+    """（画像, MIME, 版）。描いていなければ役割から決まる人物のイラスト。"""
     if key not in KEYS:
         raise AvatarError(404, "そのエージェントはいません")
     with session() as s:
@@ -101,7 +163,7 @@ def get(tenant: str, key: str) -> tuple[bytes, str, str]:
         ).scalar_one_or_none()
         if a is not None:
             return a.data, a.mime, str(int(a.created_at.timestamp()))
-    return geometric(key), "image/svg+xml", "0"
+    return person(key), "image/svg+xml", "p1"
 
 
 def versions(tenant: str) -> dict[str, str]:
@@ -143,7 +205,7 @@ def run(job_id: str) -> None:
         with jobs.task(job_id, k):
             prompt = prompt_for(k)
             if stub:
-                data, mime = geometric(k), "image/svg+xml"
+                data, mime = person(k), "image/svg+xml"
             else:
                 data, mime = images.generate(conn, "free", prompt, k, [], aspect="1:1")
             with session() as s:
