@@ -10,7 +10,7 @@ from __future__ import annotations
 from pydantic import BaseModel
 from sqlalchemy import func, select
 
-from . import designs, jobs, llm, llmconf, repo
+from . import designs, fwlib, jobs, llm, llmconf, repo
 from . import frameworks as fx
 from .db import JobRun, Product, ProductReport, session
 from .stages import STAGE_BY_ID, STAGES
@@ -57,7 +57,7 @@ def sources(product: Product) -> list[dict]:
     out = []
     for st in STAGES:
         r = rs.get(st.id)
-        fw = fx.FRAMEWORK_BY_STAGE[st.id]
+        fw = fwlib.of(product.id, st.id)
         art = repo.confirmed_artifact(product.id, st.id)
         data = art.data if art is not None and art.data else repo.draft(product.id, st.id)
         out.append({"id": st.id, "no": st.no, "name": st.name, "phase": st.phase,
@@ -68,13 +68,13 @@ def sources(product: Product) -> list[dict]:
     return out
 
 
-def _clean_selection(selection: list[dict]) -> list[dict]:
+def _clean_selection(selection: list[dict], product_id: str | None = None) -> list[dict]:
     out = []
     for it in selection or []:
         sid = str(it.get("stage", ""))
         if sid not in STAGE_BY_ID:
             raise ReportError(422, f"不明な工程：{sid}")
-        fw = fx.FRAMEWORK_BY_STAGE[sid]
+        fw = fwlib.of(product_id, sid)
         keys = [k for k in it.get("fields") or [] if fw.get(k) is not None] or [f.key for f in fw.fields]
         out.append({"stage": sid, "fields": keys})
     if not out:
@@ -88,7 +88,7 @@ def create(product: Product, user: str, title: str, audience: str, purpose: str,
         raise ReportError(422, "題を入れてください")
     if source not in ("latest", "draft"):
         raise ReportError(422, "source は latest か draft です")
-    sel = _clean_selection(selection)
+    sel = _clean_selection(selection, product.id)
     with session() as s:
         n = (s.execute(select(func.max(ProductReport.number)).where(ProductReport.product_id == product.id))
              .scalar() or 0) + 1
@@ -181,8 +181,8 @@ def _collect(product: Product, sel: list[dict], source: str) -> tuple[dict[str, 
     return data, basis
 
 
-def _markdown(sid: str, values: dict) -> str:
-    st, fw = STAGE_BY_ID[sid], fx.FRAMEWORK_BY_STAGE[sid]
+def _markdown(sid: str, values: dict, product_id: str | None = None) -> str:
+    st, fw = STAGE_BY_ID[sid], fwlib.of(product_id, sid)
     sub = fx.Framework(fw.view, fw.title, fw.summary, tuple(f for f in fw.fields if f.key in values))
     return fx.to_markdown(st, sub, values)
 
@@ -191,11 +191,11 @@ def _cell(v) -> str:
     return str(v if v is not None else "").replace("\n", " ")[:200]
 
 
-def appendix(data: dict[str, dict]) -> list[dict]:
+def appendix(data: dict[str, dict], product_id: str | None = None) -> list[dict]:
     """選んだ表は付録の表のスライドにする（多い行は分ける）。処理仕様は CRUD マトリクスにする。"""
     out = []
     for sid, values in data.items():
-        st, fw = STAGE_BY_ID[sid], fx.FRAMEWORK_BY_STAGE[sid]
+        st, fw = STAGE_BY_ID[sid], fwlib.of(product_id, sid)
         for f in fw.fields:
             v = values.get(f.key)
             if f.key not in values or not fx.is_filled(f, v):
@@ -265,7 +265,7 @@ def run(job_id: str) -> None:
     try:
         with jobs.task(job_id, "collect"):
             data, basis = _collect(product, info["selection"], info["source"])
-            md = "\n\n".join(_markdown(sid, v) for sid, v in data.items())
+            md = "\n\n".join(_markdown(sid, v, product.id) for sid, v in data.items())
             jobs.set_task(job_id, "collect", detail=f"{len(data)}工程・{len(md)}文字")
         with jobs.task(job_id, "outline"):
             deck = _outline(conn, product, info, md)
@@ -274,7 +274,7 @@ def run(job_id: str) -> None:
                       for s in deck.slides]
             jobs.set_task(job_id, "outline", detail=f"{len(slides)}枚")
         with jobs.task(job_id, "appendix"):
-            extra = appendix(data)
+            extra = appendix(data, product.id)
             jobs.set_task(job_id, "appendix", detail=f"{len(extra)}枚")
         with session() as s:
             r = _get(s, product.id, info["number"])

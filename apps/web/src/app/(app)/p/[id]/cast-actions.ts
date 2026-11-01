@@ -22,3 +22,15 @@ export async function saveSkill(pid: string, id: string, body: { name: string; k
   return call(pid, `/skills/${encodeURIComponent(id)}`, "PUT", body);
 }
 export async function deleteSkill(pid: string, id: string) { return call(pid, `/skills/${encodeURIComponent(id)}`, "DELETE"); }
+
+// フレームワークのエディタ（テナントで共通。管理者だけ）
+export async function saveFramework(pid: string, id: string, body: unknown) {
+  const r = await call(pid, `/frameworks/${encodeURIComponent(id)}`, "PUT", body);
+  revalidatePath(`/p/${pid}/frameworks`);
+  return r;
+}
+export async function deleteFramework(pid: string, id: string) {
+  const r = await call(pid, `/frameworks/${encodeURIComponent(id)}`, "DELETE");
+  revalidatePath(`/p/${pid}/frameworks`);
+  return r;
+}

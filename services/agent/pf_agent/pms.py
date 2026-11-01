@@ -17,7 +17,7 @@ import json
 from pydantic import BaseModel
 from sqlalchemy import func, select
 
-from . import cron, llm, llmconf, repo
+from . import cron, fwlib, llm, llmconf, repo
 from .db import AgentIssue, IssueJournal, PmMessage, PmNote, Product, TeamAgent, session
 from .stages import STAGE_BY_ID
 from .team import (
@@ -447,7 +447,7 @@ def talk(
             from . import frameworks as fx
 
             stage_md = fx.to_markdown(
-                STAGE_BY_ID[stage_id], fx.FRAMEWORK_BY_STAGE[stage_id], repo.draft(product.id, stage_id)
+                STAGE_BY_ID[stage_id], fwlib.of(product.id, stage_id), repo.draft(product.id, stage_id)
             )[:20000]
         prompt = (
             f"あなたはプロダクト「{product.name}」（{product.idea}）の{name_of(pm)}です。PdM（人）と話しています。"

@@ -832,6 +832,34 @@ class AssistantMessage(Base):
     created_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), default=_now)
 
 
+class FrameworkDef(Base):
+    """テナントが作った・上書きしたフレームワーク（同じ id の標準より優先する）。"""
+    __tablename__ = "framework_defs"
+    __table_args__ = (UniqueConstraint("tenant_id", "fw_id"),)
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    tenant_id: Mapped[str] = mapped_column(String(64), index=True)
+    fw_id: Mapped[str] = mapped_column(String(60))
+    name: Mapped[str] = mapped_column(String(200))
+    category: Mapped[str] = mapped_column(String(60), default="")
+    description: Mapped[str] = mapped_column(Text, default="")
+    stages: Mapped[list | None] = mapped_column(JSON, nullable=True)          # 向いている工程
+    blocks: Mapped[list | None] = mapped_column(JSON, nullable=True)          # 部品と配置
+    updated_by: Mapped[str] = mapped_column(String(200), default="")
+    updated_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), default=_now, onupdate=_now)
+
+
+class StageFrameworkSet(Base):
+    """プロダクトの工程に足したフレームワーク（行がなければ既定の組み合わせ）。"""
+    __tablename__ = "stage_framework_sets"
+    __table_args__ = (UniqueConstraint("product_id", "stage_id"),)
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    product_id: Mapped[str] = mapped_column(String(32), index=True)
+    stage_id: Mapped[str] = mapped_column(String(8))
+    items: Mapped[list | None] = mapped_column(JSON, nullable=True)           # [{id, required}]
+    updated_by: Mapped[str] = mapped_column(String(200), default="")
+    updated_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), default=_now, onupdate=_now)
+
+
 class TenantSetting(Base):
     """テナントの小さな設定（プラットフォームの見回りの間隔など）。"""
     __tablename__ = "tenant_settings"

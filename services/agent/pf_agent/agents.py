@@ -22,7 +22,7 @@ import time
 from pydantic import BaseModel
 from sqlalchemy import func, select, update
 
-from . import cron, jobs, llm, llmconf, repo, reports, research
+from . import cron, fwlib, jobs, llm, llmconf, repo, reports, research
 from . import frameworks as fx
 from .db import AgentFinding, AgentSchedule, JobRun, Notice, Product, session
 from .stages import STAGE_BY_ID
@@ -282,7 +282,7 @@ def _material(product: Product, stages: list[str]) -> tuple[str, list[str]]:
     ids = [s for s in (stages or list(STAGE_BY_ID)) if rs.get(s) is None or rs[s].enabled]
     parts = []
     for sid in ids:
-        st, fw = STAGE_BY_ID[sid], fx.FRAMEWORK_BY_STAGE[sid]
+        st, fw = STAGE_BY_ID[sid], fwlib.of(product.id, sid)
         d = repo.draft(product.id, sid)
         miss = fx.check(fw, d)
         head = f"# 工程 {sid}（{st.no}{st.name}）の今の下書き\n"
@@ -299,7 +299,7 @@ def _material(product: Product, stages: list[str]) -> tuple[str, list[str]]:
 def _stub_findings(product: Product, ids: list[str], a: dict) -> list[dict]:
     out = []
     for sid in ids:
-        fw = fx.FRAMEWORK_BY_STAGE[sid]
+        fw = fwlib.of(product.id, sid)
         d = repo.draft(product.id, sid)
         empty = [f for f in fw.fields if f.required and not fx.is_filled(f, d.get(f.key))]
         if empty:
@@ -321,7 +321,7 @@ def _think(conn, product: Product, a: dict, material: str, ids: list[str]) -> li
     goal = (f"指示：{a['instruction']}" if a["task"] == "custom" else
             "上流の最新版との食い違い、必須の抜け、根拠のない数値、工程の間で ID がつながっていない箇所、"
             "古くなった前提を探す。" + (f"\n追加の観点：{a['instruction']}" if a["instruction"] else ""))
-    allowed = {sid: [f.key for f in fx.FRAMEWORK_BY_STAGE[sid].fields] for sid in ids}
+    allowed = {sid: [f.key for f in fwlib.of(product.id, sid).fields] for sid in ids}
     prompt = (
         f"あなたはプロダクト「{product.name}」を定期的に見直す自律エージェント「{a['name']}」です。\n{goal}\n\n"
         "## 出し方\n"
@@ -337,10 +337,10 @@ def _think(conn, product: Product, a: dict, material: str, ids: list[str]) -> li
     return [f.model_dump() for f in out.findings[:8]]
 
 
-def _coerce_props(sid: str | None, props: list[dict]) -> list[dict]:
+def _coerce_props(sid: str | None, props: list[dict], product_id: str | None = None) -> list[dict]:
     if not sid or sid not in STAGE_BY_ID:
         return []
-    fw = fx.FRAMEWORK_BY_STAGE[sid]
+    fw = fwlib.of(product_id, sid)
     out = []
     for p in props:
         f = fw.get(p.get("field", ""))
@@ -367,7 +367,7 @@ def _post(product: Product, number: int | None, job_id: str | None, found: list[
                                schedule_id=sched.id if sched else None, job_id=job_id, stage_id=sid,
                                severity=f.get("severity") if f.get("severity") in SEVERITY else "info",
                                title=str(f.get("title", ""))[:300] or "所見", body=str(f.get("body", "")),
-                               proposals=_coerce_props(sid, f.get("proposals") or []), thread=[]))
+                               proposals=_coerce_props(sid, f.get("proposals") or [], product.id), thread=[]))
             n += 1
         if sched is not None and n:
             s.add(Notice(tenant_id=product.tenant_id, user=sched.created_by, product_id=product.id, kind="agent",
@@ -471,7 +471,7 @@ def reply(product: Product, user: str, fid: int, text: str) -> dict:
         llm._record("stub", 0, 0)
         out = ReplyOut(reply=f"（スタブ）「{text[:60]}」を受けて見直しました。", revise=False, proposals=[])
     else:
-        fw = fx.FRAMEWORK_BY_STAGE.get(sid) if sid else None
+        fw = fwlib.of(product.id, sid) if sid else None
         draft = repo.draft(product.id, sid) if sid else {}
         about = {k: info[k] for k in ("stage_label", "title", "body", "proposals")}
         talk = "\n".join(f"{m['role']}: {m['text']}" for m in info["thread"])
@@ -489,7 +489,7 @@ def reply(product: Product, user: str, fid: int, text: str) -> dict:
     with session() as s:
         f = _finding(s, product, fid)
         if out.revise:
-            new = _coerce_props(sid, [p.model_dump() for p in out.proposals])
+            new = _coerce_props(sid, [p.model_dump() for p in out.proposals], product.id)
             if new:
                 f.proposals = new
         _say(f, "agent", f"agent ({conn.chat_model})", out.reply)

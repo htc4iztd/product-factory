@@ -166,3 +166,30 @@ def test_platform_alert_reaches_chat_with_approval(client):
     m = c.post(f"/assistant/messages/{f[0]['id']}/actions/{a['id']}", headers=H, json={"approve": True}).json()
     assert m["actions"][0]["status"] == "approved" and m["actions"][0]["result"].startswith("定期実行を1回動かしました")
     wait_idle(c, pid)
+
+
+def test_ui_editor_by_chat(client):
+    """⑥の UI エディタで話すと、画面の HTML を承認依頼で出し、承認すると UI デザインに入る（手での編集と同じ項目）。"""
+    c = client
+    pid = c.post("/products", headers=H, json={"name": "画面", "idea": "家計簿"}).json()["id"]
+    c.get(f"/products/{pid}/team", headers=H)
+    rep = say(c, f"/p/{pid}/s/s06/ui", "申込画面を作って").json()["reply"]
+    assert rep["agent"] == "pm_design" and rep["context"]["kind"] == "ui"
+    a = rep["actions"][0]
+    assert a["type"] == "ui_page" and a["before"] == "（新しい画面）" and "申込" in a["after"]
+    assert "pf-btn" in a["preview"]["html"]
+    c.post(f"/assistant/messages/{rep['id']}/actions/{a['id']}", headers=H, json={"approve": True})
+    st = c.get(f"/products/{pid}/stages/s06", headers=H).json()
+    pages = st["draft"]["ui"]["pages"]
+    assert len(pages) == 1 and pages[0]["name"] == "申込" and "pf-btn" in pages[0]["html"]
+    assert "## UI デザイン" in st["markdown"] and "- 申込：" in st["markdown"]
+    # 手で編集（エディタの保存と同じ）：エディタの状態も持つ。もう一度 AI に頼むと同じ画面を書き換える
+    pages[0]["project"] = {"pages": [{"frames": []}]}
+    c.put(f"/products/{pid}/stages/s06/draft", headers=H, json={"field": "ui", "value": {"pages": pages}})
+    rep = say(c, f"/p/{pid}/s/s06/ui", "申込画面を直して").json()["reply"]
+    assert rep["actions"][0]["after"]
+    big = {"pages": [{"id": "x", "name": "x", "html": "a" * 300_001}]}
+    assert c.put(f"/products/{pid}/stages/s06/draft", headers=H, json={"field": "ui", "value": big}).status_code in (
+        400,
+        422,
+    )

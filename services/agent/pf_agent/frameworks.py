@@ -36,6 +36,8 @@ class Field:
     columns: tuple[Column, ...] = ()
     rows: tuple[str, ...] = ()   # 行の見出しを固定する表（先頭列に入る）
     id_prefix: str = ""          # 先頭列を ID にする表（空なら US-01 のように自動で振る）
+    group: str = ""              # 足したフレームワークの id（工程の基本の項目は空）
+    config: dict = field(default_factory=dict, compare=False, hash=False)  # matrix・positioning・diagram の設定
 
 
 @dataclass(frozen=True)
@@ -45,12 +47,15 @@ class Framework:
     summary: str            # 何を決めるためのものか（1文）
     fields: tuple[Field, ...]
     prompts: tuple[str, ...] = field(default_factory=tuple)   # チャットの最初に出す問いかけ
+    parts: tuple = ()        # 足したフレームワーク：({id, name, description, required, blocks: [...]}, ...)
 
     def get(self, key: str) -> Field | None:
         return next((f for f in self.fields if f.key == key), None)
 
 
 T, L, TB, FL = "text", "list", "table", "flows"
+MX, PS, DG = "matrix", "positioning", "diagram"   # 2×2 の象限・ポジショニング図・ノードと線の図
+UI = "ui"   # UI デザイン（GrapesJS の画面：HTML・CSS・エディタの状態）
 ER, ST, SP, GR = dz.ER, dz.ST, dz.SP, dz.GR
 # フローのノードの種類
 NODE_TYPES = {"start": "開始", "task": "作業", "decision": "判断", "system": "システム処理", "end": "終了"}
@@ -178,6 +183,8 @@ FRAMEWORKS: dict[str, Framework] = {
                            Column("parent", "上位の画面"), Column("content", "主な情報・操作"),
                            Column("stories", "ストーリーID")),
                   id_prefix="SC"),
+            Field("ui", "UI デザイン", UI, "画面ごとの UI（エディタで作る。画面一覧の SC-xx とつなぐ）",
+                  required=False),
             Field("usability", "ユーザビリティ基準", TB,
                   "体験の品質の目標と測り方（例：初回の締めを3分以内に終えられる）",
                   required=False,
@@ -360,6 +367,14 @@ FRAMEWORK_BY_STAGE = {s.id: framework(s) for s in STAGES}
 
 # ---------------- 値の扱い ----------------
 def empty_value(f: Field):
+    if f.kind == UI:
+        return {"pages": []}
+    if f.kind == MX:
+        return {q: [] for q in ("q1", "q2", "q3", "q4")}
+    if f.kind == PS:
+        return {"items": []}
+    if f.kind == DG:
+        return {"nodes": [], "edges": []}
     if f.kind in dz.KINDS:
         return dz.empty(f.kind)
     if f.kind == FL:
@@ -376,6 +391,14 @@ def empty_draft(fw: Framework) -> dict:
 
 
 def is_filled(f: Field, value) -> bool:
+    if f.kind == UI:
+        return any(str(p.get("html", "")).strip() for p in (value or {}).get("pages") or [])
+    if f.kind == MX:
+        return any(str(x).strip() for q in (value or {}).values() for x in (q or []))
+    if f.kind == PS:
+        return bool((value or {}).get("items"))
+    if f.kind == DG:
+        return bool((value or {}).get("nodes"))
     if f.kind == T:
         return bool(str(value or "").strip())
     if f.kind == L:
@@ -409,6 +432,10 @@ def coerce(f: Field, value):
         return [str(v).strip() for v in value if str(v).strip()]
     if f.kind == FL:
         return _coerce_flows(value)
+    if f.kind in (MX, PS, DG):
+        return _coerce_block(f, value)
+    if f.kind == UI:
+        return coerce_ui(value)
     if f.kind in dz.KINDS:
         return dz.COERCE[f.kind](value)
     # table
@@ -426,6 +453,115 @@ def coerce(f: Field, value):
         rows = [dict(by.get(h, {}), **{keys[0]: h}) for h in f.rows]
         rows = [{k: r.get(k, "") for k in keys} for r in rows]
     return rows
+
+
+def _num01(v, default: float = 50.0) -> float:
+    try:
+        return max(0.0, min(100.0, float(v)))
+    except (TypeError, ValueError):
+        return default
+
+
+def _coerce_block(f: Field, value):
+    """matrix：{q1..q4: [文字]}（q1 左上・q2 右上・q3 左下・q4 右下）／positioning：{items: [{name, x, y, note}]}
+    （x・y は 0〜100）／diagram：{nodes: [{id, label, kind, x, y}], edges: [{source, target, label}]}。"""
+    if isinstance(value, str):
+        value = json.loads(value) if value.strip() else {}
+    if not isinstance(value, dict):
+        raise ValueError(f"{f.label} はオブジェクト（JSON）で渡してください")
+    if f.kind == MX:
+        out = {}
+        for q in ("q1", "q2", "q3", "q4"):
+            v = value.get(q) or []
+            if isinstance(v, str):
+                v = v.splitlines()
+            out[q] = [str(x).strip().lstrip("-・*").strip() for x in v if str(x).strip()][:30]
+        return out
+    if f.kind == PS:
+        items = []
+        for it in (value.get("items") or [])[:40]:
+            if isinstance(it, dict) and str(it.get("name", "")).strip():
+                items.append({"name": str(it["name"]).strip()[:80], "x": _num01(it.get("x")), "y": _num01(it.get("y")),
+                              "note": str(it.get("note", ""))[:300], "self": bool(it.get("self"))})
+        return {"items": items}
+    nodes, ids = [], set()
+    for i, n in enumerate((value.get("nodes") or [])[:80]):
+        if not isinstance(n, dict) or not str(n.get("label", "")).strip():
+            continue
+        nid = str(n.get("id") or f"n{i + 1}")[:40]
+        if nid in ids:
+            nid = f"{nid}_{i}"
+        ids.add(nid)
+        nodes.append({"id": nid, "label": str(n["label"]).strip()[:120], "kind": str(n.get("kind", ""))[:40],
+                      "x": float(n.get("x") or 60 + (i % 5) * 200), "y": float(n.get("y") or 60 + (i // 5) * 140)})
+    edges = [{"source": str(e["source"]), "target": str(e["target"]), "label": str(e.get("label", ""))[:80]}
+             for e in (value.get("edges") or [])[:160]
+             if isinstance(e, dict) and str(e.get("source")) in ids and str(e.get("target")) in ids]
+    return {"nodes": nodes, "edges": edges}
+
+
+def coerce_ui(value) -> dict:
+    """{pages: [{id, name, screen, html, css, project}]}。project は GrapesJS の状態（そのまま持つ）。"""
+    if isinstance(value, str):
+        value = json.loads(value) if value.strip() else {}
+    if not isinstance(value, dict):
+        raise ValueError("UI デザインはオブジェクト（JSON）で渡してください")
+    pages, ids = [], set()
+    for i, p in enumerate((value.get("pages") or [])[:40]):
+        if not isinstance(p, dict):
+            continue
+        pid = str(p.get("id") or f"p{i + 1}")[:40]
+        if pid in ids:
+            pid = f"{pid}_{i}"
+        ids.add(pid)
+        html, css = str(p.get("html") or ""), str(p.get("css") or "")
+        if len(html) > 300_000 or len(css) > 200_000:
+            raise ValueError(f"画面「{p.get('name') or pid}」が大きすぎます")
+        project = p.get("project") if isinstance(p.get("project"), dict) else None
+        if project is not None and len(json.dumps(project)) > 1_500_000:
+            project = None
+        pages.append({"id": pid, "name": str(p.get("name") or f"画面{i + 1}")[:120],
+                      "screen": str(p.get("screen") or "")[:20], "html": html, "css": css, "project": project})
+    return {"pages": pages}
+
+
+def ui_text(html: str, limit: int = 600) -> str:
+    """HTML から読める文字だけを取り出す（Markdown・AI・承認依頼の要約に使う）。"""
+    import re
+
+    t = re.sub(r"<(script|style)[^>]*>.*?</\1>", " ", html or "", flags=re.S | re.I)
+    t = re.sub(r"<[^>]+>", " ", t)
+    t = re.sub(r"\s+", " ", t).strip()
+    return t[:limit]
+
+
+def block_markdown(f: Field, v) -> list[str]:
+    """matrix・positioning・diagram の Markdown（下流・AI・監査に渡す）。"""
+    cfg = f.config or {}
+    if f.kind == MX:
+        labels = cfg.get("quadrants") or ["左上", "右上", "左下", "右下"]
+        lines = []
+        for q, lab in zip(("q1", "q2", "q3", "q4"), labels, strict=False):
+            items = (v or {}).get(q) or []
+            lines.append(f"### {lab}")
+            lines += [f"- {x}" for x in items] or ["（未記入）"]
+        return lines
+    if f.kind == PS:
+        ax = cfg.get("axes") or {}
+        x, y = ax.get("x") or {}, ax.get("y") or {}
+        head = [f"横軸：{x.get('label', '横軸')}（{x.get('low', '低')}→{x.get('high', '高')}）",
+                f"縦軸：{y.get('label', '縦軸')}（{y.get('low', '低')}→{y.get('high', '高')}）", ""]
+        rows = ["| 名前 | 横 | 縦 | メモ |", "|---|---|---|---|"] + [
+            f"| {'★' if it.get('self') else ''}{it['name']} | {it['x']:.0f} | {it['y']:.0f} | {it.get('note', '')} |"
+            for it in (v or {}).get("items") or []]
+        return head + rows if (v or {}).get("items") else head + ["（未記入）"]
+    nodes = {n["id"]: n["label"] for n in (v or {}).get("nodes") or []}
+    lines = ["```mermaid", "flowchart LR"]
+    lines += [f'  {k}["{lab}"]' for k, lab in nodes.items()]
+    lines += [f"  {e['source']} -->{'|' + e['label'] + '|' if e.get('label') else ''} {e['target']}"
+              for e in (v or {}).get("edges") or []]
+    lines.append("```")
+    return lines if nodes else ["（未記入）"]
 
 
 def _assign_ids(f: Field, rows: list[dict]) -> list[dict]:
@@ -598,6 +734,12 @@ def to_markdown(stage: Stage, fw: Framework, draft: dict) -> str:
             lines += [f"- {x}" for x in v or []] or ["（未記入）"]
         elif f.kind == FL:
             lines += flows_mermaid(v or []) or ["（未記入）"]
+        elif f.kind in (MX, PS, DG):
+            lines += block_markdown(f, v)
+        elif f.kind == UI:
+            pages = (v or {}).get("pages") or []
+            lines += [f"- {p['name']}{'（' + p['screen'] + '）' if p.get('screen') else ''}：{ui_text(p['html'], 300)}"
+                      for p in pages] or ["（未記入）"]
         elif f.kind in dz.KINDS:
             lines += dz.markdown(f.kind, v, draft) or ["（未記入）"]
         else:
@@ -655,7 +797,7 @@ def from_markdown(fw: Framework, markdown: str) -> tuple[dict, list[str]]:
         if f is None:
             notes.append(f"見出し「{label}」は項目にないため反映しませんでした")
             continue
-        if f.kind == FL or f.kind in dz.KINDS:
+        if f.kind in (FL, MX, PS, DG, UI) or f.kind in dz.KINDS:
             where = "フローエディタ" if f.kind == FL else "図のエディタ"
             notes.append(f"「{label}」は文書からは変えられません（キャンバスの{where}で編集してください）")
             continue
@@ -684,4 +826,5 @@ def spec(fw: Framework) -> list[dict]:
     return [{"key": f.key, "label": f.label, "kind": f.kind, "hint": f.hint, "required": f.required,
              "columns": [{"key": c.key, "label": c.label, "kind": c.kind, "options": list(c.options)}
                          for c in f.columns],
-             "rows": list(f.rows), "id_prefix": f.id_prefix} for f in fw.fields]
+             "rows": list(f.rows), "id_prefix": f.id_prefix, "group": f.group, "config": f.config or {}}
+            for f in fw.fields]

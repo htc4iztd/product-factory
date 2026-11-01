@@ -1,0 +1,9 @@
+/* GrapesJS の文字のボタンを読みやすく（アイコンの代わり） */
+.gjs-pn-btn { width: auto; min-width: 28px; padding: 4px 8px; font-size: 12px; line-height: 1.4; font-family: inherit; }
+.gjs-pn-views { width: 30%; }
+.gjs-pn-views-container { width: 30%; padding-top: 40px; }
+.gjs-cv-canvas { width: 70%; }
+.gjs-pn-options { right: 30%; }
+.gjs-pn-devices-c .gjs-field { min-width: 120px; }
+.gjs-pn-commands { width: 35%; }
+.gjs-pn-commands .gjs-pn-buttons { justify-content: flex-start; gap: 2px; }

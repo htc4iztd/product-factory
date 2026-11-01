@@ -16,6 +16,7 @@ from dataclasses import dataclass, field
 
 from pydantic import BaseModel, Field
 
+from . import fwlib
 from .db import Product
 
 
@@ -96,7 +97,7 @@ def _stage_draft(ctx: Ctx, a: StageArg) -> str:
     from .stages import STAGE_BY_ID
 
     p, sid = _need_product(ctx), _stage(ctx, a.stage_id)
-    fw = fx.FRAMEWORK_BY_STAGE[sid]
+    fw = fwlib.of(p.id, sid)
     d = repo.draft(p.id, sid)
     miss = fx.check(fw, d)
     rs = repo.runs(p.id)[sid]
@@ -112,7 +113,7 @@ def _stage_fields(ctx: Ctx, a: StageArg) -> str:
     from . import llm
 
     sid = _stage(ctx, a.stage_id)
-    fw = fx.FRAMEWORK_BY_STAGE[sid]
+    fw = fwlib.of(ctx.product.id if ctx.product else None, sid)
     return (
         f"{fw.title}：{fw.summary}\n" + json.dumps(fx.spec(fw), ensure_ascii=False)[:8000] + "\n" + llm.value_rules(fw)
     )

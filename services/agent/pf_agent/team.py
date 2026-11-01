@@ -21,7 +21,7 @@ import datetime as dt
 from pydantic import BaseModel
 from sqlalchemy import func, or_, select, update
 
-from . import cron, jobs, llm, llmconf, repo
+from . import cron, fwlib, jobs, llm, llmconf, repo
 from . import frameworks as fx
 from .db import AgentIssue, BoardPost, IssueJournal, JobRun, PmMessage, PmNote, Product, TeamAgent, session
 from .stages import STAGE_BY_ID, STAGES
@@ -87,7 +87,7 @@ def default_mission(key: str) -> str:
             "毎日の振り返りの会議で PdM に報告し、他の PM の報告と自分の領域の成果物を突き合わせる。"
         )
     st = STAGE_BY_ID[key]
-    fw = fx.FRAMEWORK_BY_STAGE[key]
+    fw = fwlib.of(None, key)
     return (
         f"{st.no}{st.name}（{fw.title}）を作り上げる：{fw.summary}。自分宛ての Issue を実行し、結果を Issue に返す。"
         "他の工程に確認が要ることは掲示板で、動いてほしいことは Issue で伝える。PdM に聞きたいことは"
@@ -636,7 +636,7 @@ def _prompt(product: Product, key: str, mission: str, header: str, issues_md: st
 
 def _stub_turn(product: Product, key: str, issues: list[AgentIssue], writes: list[str] | None = None) -> BaseModel:
     writes = list(writes if writes is not None else ("set_field", "issue_update", "issue_create", "board_post"))
-    fw = fx.FRAMEWORK_BY_STAGE[key]
+    fw = fwlib.of(product.id, key)
     d = repo.draft(product.id, key)
     empty = [f for f in fw.fields if not fx.is_filled(f, d.get(f.key))]
     changes = [
@@ -701,7 +701,7 @@ def _apply(product: Product, key: str, out: BaseModel, job_id: str, model: str) 
         s.commit()
     # 工程の下書きに書き込む（どの項目を変えたかは Issue の記録と監査ログに残る）
     changed = []
-    fw = fx.FRAMEWORK_BY_STAGE[key]
+    fw = fwlib.of(product.id, key)
     for c in getattr(out, "changes", [])[:12]:
         f = fw.get(c.field)
         if f is None:

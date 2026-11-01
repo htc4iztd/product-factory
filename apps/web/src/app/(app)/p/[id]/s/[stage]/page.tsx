@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { ArrowRight, Lock } from "lucide-react";
-import { agent, AgentError, type StageDetail, type VariantStage } from "@/lib/agent";
+import { agent, AgentError, type FrameworkDefT, type StageDetail, type VariantStage } from "@/lib/agent";
 import { auth } from "@/lib/auth";
 import { PatternStageBar } from "@/components/autodev/PatternStageBar";
 import { StatusBadge, StatusDot } from "@/components/StatusBadge";
@@ -18,7 +18,10 @@ export default async function StagePage({ params, searchParams }: Props) {
   const { id, stage } = await params;
   const sp = await searchParams;
   const tab = sp.tab ?? "canvas";
-  const main = await agent<StageDetail>(`/products/${id}/stages/${stage}${sp.session ? `?session=${encodeURIComponent(sp.session)}` : ""}`);
+  const [main, lib] = await Promise.all([
+    agent<StageDetail>(`/products/${id}/stages/${stage}${sp.session ? `?session=${encodeURIComponent(sp.session)}` : ""}`),
+    agent<{ frameworks: FrameworkDefT[] }>("/frameworks").catch(() => ({ frameworks: [] as FrameworkDefT[] })),
+  ]);
   // 案（プリプロダクト）のタブ：その案の、このステージの下書きを本線と同じ画面で見る
   const pp = sp.pp && main.variants.some((v) => String(v.number) === sp.pp)
     ? await agent<VariantStage>(`/products/${id}/preproducts/${sp.pp}/stages/${stage}`).catch((e) => { if (e instanceof AgentError) return null; throw e; })
@@ -100,7 +103,7 @@ export default async function StagePage({ params, searchParams }: Props) {
             {!st.enabled && <ClosedBanner pid={id} sid={stage} />}
             {!pp && st.status === "needs_recheck" && <RecheckBanner pid={id} sid={stage} inputs={st.inputs.map((s) => s.no + s.name).join("・")} />}
             {!pp && awaiting && st.pending && <ApprovalPanel pid={id} sid={stage} version={st.pending.version} findings={st.audit_findings ?? []} />}
-            {tab === "canvas" && <Canvas pid={id} st={st} readOnly={readOnly} />}
+            {tab === "canvas" && <Canvas pid={id} st={st} readOnly={readOnly} library={lib.frameworks} />}
             {tab === "doc" && <DocEditor pid={id} sid={stage} markdown={st.markdown} fields={st.framework.fields} readOnly={readOnly} />}
             {tab === "history" && (
               <div className="card divide-y divide-zinc-100">

@@ -16,7 +16,7 @@ from google.adk.agents.context import Context
 from google.adk.workflow import START, Workflow
 
 from . import frameworks as fx
-from . import llm, llmconf, ontology, repo
+from . import fwlib, llm, llmconf, ontology, repo
 from .stages import STAGE_BY_ID
 
 
@@ -31,7 +31,7 @@ def _chat_session(ctx: Context) -> str | None:
 def converse(ctx: Context, node_input: Any):
     product_id, stage_id = _ids(ctx)
     stage = STAGE_BY_ID[stage_id]
-    fw = fx.FRAMEWORK_BY_STAGE[stage_id]
+    fw = fwlib.of(product_id, stage_id)
     c = repo.chat_context(product_id, stage_id, _chat_session(ctx))
     conn = llmconf.resolve(c["tenant_id"])
     # 社内の用語・組織・業務（オントロジー）は、扱う文章に出てくる語に関係する部分だけを渡す
@@ -63,7 +63,7 @@ def converse(ctx: Context, node_input: Any):
 
 def screen(ctx: Context, node_input: Any):
     product_id, stage_id = _ids(ctx)
-    fw = fx.FRAMEWORK_BY_STAGE[stage_id]
+    fw = fwlib.of(product_id, stage_id)
     accepted, dropped = [], []
     for p in (node_input or {}).get("proposals", []):
         f = fw.get(p.get("field", ""))

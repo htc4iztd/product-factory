@@ -1,4 +1,7 @@
-import type { FieldSpec, Row, StageDetail } from "@/lib/agent";
+import type { FieldSpec, FrameworkDefT, Row, StageDetail } from "@/lib/agent";
+import { FrameworkParts } from "@/components/framework/FrameworkParts";
+import Link from "next/link";
+import { srcDoc } from "@/lib/uikit";
 import { FieldEditor } from "./FieldEditor";
 import { KpiGraph } from "./KpiGraph";
 import { FlowEditor } from "./FlowEditor";
@@ -395,8 +398,35 @@ function ProductSpec({ c }: { c: Ctx }) {
       </Panel>
       <Panel><F c={c} k="userflows" /></Panel>
       <Panel><F c={c} k="screens" /></Panel>
+      <UiPanel c={c} />
       <Panel><F c={c} k="usability" /></Panel>
     </div>
+  );
+}
+
+// UI デザイン：画面ごとの下見と、UI エディタへの入口
+function UiPanel({ c }: { c: Ctx }) {
+  const pages = ((c.st.draft.ui as unknown as { pages?: { id: string; name: string; screen: string; html: string; css: string }[] })?.pages) ?? [];
+  return (
+    <Panel>
+      <div className="mb-3 flex items-center gap-2">
+        <span className="text-[13px] font-medium">UI デザイン</span>
+        <span className="text-[11px] text-zinc-400">画面ごとの UI。エディタで組むか、右のチャットで AI に頼む</span>
+        <Link href={`/p/${c.pid}/s/s06/ui`} className="btn-primary btn-sm ml-auto">UI エディタを開く</Link>
+      </div>
+      {pages.length === 0 ? <p className="text-[13px] text-zinc-400">まだ画面がありません。</p> : (
+        <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+          {pages.map((p) => (
+            <Link key={p.id} href={`/p/${c.pid}/s/s06/ui`} className="group overflow-hidden rounded-lg border border-zinc-200 hover:border-brand-300">
+              <div className="relative h-44 overflow-hidden bg-zinc-50">
+                <iframe title={p.name} srcDoc={srcDoc(p.html, p.css)} sandbox="" className="pointer-events-none absolute left-0 top-0 h-[352px] w-[200%] origin-top-left scale-50 border-0" />
+              </div>
+              <div className="flex items-center gap-2 border-t border-zinc-100 px-3 py-1.5 text-[12px]"><span className="font-medium">{p.name}</span>{p.screen && <span className="font-mono text-[10.5px] text-zinc-400">{p.screen}</span>}</div>
+            </Link>
+          ))}
+        </div>
+      )}
+    </Panel>
   );
 }
 
@@ -651,8 +681,15 @@ const VIEWS: Record<string, (p: { c: Ctx }) => React.ReactNode> = {
   app_design: AppDesign, infra_design: InfraDesign, ops_design: OpsDesign,
 };
 
-export function Canvas({ pid, st, readOnly }: { pid: string; st: StageDetail; readOnly: boolean }) {
+export function Canvas({ pid, st, readOnly, library = [] }: { pid: string; st: StageDetail; readOnly: boolean; library?: FrameworkDefT[] }) {
   const proposed = new Set(st.chat.flatMap((m) => m.proposals.filter((p) => p.status === "pending").map((p) => p.field)));
   const View = VIEWS[st.framework.view] ?? DocumentView;
-  return <View c={{ pid, st, readOnly, proposed }} />;
+  // 基本の項目は工程ごとの描き方で、足したフレームワークは部品の格子で描く
+  const core: StageDetail = { ...st, framework: { ...st.framework, fields: st.framework.fields.filter((f) => !f.group) } };
+  return (
+    <div className="space-y-6">
+      <View c={{ pid, st: core, readOnly, proposed }} />
+      <FrameworkParts pid={pid} st={st} readOnly={readOnly} library={library} />
+    </div>
+  );
 }

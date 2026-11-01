@@ -104,6 +104,18 @@ def value_rules(fw: Framework) -> str:
         "label, lane: レーンの番号, x: 左からの位置(px)}], edges: [{source, target, label}]}] の JSON。\n"
         + "".join(f"- kind が {k} の項目の value は {designs.FORMATS[k]} の JSON。\n"
                   for k in designs.KINDS if any(f.kind == k for f in fw.fields))
+        + ("- kind が matrix の項目の value は {q1: [..], q2: [..], q3: [..], q4: [..]} の JSON"
+           "（config.quadrants の順に左上・右上・左下・右下）。\n"
+           if any(f.kind == "matrix" for f in fw.fields) else "")
+        + ("- kind が positioning の項目の value は {items: [{name, x, y, note, self}]} の JSON"
+           "（x・y は 0〜100。config.axes の low→high。自社は self: true）。"
+           "\n" if any(f.kind == "positioning" for f in fw.fields) else "")
+        + ("- kind が ui の項目の value は {pages: [{id, name, screen: 画面ID, html, css}]} の JSON"
+           "（html は body の中身）。\n"
+           if any(f.kind == "ui" for f in fw.fields) else "")
+        + ("- kind が diagram の項目の value は {nodes: [{id, label, kind}], edges: [{source, target, label}]}"
+           " の JSON。\n"
+           if any(f.kind == "diagram" for f in fw.fields) else "")
     )
 
 
@@ -144,6 +156,25 @@ def _stub_value(f, idea: str):
                                       {"source": "n4", "target": "n2"}]}], ensure_ascii=False)
     if f.kind in designs.KINDS:
         return json.dumps(designs.stub(f.kind), ensure_ascii=False)
+    if f.kind == "ui":
+        page = ('<header class="pf-nav"><strong>' + base + '</strong></header><main class="pf-main">'
+                '<h1>ホーム（仮）</h1><p>この画面でできること（仮）</p><button class="pf-btn">はじめる</button></main>')
+        home = {"id": "home", "name": "ホーム（仮）", "screen": "SC-01", "html": page, "css": ""}
+        return json.dumps({"pages": [home]}, ensure_ascii=False)
+    if f.kind == "matrix":
+        labels = (f.config or {}).get("quadrants") or ["左上", "右上", "左下", "右下"]
+        return json.dumps({q: [f"{lab}の要素（仮）"] for q, lab in zip(("q1", "q2", "q3", "q4"), labels, strict=False)},
+                          ensure_ascii=False)
+    if f.kind == "positioning":
+        items = [{"name": base, "x": 70, "y": 75, "self": True, "note": "自社（仮）"},
+                 {"name": "競合A（仮）", "x": 35, "y": 40}, {"name": "競合B（仮）", "x": 60, "y": 30}]
+        return json.dumps({"items": items}, ensure_ascii=False)
+    if f.kind == "diagram":
+        return json.dumps({"nodes": [{"id": "a", "label": base}, {"id": "b", "label": "顧客（仮）"},
+                                     {"id": "c", "label": "パートナー（仮）"}],
+                           "edges": [{"source": "a", "target": "b", "label": "価値"},
+                                     {"source": "b", "target": "a", "label": "代金"},
+                                     {"source": "c", "target": "a", "label": "供給"}]}, ensure_ascii=False)
     if f.kind == "text":
         return f"{base}の{f.label}（仮）"
     if f.kind == "list":

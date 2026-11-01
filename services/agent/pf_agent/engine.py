@@ -14,7 +14,7 @@ from google.adk.sessions import DatabaseSessionService
 from google.genai import types
 from sqlalchemy import select
 
-from . import autodev, code, ghsync, images, llm, llmconf, repo, team
+from . import autodev, code, fwlib, ghsync, images, llm, llmconf, repo, team
 from . import frameworks as fx
 from .db import (
     PhaseReview,
@@ -78,7 +78,7 @@ class Engine:
         repo.log(p.id, None, "human", user, "product.create",
                  body={"name": name, "idea": idea, "scope": scope, "mode": mode})
         if canvas:  # 聞き取りで分かったことを①の下書きに入れる（本人の答えなので案にせず直接入れる）
-            fw = fx.FRAMEWORK_BY_STAGE["s01"]
+            fw = fwlib.of(None, "s01")
             values = {}
             for k, v in canvas.items():
                 f = fw.get(k)
@@ -161,7 +161,7 @@ class Engine:
     def make_report(self, product: Product, stage_id: str, user: str) -> None:
         """ステージの全セッションの対話をレポートにまとめる。"""
         stage = self._stage(product, stage_id, writable=False)
-        fw = fx.FRAMEWORK_BY_STAGE[stage_id]
+        fw = fwlib.of(product.id, stage_id)
         titles = {x["id"]: x["title"] for x in repo.sessions(product.id, stage_id)}
         messages = [dict(m, session=titles.get(m["session_id"], "")) for m in repo.chat(product.id, stage_id)]
         if not messages:
@@ -194,7 +194,7 @@ class Engine:
     def set_markdown(self, product: Product, stage_id: str, user: str, markdown: str) -> dict:
         """文書タブで書いた Markdown を、見出しごとに項目へ反映する。"""
         self._stage(product, stage_id)
-        values, notes = fx.from_markdown(fx.FRAMEWORK_BY_STAGE[stage_id], markdown)
+        values, notes = fx.from_markdown(fwlib.of(product.id, stage_id), markdown)
         changed = repo.set_fields(product.id, stage_id, values, user, "markdown")
         return {"changed": changed, "notes": notes}
 
@@ -214,7 +214,7 @@ class Engine:
         if run.status == AWAITING_APPROVAL:
             raise FactoryError(409, "承認待ちです。承認するか、修正指示を出してから更新し直してください")
         d = repo.draft(product.id, stage_id)
-        fw = fx.FRAMEWORK_BY_STAGE[stage.id]
+        fw = fwlib.of(product.id, stage.id)
         findings = fx.check(fw, d)
         if findings and not force:
             raise FactoryError(422, "必須の項目が空です：" + "、".join(findings))
@@ -418,7 +418,7 @@ class Engine:
         stages = []
         for st in STAGES:
             r = rs[st.id]
-            fw = fx.FRAMEWORK_BY_STAGE[st.id]
+            fw = fwlib.of(product.id, st.id)
             stages.append({"id": st.id, "no": st.no, "name": st.name, "phase": st.phase,
                            "framework": fw.title, "status": r.status, "enabled": r.enabled,
                            "approval_required": r.approval_required,
@@ -428,7 +428,7 @@ class Engine:
 
     def stage_detail(self, product: Product, stage_id: str, session_id: str | None = None) -> dict:
         st = self._stage(product, stage_id, writable=False)
-        fw = fx.FRAMEWORK_BY_STAGE[stage_id]
+        fw = fwlib.of(product.id, stage_id)
         r = repo.get_run(product.id, stage_id)
         d = repo.draft(product.id, stage_id)
         art = repo.current_artifact(product.id, stage_id)
@@ -439,7 +439,7 @@ class Engine:
         return {
             "id": st.id, "no": st.no, "name": st.name, "phase": st.phase,
             "framework": {"view": fw.view, "title": fw.title, "summary": fw.summary,
-                          "fields": fx.spec(fw), "prompts": list(fw.prompts)},
+                          "fields": fx.spec(fw), "prompts": list(fw.prompts), "parts": list(fw.parts)},
             "status": r.status, "enabled": r.enabled, "approval_required": r.approval_required,
             "pending": r.pending, "audit_findings": r.audit_findings, "missing": fx.check(fw, d),
             "current_version": r.current_version, "approved_version": r.approved_version,
@@ -509,7 +509,7 @@ class Engine:
                 rows.append({"ac": a["id"], "story": a.get("story", ""), "criterion": criterion, "result": "未実施",
                              "evidence": "", "note": ""})
                 added += 1
-        f = fx.FRAMEWORK_BY_STAGE["s13"].get("coverage")
+        f = fwlib.of(product.id, "s13").get("coverage")
         repo.set_fields(product.id, "s13", {"coverage": fx.coerce(f, rows)}, user, "import")
         return added
 
@@ -524,8 +524,8 @@ class Engine:
             if art is not None:
                 md, source = art.content, f"最新版 v{art.version}"
             else:
-                md, source = fx.to_markdown(st, fx.FRAMEWORK_BY_STAGE[st.id], repo.draft(product.id, st.id)), "下書き"
-            out.append({"id": st.id, "no": st.no, "name": st.name, "framework": fx.FRAMEWORK_BY_STAGE[st.id].title,
+                md, source = fx.to_markdown(st, fwlib.of(product.id, st.id), repo.draft(product.id, st.id)), "下書き"
+            out.append({"id": st.id, "no": st.no, "name": st.name, "framework": fwlib.of(product.id, st.id).title,
                         "status": rs[st.id].status, "source": source, "markdown": md})
         return out
 

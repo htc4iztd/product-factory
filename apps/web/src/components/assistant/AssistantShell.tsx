@@ -7,6 +7,7 @@ import { decideAssistant, researchBrief, sendAssistant } from "@/lib/assistant-a
 import { Avatar } from "@/components/rail/Avatar";
 import { AttachButton, AttachChips, SentAttachments, useAttachments } from "@/components/chat/Attachments";
 import { ResearchImport } from "@/components/chat/ResearchImport";
+import { srcDoc } from "@/lib/uikit";
 
 const POLL_MS = 4000;
 const PM_OF: Record<string, string> = Object.fromEntries([
@@ -14,7 +15,7 @@ const PM_OF: Record<string, string> = Object.fromEntries([
   ...["s06", "s07", "s08", "s09", "s10", "s11"].map((s) => [s, "設計PM"]),
   ...["s12", "s13", "s14"].map((s) => [s, "実装PM"]),
 ]);
-const PLATFORM_PAGES = ["platform", "schedule", "cast", "team", "agents"];
+const PLATFORM_PAGES = ["platform", "schedule", "cast", "team", "agents", "frameworks"];
 const time = (t: string) => new Date(t).toLocaleString("ja-JP", { timeZone: "Asia/Tokyo", month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit" });
 
 // いまのページと、送ったときに答える相手の見込み（実際の宛先は送ったあとに決まる）
@@ -26,7 +27,7 @@ function where(path: string, choices: MentionT[], mentions: MentionT[]): { label
   const m = p.match(/^\/p\/[0-9a-f]+(?:\/([^/]+)(?:\/([^/]+))?)?/);
   if (!m) return { label: "ファクトリー全体", who: "プラットフォーム" };
   const [, seg, sub] = m;
-  if (seg === "s" && sub) return { label: choices.find((c) => c.ref === sub)?.label ?? sub, who: PM_OF[sub] ?? "PM" };
+  if (seg === "s" && sub) return { label: `${choices.find((c) => c.ref === sub)?.label ?? sub}${p.endsWith("/ui") ? "の UI エディタ" : ""}`, who: PM_OF[sub] ?? "PM" };
   if (seg === "pm" && sub) return { label: `${choices.find((c) => c.ref === sub)?.label ?? sub}の作業場所`, who: choices.find((c) => c.ref === sub)?.label ?? "PM" };
   if (seg && PLATFORM_PAGES.includes(seg)) return { label: choices.find((c) => c.ref.endsWith(`/${seg}`))?.label ?? seg, who: "プラットフォーム" };
   const page = choices.find((c) => c.kind === "page" && c.ref === p.split("?")[0]);
@@ -166,6 +167,15 @@ function ActionCard({ m, a, onChanged }: { m: AssistantMsg; a: ChatActionT; onCh
         <div><div className="text-[10px] text-zinc-400">変更前</div><div className="max-h-40 overflow-y-auto whitespace-pre-wrap rounded bg-zinc-50 px-2 py-1 text-zinc-600">{a.before}</div></div>
         <div><div className="text-[10px] text-zinc-400">変更後</div><div className="max-h-40 overflow-y-auto whitespace-pre-wrap rounded bg-emerald-50 px-2 py-1 text-zinc-900">{a.after}</div></div>
       </div>
+      {(a as ChatActionT & { preview?: { html: string; css: string } }).preview && (
+        <div className="mt-1.5 overflow-hidden rounded border border-zinc-200 bg-zinc-50">
+          <div className="px-2 py-0.5 text-[10px] text-zinc-400">下見（変更後）</div>
+          <div className="relative h-48 overflow-hidden">
+            <iframe title="変更後の下見" sandbox="" className="pointer-events-none absolute left-0 top-0 h-[384px] w-[200%] origin-top-left scale-50 border-0"
+              srcDoc={srcDoc((a as ChatActionT & { preview: { html: string; css: string } }).preview.html, (a as ChatActionT & { preview: { html: string; css: string } }).preview.css)} />
+          </div>
+        </div>
+      )}
       {a.status === "pending" ? (
         <div className="mt-2 flex gap-1.5">
           <button className="btn-primary btn-sm" disabled={pending} onClick={() => decide(true)}><Check size={12} />承認</button>

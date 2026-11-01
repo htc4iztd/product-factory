@@ -593,3 +593,57 @@ def decide_approvals(product_id: str, body: ApprovalBody, c: Caller = Depends(ca
     from . import approvals
 
     return approvals.decide(_p(c, product_id, True), c.user, body.keys, body.accept)
+
+
+# ---------------- フレームワークのライブラリと、工程ごとの組み合わせ ----------------
+@router.get("/frameworks")
+def get_frameworks(c: Caller = Depends(caller)):
+    from . import fwlib
+
+    return {"frameworks": list(fwlib.library(c.tenant).values()), "kinds": fwlib.KINDS}
+
+
+class FrameworkBody(BaseModel):
+    name: str = Field(min_length=1, max_length=200)
+    category: str = Field(default="", max_length=60)
+    description: str = Field(default="", max_length=2000)
+    stages: list[str] = Field(default_factory=list, max_length=14)
+    blocks: list[dict] = Field(min_length=1, max_length=30)
+
+
+@router.put("/frameworks/{fw_id}")
+def put_framework(fw_id: str, body: FrameworkBody, c: Caller = Depends(caller)):
+    from . import fwlib
+
+    _admin(c)
+    return fwlib.save(c.tenant, c.user, fw_id, body.model_dump())
+
+
+@router.delete("/frameworks/{fw_id}")
+def delete_framework(fw_id: str, c: Caller = Depends(caller)):
+    from . import fwlib
+
+    _admin(c)
+    fwlib.delete(c.tenant, fw_id)
+    return {"ok": True}
+
+
+@router.get(P + "/stages/{stage_id}/frameworks")
+def get_stage_frameworks(product_id: str, stage_id: str, c: Caller = Depends(caller)):
+    from . import fwlib
+
+    p = _p(c, product_id)
+    items, custom = fwlib.attached(p.id, stage_id)
+    return {"items": items, "customized": custom, "suggested": [
+        f["id"] for f in fwlib.library(c.tenant).values() if stage_id in (f.get("stages") or [])]}
+
+
+class StageFrameworksBody(BaseModel):
+    items: list[dict] = Field(default_factory=list, max_length=20)
+
+
+@router.put(P + "/stages/{stage_id}/frameworks")
+def put_stage_frameworks(product_id: str, stage_id: str, body: StageFrameworksBody, c: Caller = Depends(caller)):
+    from . import fwlib
+
+    return {"items": fwlib.set_attached(_p(c, product_id, True), c.user, stage_id, body.items)}

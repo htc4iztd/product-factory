@@ -15,7 +15,7 @@ import datetime as dt
 from pydantic import BaseModel
 from sqlalchemy import select
 
-from . import cron, jobs, llm, llmconf, repo
+from . import cron, fwlib, jobs, llm, llmconf, repo
 from . import frameworks as fx
 from .db import AgentIssue, DailyMeeting, IssueJournal, JobRun, PmNote, Product, session
 from .stages import STAGE_BY_ID
@@ -230,7 +230,7 @@ def _domain_material(product: Product, pm: str, since: dt.datetime, mid: int) ->
 def _deliverables(product: Product, pm: str) -> str:
     out = []
     for k in DOMAIN[pm]:
-        st, fw = STAGE_BY_ID[k], fx.FRAMEWORK_BY_STAGE[k]
+        st, fw = STAGE_BY_ID[k], fwlib.of(product.id, k)
         out.append(fx.to_markdown(st, fw, repo.draft(product.id, k))[:6000])
     return "\n\n".join(out)
 

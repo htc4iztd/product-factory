@@ -18,7 +18,7 @@ from pydantic import BaseModel
 from sqlalchemy import select
 
 from . import frameworks as fx
-from . import jobs, llm, llmconf, office, repo
+from . import fwlib, jobs, llm, llmconf, office, repo
 from .db import ImportDoc, JobRun, Product, session
 from .stages import STAGE_BY_ID, STAGES
 
@@ -145,19 +145,21 @@ def get(product: Product, doc_id: int) -> dict:
 
 
 # ---------------- ジョブ ----------------
-def _fields_brief(sid: str) -> str:
-    fw = fx.FRAMEWORK_BY_STAGE[sid]
+def _fields_brief(sid: str, product_id: str | None = None) -> str:
+    fw = fwlib.of(product_id, sid)
     st = STAGE_BY_ID[sid]
     fields = "／".join(f"{f.key}:{f.label}" + (f"（{f.hint[:40]}）" if f.hint else "") for f in fw.fields)
     return f"- {sid} {st.no}{st.name}（{fw.title}）：{fields}"
 
 
-def _route(conn, text: str, outline: list[str], candidates: list[str]) -> list[RouteItem]:
+def _route(
+    conn, text: str, outline: list[str], candidates: list[str], product_id: str | None = None
+) -> list[RouteItem]:
     if conn.provider == "stub":
         llm._record("stub", 0, 0)
         out = []
         for sid in candidates:
-            fw = fx.FRAMEWORK_BY_STAGE[sid]
+            fw = fwlib.of(product_id, sid)
             hit = [f.key for f in fw.fields if f.label in text]
             if hit:
                 out.append(RouteItem(stage=sid, fields=hit, why="項目名が資料に出てくる"))
@@ -167,7 +169,7 @@ def _route(conn, text: str, outline: list[str], candidates: list[str]) -> list[R
         "- 資料に具体的な中身（表・手順・値・定義）がある項目だけを選ぶ。名前が出てくるだけの項目は選ばない。\n"
         "- 工程は多くても6つ。stage は下の一覧の id（s01 など）、fields は項目の key。\n"
         "- why には、資料のどこ（シート名・スライド・章）が根拠かを短く書く。\n\n"
-        "## 工程と項目\n" + "\n".join(_fields_brief(s) for s in candidates) + "\n\n"
+        "## 工程と項目\n" + "\n".join(_fields_brief(s, product_id) for s in candidates) + "\n\n"
         "## 資料の見出し\n" + "\n".join(f"- {h}" for h in outline[:200]) + "\n\n"
         f"## 資料（冒頭）\n{text[:40000]}\n"
     )
@@ -175,7 +177,7 @@ def _route(conn, text: str, outline: list[str], candidates: list[str]) -> list[R
     ok = []
     for it in r.stages:
         if it.stage in candidates:
-            fw = fx.FRAMEWORK_BY_STAGE[it.stage]
+            fw = fwlib.of(product_id, it.stage)
             keys = [k for k in it.fields if fw.get(k) is not None]
             if keys:
                 ok.append(RouteItem(stage=it.stage, fields=keys, why=it.why))
@@ -183,7 +185,7 @@ def _route(conn, text: str, outline: list[str], candidates: list[str]) -> list[R
 
 
 def _map(conn, product: Product, sid: str, keys: list[str], text: str, filename: str) -> list[llm.Proposal]:
-    st, fw = STAGE_BY_ID[sid], fx.FRAMEWORK_BY_STAGE[sid]
+    st, fw = STAGE_BY_ID[sid], fwlib.of(product.id, sid)
     fields = [f for f in fw.fields if f.key in keys]
     if conn.provider == "stub":
         llm._record("stub", 0, 0)
@@ -219,7 +221,7 @@ def _map(conn, product: Product, sid: str, keys: list[str], text: str, filename:
 
 def _apply(product: Product, user: str, sid: str, props: list[llm.Proposal], mode: str, filename: str,
            model: str) -> list[dict]:
-    fw = fx.FRAMEWORK_BY_STAGE[sid]
+    fw = fwlib.of(product.id, sid)
     draft = repo.draft(product.id, sid)
     out, pending = [], []
     for p in props:
@@ -262,7 +264,7 @@ def run(job_id: str) -> None:
     conn = llmconf.resolve(product.tenant_id)
     try:
         with jobs.task(job_id, "route"):
-            routes = _route(conn, text, outline, _candidates(product.id, only))
+            routes = _route(conn, text, outline, _candidates(product.id, only), product.id)
             hits = "、".join(f"{STAGE_BY_ID[r.stage].no}{len(r.fields)}項目" for r in routes)
             jobs.set_task(job_id, "route", detail=hits or "あてはまる工程なし")
         jobs.define_tasks(job_id, [
@@ -335,7 +337,7 @@ def docs_context(product_id: str, key: str, limit: int = 16000) -> str:
             where = "、".join(f"{STAGE_BY_ID[x].no}{STAGE_BY_ID[x].name}" for x in stages if x in STAGE_BY_ID)
             lines.append(f"- 資料{i}「{name}」（{at:%m/%d}）→ {where or '割り当てなし'}\n  冒頭：{text[:1200]}")
         return "\n".join(lines)
-    st, fw = STAGE_BY_ID[key], fx.FRAMEWORK_BY_STAGE[key]
+    st, fw = STAGE_BY_ID[key], fwlib.of(product_id, key)
     words = [st.name, *(f.label for f in fw.fields)]
     mine = rows
     out, used = [], 0

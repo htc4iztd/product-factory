@@ -19,7 +19,7 @@ from pydantic import BaseModel
 from sqlalchemy import func, select
 
 from . import frameworks as fx
-from . import jobs, llm, llmconf, ontology, repo
+from . import fwlib, jobs, llm, llmconf, ontology, repo
 from .db import JobRun, Product, Variant, session
 from .llmconf import Conn
 from .stages import STAGE_BY_ID, STAGES
@@ -60,7 +60,7 @@ def _upstream(product_id: str, until: str) -> tuple[dict[str, str], dict]:
     for sid in order[: order.index(until) + 1]:
         if not rs[sid].enabled:
             continue
-        st, fw = STAGE_BY_ID[sid], fx.FRAMEWORK_BY_STAGE[sid]
+        st, fw = STAGE_BY_ID[sid], fwlib.of(product_id, sid)
         art = repo.confirmed_artifact(product_id, sid)
         data = art.data if art is not None and art.data else repo.draft(product_id, sid)
         based[sid] = art.version if art is not None and art.data else "draft"
@@ -167,12 +167,12 @@ def _build_variant(job_id: str, conn: Conn, product: Product, vid: int, upstream
     try:
         for sid in stages:
             with jobs.task(job_id, f"{label}:{sid}"):
-                st, fw = STAGE_BY_ID[sid], fx.FRAMEWORK_BY_STAGE[sid]
+                st, fw = STAGE_BY_ID[sid], fwlib.of(product.id, sid)
                 ups = dict(upstream)
                 ups["この案（パターン）"] = f"{title}\n{concept}\n前提：" + "／".join(assumptions)
                 for prev, d in drafts.items():   # この案ですでに作った後工程
                     ups[f"{STAGE_BY_ID[prev].no} {STAGE_BY_ID[prev].name}（この案）"] = fx.to_markdown(
-                        STAGE_BY_ID[prev], fx.FRAMEWORK_BY_STAGE[prev], d)
+                        STAGE_BY_ID[prev], fwlib.of(product.id, prev), d)
                 turn = llm.converse(conn, st, fw, product.idea, fx.empty_draft(fw), ups, [],
                                     f"「{title}」の考え方と前提に従い、上流の決定と矛盾しないように、すべての項目の下書きを作ってください。"
                                     "この案らしさ（他の案との違い）が項目に表れるようにしてください。")
@@ -254,11 +254,11 @@ PROTO_RULES = (
 def prototype(conn: Conn, product: Product, title: str, concept: str, spec: dict, drafts: dict) -> str:
     if conn.provider == "stub":
         return _stub_prototype(product, title, concept, spec)
-    fw = fx.FRAMEWORK_BY_STAGE["s06"]
+    fw = fwlib.of(product.id, "s06")
     spec_md = fx.to_markdown(STAGE_BY_ID["s06"], fw, spec)
     extra = ""
     if "s09" in drafts:
-        extra = fx.to_markdown(STAGE_BY_ID["s09"], fx.FRAMEWORK_BY_STAGE["s09"], drafts["s09"])[:20000]
+        extra = fx.to_markdown(STAGE_BY_ID["s09"], fwlib.of(product.id, "s09"), drafts["s09"])[:20000]
     prompt = (
         f"プロダクト「{product.name}」の「{title}」の試作を作ります。考え方：{concept}\n"
         "下のUXデザイン（ストーリー・ユーザーフロー・画面）を、ブラウザで触れる試作にしてください。\n" + PROTO_RULES
@@ -319,7 +319,7 @@ def variant_dict(v: Variant, full: bool = False) -> dict:
          "adopted_by": v.adopted_by, "adopted_at": v.adopted_at.isoformat() if v.adopted_at else None,
          "created_at": v.created_at.isoformat()}
     if full:
-        d["markdown"] = {sid: fx.to_markdown(STAGE_BY_ID[sid], fx.FRAMEWORK_BY_STAGE[sid], dr)
+        d["markdown"] = {sid: fx.to_markdown(STAGE_BY_ID[sid], fwlib.of(v.product_id, sid), dr)
                          for sid, dr in (v.drafts or {}).items()}
     return d
 
@@ -360,7 +360,7 @@ def prototype_html(product: Product, number: int) -> str:
 
 
 def _copy_to_main(product: Product, sid: str, d: dict, user: str, number: int) -> list:
-    fw = fx.FRAMEWORK_BY_STAGE[sid]
+    fw = fwlib.of(product.id, sid)
     values = {}
     for f in fw.fields:
         if f.key in d:
@@ -407,7 +407,7 @@ def variant_stage(product: Product, number: int, sid: str) -> dict:
             raise AutodevError(404, f"PP-{number} には {st.no}{st.name} の下書きがありません")
         return {"number": v.number, "key": f"PP-{v.number}", "title": v.title, "concept": v.concept,
                 "assumptions": v.assumptions or [], "status": v.status, "draft": d,
-                "markdown": fx.to_markdown(STAGE_BY_ID[sid], fx.FRAMEWORK_BY_STAGE[sid], d)}
+                "markdown": fx.to_markdown(STAGE_BY_ID[sid], fwlib.of(product.id, sid), d)}
 
 
 def adopt_stage(product: Product, user: str, number: int, sid: str) -> dict:

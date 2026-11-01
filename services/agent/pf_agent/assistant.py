@@ -19,13 +19,13 @@ from pydantic import BaseModel, Field
 from sqlalchemy import or_, select
 
 from . import frameworks as fx
-from . import llm, llmconf, repo
+from . import fwlib, llm, llmconf, repo
 from .db import AgentIssue, AssistantMessage, Product, session
 from .stages import STAGE_BY_ID, STAGES
 from .team import DOMAIN, KEYS, PM_OF, PMS, TeamError, _iso, name_of
 
 RESPONDERS = (*PMS, "platform")
-ACTION_TYPES = ("set_field", "issue_create", "issue_update", "schedule", "agent_enabled", "platform_act")
+ACTION_TYPES = ("set_field", "issue_create", "issue_update", "schedule", "agent_enabled", "platform_act", "ui_page")
 PAGES = {
     "": ("dashboard", "ダッシュボード"),
     "board": ("board", "掲示板"),
@@ -34,6 +34,7 @@ PAGES = {
     "team": ("team", "エージェントの組織"),
     "cast": ("cast", "ペルソナ・スキル・ツール"),
     "schedule": ("schedule", "スケジュール"),
+    "frameworks": ("frameworks", "フレームワーク"),
     "platform": ("platform", "プラットフォーム"),
     "reports": ("reports", "報告資料"),
     "agents": ("agents", "定期の仕事"),
@@ -42,7 +43,7 @@ PAGES = {
     "docs": ("docs", "ドキュメント"),
     "settings": ("settings", "ステージの設定"),
 }
-PLATFORM_KINDS = {"platform", "schedule", "cast", "team", "factory", "agents"}
+PLATFORM_KINDS = {"platform", "schedule", "cast", "team", "factory", "agents", "frameworks"}
 
 
 class AssistantError(Exception):
@@ -61,6 +62,9 @@ def parse_path(path: str) -> dict:
     pid, rest = m.group(1), (m.group(2) or "")
     parts = rest.split("/") if rest else []
     ctx = {"path": path, "product_id": pid}
+    if parts[:1] == ["s"] and len(parts) > 2 and parts[1] in STAGE_BY_ID and parts[2] == "ui":
+        st = STAGE_BY_ID[parts[1]]
+        return {**ctx, "kind": "ui", "stage_id": st.id, "label": f"{st.no}{st.name}の UI エディタ"}
     if parts[:1] == ["s"] and len(parts) > 1 and parts[1] in STAGE_BY_ID:
         st = STAGE_BY_ID[parts[1]]
         return {**ctx, "kind": "stage", "stage_id": st.id, "label": f"{st.no}{st.name}"}
@@ -111,7 +115,7 @@ def route(conn, ctx: dict, text: str) -> str:
         return ctx["agent"]
     if k in PLATFORM_KINDS or not ctx.get("product_id"):
         return "platform"
-    if k == "stage":
+    if k in ("stage", "ui"):
         return PM_OF[ctx["stage_id"]]
     if k == "pm":
         return ctx["pm"]
@@ -161,6 +165,10 @@ class ActionOut(BaseModel):
     keys: list[str] = Field(default_factory=list, description="schedule・agent_enabled：エージェントの key")
     cron: str = Field(default="", description="schedule：cron（分 時 日 月 曜日）")
     enabled: str = Field(default="", description="agent_enabled：on か off")
+    page_id: str = Field(default="", description="ui_page：書き換える画面の id（新しい画面なら空）")
+    screen: str = Field(default="", description="ui_page：画面一覧の ID（SC-01 など）")
+    html: str = Field(default="", description="ui_page：画面の HTML（body の中身）")
+    css: str = Field(default="", description="ui_page：画面の CSS")
     reason: str = ""
 
 
@@ -205,7 +213,7 @@ def prepare_action(tenant: str, product: Product | None, responder: str, a: Acti
         sid = a.stage_id
         if sid not in STAGE_BY_ID:
             raise ValueError(f"工程 {sid} はありません")
-        f = fx.FRAMEWORK_BY_STAGE[sid].get(a.field)
+        f = fwlib.of((product.id if product else None), sid).get(a.field)
         if f is None:
             raise ValueError(f"{STAGE_BY_ID[sid].name}に項目 {a.field} はありません")
         new = fx.coerce(f, _value(f, a.value))
@@ -280,6 +288,28 @@ def prepare_action(tenant: str, product: Product | None, responder: str, a: Acti
             "after": "定期実行で動かす" if on else "定期実行を止める",
             "args": {"keys": keys, "enabled": on},
         }
+    if a.type == "ui_page":
+        if product is None:
+            raise ValueError("プロダクトを開いてから指示してください")
+        if not a.html.strip():
+            raise ValueError("画面の HTML が空です")
+        pages = (repo.draft(product.id, "s06").get("ui") or {}).get("pages") or []
+        old = next((p for p in pages if a.page_id and p["id"] == a.page_id), None)
+        name = (a.subject or (old or {}).get("name") or a.screen or "新しい画面")[:120]
+        return {
+            **base,
+            "title": f"UI デザイン「{name}」を{'書き換える' if old else '作る'}",
+            "before": fx.ui_text(old["html"]) if old else "（新しい画面）",
+            "after": fx.ui_text(a.html),
+            "preview": {"html": a.html[:300_000], "css": a.css[:200_000]},
+            "args": {
+                "page_id": (old or {}).get("id") or "",
+                "name": name,
+                "screen": a.screen or (old or {}).get("screen", ""),
+                "html": a.html[:300_000],
+                "css": a.css[:200_000],
+            },
+        }
     if a.type == "platform_act":
         from . import platform_agent as pa
 
@@ -330,10 +360,20 @@ def _stub(product: Product | None, ctx: dict, responder: str, text: str) -> Assi
     llm._record("stub", 0, 0)
     where = ctx.get("label", "")
     acts: list[ActionOut] = []
+    if ctx["kind"] == "ui" and product is not None:
+        # UI エディタで話すと、言葉から画面を組んで承認依頼にする（スタブ：決まった部品で組む）
+        title = re.sub(r"(画面|ページ)?を?(作って|作る|直して|変えて|にして).*$", "", text.strip())[:40] or "新しい画面"
+        html = (
+            f'<header class="pf-nav"><strong>{product.name}</strong></header><main class="pf-main">'
+            f'<h1>{title}</h1><p>{text[:120]}</p><input class="pf-input" placeholder="入力"/>'
+            '<button class="pf-btn">決定</button></main>'
+        )
+        acts.append(ActionOut(type="ui_page", subject=title, html=html, reason="PdM の指示から画面を組みました"))
     if ctx["kind"] == "stage":
         sid = ctx["stage_id"]
         m = re.match(r"^「?(.+?)」?を「?(.+?)」?に(して|する|変えて)", text.strip())
-        f = next((x for x in fx.FRAMEWORK_BY_STAGE[sid].fields if m and x.label == m.group(1)), None)
+        fields = fwlib.of(product.id if product else None, sid).fields
+        f = next((x for x in fields if m and x.label == m.group(1)), None)
         if f is not None and f.kind == fx.T:
             acts.append(ActionOut(type="set_field", stage_id=sid, field=f.key, value=m.group(2), reason="PdM の指示"))
         elif responder in PMS and re.search(r"して|作って|直して|確かめて|見直して", text):
@@ -390,7 +430,9 @@ def _prompt(
         "- actions：何かを変えるときだけ。自分では実行せず、PdM の承認を待つ承認依頼として出す。種類は "
         "set_field（工程の項目を書き換える：stage_id・field・value）、issue_create（担当に動いてもらう：assignee・"
         "subject・description・stage_id。PM のときだけ）、issue_update（number・status・notes。PM のときだけ）、"
-        "schedule（keys・cron）、agent_enabled（keys・enabled は on/off）、platform_act（number は問題の id）。"
+        "schedule（keys・cron）、agent_enabled（keys・enabled は on/off）、platform_act（number は問題の id）、"
+        "ui_page（⑥UIデザインの画面：page_id は書き換える画面の id か空、subject は画面名、screen は SC-xx、"
+        "html は body の中身、css。クラス pf-nav・pf-main・pf-btn・pf-input・pf-card が使える）。"
         "質問への答えだけなら空にする。\n\n"
         + (f"## ページの中身\n{material}\n\n" if material else "")
         + (f"## 添えられたもの\n{extra}\n\n" if extra else "")
@@ -579,6 +621,23 @@ def _execute(tenant: str, product: Product | None, user: str, a: dict) -> str:
     if a["type"] == "agent_enabled":
         schedule.bulk(product, x["keys"], None, x["enabled"])
         return "動かします" if x["enabled"] else "止めました"
+    if a["type"] == "ui_page":
+        import uuid as _uuid
+
+        cur = repo.draft(product.id, "s06").get("ui") or {}
+        pages = list(cur.get("pages") or [])
+        pid = x["page_id"] or f"p{_uuid.uuid4().hex[:6]}"
+        page = {
+            "id": pid,
+            "name": x["name"],
+            "screen": x["screen"],
+            "html": x["html"],
+            "css": x["css"],
+            "project": None,
+        }
+        pages = [page if p["id"] == pid else p for p in pages] if any(p["id"] == pid for p in pages) else [*pages, page]
+        repo.set_field(product.id, "s06", "ui", {"pages": pages}, user, "chat")
+        return f"UI デザインの「{x['name']}」に反映しました"
     if a["type"] == "platform_act":
         from . import platform_agent as pa
 

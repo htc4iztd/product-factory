@@ -9,8 +9,7 @@ from __future__ import annotations
 
 from sqlalchemy import select
 
-from . import agents, repo
-from . import frameworks as fx
+from . import agents, fwlib, repo
 from .assistant import _show
 from .db import AgentFinding, ChatMessage, ChatSession, Product, session
 from .stages import STAGE_BY_ID
@@ -60,7 +59,7 @@ def pending(product: Product) -> list[dict]:
     for m in msgs:
         if m.stage_id not in STAGE_BY_ID:
             continue
-        fw = fx.FRAMEWORK_BY_STAGE[m.stage_id]
+        fw = fwlib.of(product.id, m.stage_id)
         for p in m.proposals or []:
             if p.get("status") != "pending":
                 continue

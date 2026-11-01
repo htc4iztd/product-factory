@@ -203,9 +203,26 @@ export type ImportDoc = {
 
 export type Column = { key: string; label: string; kind: "text" | "number"; options: string[] };
 export type FieldSpec = {
-  key: string; label: string; kind: "text" | "list" | "table" | "flows" | "er" | "states" | "specs" | "graph"; hint: string; required: boolean;
-  columns: Column[]; rows: string[]; id_prefix: string;
+  key: string; label: string; kind: "text" | "list" | "table" | "flows" | "er" | "states" | "specs" | "graph" | "matrix" | "positioning" | "diagram"; hint: string; required: boolean;
+  columns: Column[]; rows: string[]; id_prefix: string; group?: string; config?: BlockConfig;
 };
+// フレームワーク（ライブラリ）と部品
+export type Axis = { label: string; low: string; high: string };
+export type BlockConfig = { quadrants?: string[]; axes?: { x: Axis; y: Axis }; node_kinds?: string[]; layout?: Layout };
+export type Layout = { x: number; y: number; w: number; h: number };
+export type BlockDef = {
+  key: string; label: string; kind: "text" | "list" | "table" | "matrix" | "positioning" | "diagram"; hint: string; layout: Layout;
+  columns?: { key: string; label: string; kind: "text" | "number"; options: string[] }[]; rows?: string[];
+  quadrants?: string[]; axes?: { x: Axis; y: Axis }; node_kinds?: string[];
+};
+export type FrameworkDefT = {
+  id: string; name: string; category: string; description: string; stages: string[]; blocks: BlockDef[];
+  source: "builtin" | "override" | "custom";
+};
+export type FrameworkPart = { id: string; name: string; category: string; description: string; required: boolean; blocks: BlockDef[] };
+export type MatrixValue = { q1: string[]; q2: string[]; q3: string[]; q4: string[] };
+export type PositioningValue = { items: { name: string; x: number; y: number; note?: string; self?: boolean }[] };
+export type DiagramValue = { nodes: { id: string; label: string; kind?: string; x: number; y: number }[]; edges: { source: string; target: string; label?: string }[] };
 export type Row = Record<string, string | number>;
 export type FlowNode = { id: string; type: "start" | "task" | "decision" | "system" | "end"; label: string; lane: number; x: number };
 export type FlowEdge = { id: string; source: string; target: string; label: string; sourceHandle?: string; targetHandle?: string };
@@ -228,7 +245,7 @@ export type ProcSpec = {
 export type ArchNode = { id: string; label: string; kind: string; zone: string; note: string; x?: number; y?: number };
 export type ArchEdge = { id: string; source: string; target: string; label: string };
 export type ArchGraph = { nodes: ArchNode[]; edges: ArchEdge[] };
-export type FieldValue = string | string[] | Row[] | Flow[] | ErModel | StateMachine[] | ProcSpec[] | ArchGraph;
+export type FieldValue = string | string[] | Row[] | Flow[] | ErModel | StateMachine[] | ProcSpec[] | ArchGraph | MatrixValue | PositioningValue | DiagramValue;
 export type Draft = Record<string, FieldValue>;
 export type Proposal = { id: string; field: string; value: FieldValue; reason: string; status: "pending" | "accepted" | "rejected" };
 export type ChatMsg = {
@@ -240,7 +257,7 @@ export type StageReport = { content: string; model: string; created_by: string; 
 export type StageRef = { id: string; no: string; name: string; status?: string; enabled?: boolean };
 export type StageDetail = {
   id: string; no: string; name: string; phase: string;
-  framework: { view: string; title: string; summary: string; fields: FieldSpec[]; prompts: string[] };
+  framework: { view: string; title: string; summary: string; fields: FieldSpec[]; prompts: string[]; parts?: FrameworkPart[] };
   status: string; enabled: boolean; approval_required: boolean;
   pending: { kind: string; version: number } | null; audit_findings: string[] | null; missing: string[];
   current_version: number; approved_version: number; dirty: boolean;

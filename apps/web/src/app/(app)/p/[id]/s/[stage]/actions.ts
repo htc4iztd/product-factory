@@ -49,3 +49,8 @@ export async function setMarkdown(pid: string, sid: string, markdown: string): P
 export async function importAcceptance(pid: string) {
   return call(pid, `/stages/s13/import-acceptance`, "POST");
 }
+
+// 工程に足すフレームワーク（足す・外す・必須）
+export async function setStageFrameworks(pid: string, sid: string, items: { id: string; required: boolean }[]) {
+  return call(pid, `/stages/${sid}/frameworks`, "PUT", { items });
+}

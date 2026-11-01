@@ -24,6 +24,7 @@ export default async function ProductLayout({ children, params }: { children: Re
     { label: "設計PMの作業場所", href: `/p/${id}/pm/pm_design`, hint: "⑥〜⑪", keys: "設計PM pm" },
     { label: "実装PMの作業場所", href: `/p/${id}/pm/pm_impl`, hint: "⑫〜⑭", keys: "実装PM pm" },
     { label: "エージェントの組織", href: `/p/${id}/team`, hint: "使命・動く時刻・タスク・顔", keys: "team 組織 タスク 顔" },
+    { label: "フレームワーク", href: `/p/${id}/frameworks`, hint: "PEST・5F・SWOT・BMC などと、独自のフレームワークのエディタ", keys: "framework フレームワーク pest swot bmc ファイブフォース 3c stp vrio" },
     { label: "スケジュール", href: `/p/${id}/schedule`, hint: "エージェントが定期的に動く予定と時間割", keys: "schedule スケジュール 予定 定期 時間割 cron" },
     { label: "ペルソナ・スキル・ツール", href: `/p/${id}/cast`, hint: "エージェントの人物像と、使えるスキル・ツール", keys: "persona ペルソナ skill スキル tool ツール 割り当て" },
     { label: "プロダクト・キャンバス", href: `/p/${id}/canvas`, hint: "プロダクトのイメージ画像", keys: "canvas 画像 絵 イメージ" },

@@ -8,6 +8,7 @@ from sqlalchemy import func, select
 
 from . import audit as audit_mod
 from . import frameworks as fx
+from . import fwlib
 from .db import Artifact, AuditLog, ChatMessage, ChatSession, PhaseReview, Product, StageReport, StageRun, session
 from .stages import (
     AWAITING_APPROVAL,
@@ -107,7 +108,7 @@ def confirmed_artifacts(product_id: str, stage_ids) -> dict[str, str]:
 
 # ---------------- 下書き ----------------
 def _initial_draft(s, r: StageRun) -> dict:
-    fw = fx.FRAMEWORK_BY_STAGE[r.stage_id]
+    fw = fwlib.of(r.product_id, r.stage_id)
     draft = fx.empty_draft(fw)
     a = _artifact(s, r.product_id, r.stage_id, r.current_version)
     if a is not None and a.data:
@@ -143,7 +144,7 @@ def _touch(r: StageRun) -> str | None:
 
 
 def set_field(product_id: str, stage_id: str, key: str, value, actor: str, source: str) -> dict:
-    fw = fx.FRAMEWORK_BY_STAGE[stage_id]
+    fw = fwlib.of(product_id, stage_id)
     f = fw.get(key)
     if f is None:
         raise KeyError(key)
@@ -164,7 +165,7 @@ def set_field(product_id: str, stage_id: str, key: str, value, actor: str, sourc
 
 def set_fields(product_id: str, stage_id: str, values: dict, actor: str, source: str) -> list[str]:
     """複数の項目をまとめて書き換える（文書からの反映）。変わった項目の key を返す。"""
-    fw = fx.FRAMEWORK_BY_STAGE[stage_id]
+    fw = fwlib.of(product_id, stage_id)
     with session() as s:
         r = _run(s, product_id, stage_id)
         d = _current(s, r)
@@ -343,7 +344,7 @@ def decide_proposal(product_id: str, stage_id: str, message_id: int, proposal_id
 def commit(product_id: str, stage_id: str, actor: str, note: str) -> dict:
     """下書きを新しい版として更新する。承認が要るなら承認待ち、要らなければ完了。"""
     stage = STAGE_BY_ID[stage_id]
-    fw = fx.FRAMEWORK_BY_STAGE[stage_id]
+    fw = fwlib.of(product_id, stage_id)
     d = draft(product_id, stage_id)
     findings = fx.check(fw, d)
     content = fx.to_markdown(stage, fw, d)
