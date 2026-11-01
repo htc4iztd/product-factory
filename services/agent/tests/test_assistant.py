@@ -128,13 +128,24 @@ def test_mentions_routing_schedule_and_attachments(client):
     m = say(c, f"/p/{pid}/s/s01", "このメモを読んで", attachments=[up["id"]]).json()["message"]
     assert m["attachments"][0]["filename"] == "メモ.md"
     assert say(c, "/", "x", attachments=[up["id"]]).status_code == 422
-    # チャットは1つ：自分の発言と答えが順に並ぶ。ほかの人の発言は見えない
-    f = c.get("/assistant/messages", headers=H).json()
+    # 対話はプロダクトごと：このプロダクトのページではこのプロダクトの対話だけ（プロダクトの外の発言は出ない）
+    f = c.get(f"/assistant/messages?product={pid}", headers=H).json()
     mine = [x for x in f if x["role"] == "pdm"]
-    assert [x["role"] for x in f[:2]] == ["pdm", "agent"] and len(mine) == 5
+    assert [x["role"] for x in f[:2]] == ["pdm", "agent"] and len(mine) == 4
+    assert all(x["product_id"] == pid for x in f)
+    other = c.post("/products", headers=H, json={"name": "別", "idea": "y"}).json()["id"]
+    assert c.get(f"/assistant/messages?product={other}", headers=H).json() == []
+    say(c, f"/p/{other}/s/s01", "別のプロダクトの話")
+    assert all(x["product_id"] == pid for x in c.get(f"/assistant/messages?product={pid}", headers=H).json())
+    # プロダクトの外では、プロダクトの外の対話だけ
+    outside = c.get("/assistant/messages", headers=H).json()
+    assert {x["text"] for x in outside if x["role"] == "pdm"} == {"全体は？"}
     # ほかの人の発言は見えない（テナントの全員への知らせ＝プラットフォームの【要対応】だけは見える）
-    assert all(x["role"] == "agent" and x["text"].startswith("【要対応】")
-               for x in c.get("/assistant/messages", headers=OTHER_USER).json())
+    assert all(
+        x["role"] == "agent" and x["text"].startswith("【要対応】")
+        for x in c.get(f"/assistant/messages?product={pid}", headers=OTHER_USER).json()
+    )
+    assert c.get("/assistant/messages?product=nope", headers=H).status_code == 404
     refs = [x["ref"] for x in c.get(f"/assistant/mentions?product={pid}", headers=H).json()]
     assert "platform" in refs and "s06" in refs and f"/p/{pid}/schedule" in refs
 

@@ -13,7 +13,7 @@ page.setDefaultTimeout(30000);
 const shot = (n, full = false) => page.screenshot({ path: `${SHOTS}/${n}.png`, fullPage: full });
 const btn = (name, exact = false) => page.getByRole("button", { name, exact });
 
-// ファクトリー全体で1つのチャット：画面下の欄に書いて送る → 変更は承認依頼に「承認」で答える
+// ファクトリー全体で1つのチャット：右のチャット欄の下の入力欄に書いて送る → 変更は承認依頼に「承認」で答える
 const chatSay = async (text) => {
   await page.getByLabel("チャットに話す").fill(text);
   await page.getByLabel("チャットに話す").press("Enter");
@@ -76,6 +76,7 @@ await page.keyboard.press("Control+k");
 await page.getByLabel("話しかける・移動する").last().fill("@プラットフォーム 失敗しているジョブはある？");
 await page.getByRole("option", { name: /チャットでプラットフォームに話す/ }).click();
 await page.getByText("答える人：プラットフォーム").waitFor();
+await page.waitForFunction(() => (document.querySelector('textarea[aria-label="チャットに話す"]')?.value ?? "").length > 3);
 await page.getByLabel("チャットに話す").press("Enter");
 await page.getByText(/（スタブ）プラットフォームです。プラットフォームについて/).last().waitFor();
 await shot("p3-command");

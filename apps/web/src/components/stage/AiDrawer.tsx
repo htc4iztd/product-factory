@@ -54,7 +54,7 @@ export function AiDrawer(props: {
   sessions: ChatSession[]; sessionId: string | null; report: StageReport | null; agent?: StageDetail["agent"];
   pmMessages?: PmMessageT[]; versions?: Record<string, string>;
 }) {
-  // PdM が話すのは画面下のチャット（ファクトリー全体で1つ）。ここは届いた案の採用・却下と、参照だけ
+  // PdM が話すのは右のチャット（ファクトリー全体で1つ）。ここは届いた案の採用・却下と、参照だけ
   const { initial, decisions = [], references: base, pmMessages: _pm, versions: _v, ...panel } = props;
   // 確定した決定記録（このステージ宛て・下書きの ID に触れるもの）も参照タブに並べる
   const references = decisions.length ? [...base, {
@@ -92,7 +92,7 @@ export function AiDrawer(props: {
         <aside className="w-[400px] border-r border-zinc-200">
           {state === "props"
             ? <ChatPanel {...panel} onClose={() => set("closed")}
-                disabled={panel.disabled ?? "話しかけるのは画面下のチャットからです（この工程について話すと、領域の PM が答えます）。ここでは届いた案の採用・却下ができます。"} />
+                disabled={panel.disabled ?? "話しかけるのは右のチャットからです（この工程について話すと、領域の PM が答えます）。ここでは届いた案の採用・却下ができます。"} />
             : <References refs={references} onClose={() => set("closed")} />}
         </aside>
       )}

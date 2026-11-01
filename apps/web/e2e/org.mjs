@@ -13,7 +13,7 @@ page.setDefaultTimeout(30000);
 const shot = (n, full = false) => page.screenshot({ path: `${SHOTS}/${n}.png`, fullPage: full });
 const btn = (name, exact = false) => page.getByRole("button", { name, exact });
 
-// ファクトリー全体で1つのチャット：画面下の欄に書いて送る → 変更は承認依頼に「承認」で答える
+// ファクトリー全体で1つのチャット：右のチャット欄の下の入力欄に書いて送る → 変更は承認依頼に「承認」で答える
 const chatSay = async (text) => {
   await page.getByLabel("チャットに話す").fill(text);
   await page.getByLabel("チャットに話す").press("Enter");
@@ -42,7 +42,7 @@ await btn("この内容でプロダクトをつくる").click();
 await page.waitForURL(/\/p\/[0-9a-f]+$/);
 const pid = page.url().split("/p/")[1];
 
-// ダッシュボード：3人の PM と14の担当。画面下のチャットで「①の…」→ ①の話として事業 PM が答え、起票の承認依頼
+// ダッシュボード：3人の PM と14の担当。右のチャットで「①の…」→ ①の話として事業 PM が答え、起票の承認依頼
 await page.getByRole("complementary", { name: "チャット" }).waitFor();
 await page.locator(".react-flow__node-agent").filter({ hasText: "事業PM" }).waitFor();
 await chatSay("①の下書きを作って。対象は共働き世帯");
@@ -51,6 +51,12 @@ await card1.getByText("変更後").waitFor();
 await shot("o1-dashboard");
 await approveLast();
 await page.getByText(/#1 を起票しました/).first().waitFor();
+// チャットを閉じると、見出しのボタン（全エージェントを今すぐ動かす・Issue・掲示板）の並びに「チャット」が出る
+await btn("チャットを閉じる").click();
+const head = page.locator("header").first();
+await head.getByRole("button", { name: "全エージェントを今すぐ動かす" }).waitFor();
+await head.getByRole("button", { name: "チャットを開く" }).click();
+await page.getByRole("complementary", { name: "チャット" }).waitFor();
 // Issue：担当が実行して工程に書き込み、PM に返し、PM が確かめて終了にする（記録が残る）
 await page.goto(`${BASE}/p/${pid}/issues/1`);
 for (let i = 0; i < 40 && !(await page.getByText("終了", { exact: true }).first().isVisible()); i++) { await page.waitForTimeout(1000); await page.reload(); }
@@ -90,7 +96,7 @@ const card2 = page.getByRole("group", { name: /承認依頼：①アイディエ
 await card2.getByRole("button", { name: "否認", exact: true }).click();
 await card2.getByText(/否認しました/).waitFor();
 await btn("案タブ").click();
-await page.getByText(/話しかけるのは画面下のチャットから/).waitFor();
+await page.getByText(/話しかけるのは右のチャットから/).waitFor();
 await shot("o6-stage");
 // @ で別のページ・エージェントを指す（開いていなくても話せる）
 await page.getByLabel("チャットに話す").fill("@設計");
@@ -124,6 +130,7 @@ await page.waitForURL(/\/s\/s09$/);
 await page.keyboard.press("Control+k");
 await page.getByLabel("話しかける・移動する").last().fill("@⑨ 状態遷移に取消を足して");
 await page.getByRole("option", { name: /チャットで設計PMに話す（⑨アプリケーション設計について）/ }).click();
+await page.waitForFunction(() => (document.querySelector('textarea[aria-label="チャットに話す"]')?.value ?? "").length > 3);
 await page.getByLabel("チャットに話す").press("Enter");
 await page.getByRole("group", { name: /承認依頼：⑨アプリケーション設計担当に Issue を起票する/ }).last().waitFor();
 await shot("o9-command");

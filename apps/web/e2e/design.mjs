@@ -13,7 +13,7 @@ page.on("dialog", (d) => d.accept(d.type() === "prompt" ? "注文" : undefined))
 const shot = (n, full = false) => page.screenshot({ path: `${SHOTS}/${n}.png`, fullPage: full });
 const btn = (name, exact = false) => page.getByRole("button", { name, exact });
 
-// ファクトリー全体で1つのチャット：画面下の欄に書いて送る → 変更は承認依頼に「承認」で答える
+// ファクトリー全体で1つのチャット：右のチャット欄の下の入力欄に書いて送る → 変更は承認依頼に「承認」で答える
 const chatSay = async (text) => {
   await page.getByLabel("チャットに話す").fill(text);
   await page.getByLabel("チャットに話す").press("Enter");

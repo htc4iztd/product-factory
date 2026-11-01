@@ -6,15 +6,15 @@ import { Avatar } from "@/components/rail/Avatar";
 const time = (t: string) => new Date(t).toLocaleString("ja-JP", { timeZone: "Asia/Tokyo", month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit" });
 export const PM_AREA: Record<string, string> = { pm_biz: "①〜⑤ 事業", pm_design: "⑥〜⑪ 要求・設計", pm_impl: "⑫〜⑭ 構築・リリース" };
 
-// PdM と PM の対話の記録（読むだけ）。話しかけるのは画面下のチャット（ファクトリー全体で1つ）
-export function PmLog({ pid, messages, versions = {}, title = "PM との対話の記録", empty = "まだありません。画面下のチャットで話しかけると、ここにも残ります。", height = "max-h-[480px]" }: {
+// PdM と PM の対話の記録（読むだけ）。話しかけるのは右のチャット（ファクトリー全体で1つ）
+export function PmLog({ pid, messages, versions = {}, title = "PM との対話の記録", empty = "まだありません。右のチャットで話しかけると、ここにも残ります。", height = "max-h-[480px]" }: {
   pid: string; messages: PmMessageT[]; versions?: Record<string, string>; title?: string; empty?: string; height?: string;
 }) {
   return (
     <section className="flex min-h-0 flex-col" aria-label={title}>
       <div className="flex items-center gap-2 border-b border-zinc-100 px-4 py-2.5">
         <h2 className="text-[14px] font-semibold">{title}</h2>
-        <span className="ml-auto text-[11px] text-zinc-400">話しかけるのは画面下のチャットから</span>
+        <span className="ml-auto text-[11px] text-zinc-400">話しかけるのは右のチャットから</span>
       </div>
       <ol className={`${height} space-y-2 overflow-y-auto px-4 py-3`}>
         {messages.length === 0 && <li className="text-[12px] text-zinc-400">{empty}</li>}

@@ -1,3 +1,5 @@
+import { ChatToggle } from "@/components/assistant/AssistantShell";
+
 export function PageHeader({ crumbs, title, sub, actions, children }: {
   crumbs?: React.ReactNode; title: React.ReactNode; sub?: React.ReactNode; actions?: React.ReactNode; children?: React.ReactNode;
 }) {
@@ -10,7 +12,7 @@ export function PageHeader({ crumbs, title, sub, actions, children }: {
             <h1 className="flex flex-wrap items-center gap-2.5 text-xl font-semibold tracking-tight">{title}</h1>
             {sub && <div className="mt-1 text-[13px] text-zinc-500">{sub}</div>}
           </div>
-          {actions && <div className="flex items-center gap-2">{actions}</div>}
+          <div className="flex items-center gap-2">{actions}<ChatToggle /></div>
         </div>
         {children}
       </div>

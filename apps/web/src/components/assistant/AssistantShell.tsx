@@ -1,5 +1,5 @@
 "use client";
-import { useCallback, useEffect, useMemo, useRef, useState, useTransition } from "react";
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, useTransition } from "react";
 import { usePathname, useRouter } from "next/navigation";
 import { AtSign, Check, Library, MessageSquare, PanelRightClose, Send, X } from "lucide-react";
 import type { AssistantMsg, ChatActionT, MentionT } from "@/lib/agent";
@@ -8,7 +8,6 @@ import { Avatar } from "@/components/rail/Avatar";
 import { AttachButton, AttachChips, SentAttachments, useAttachments } from "@/components/chat/Attachments";
 import { ResearchImport } from "@/components/stage/ChatPanel";
 
-const COMPOSER = 104; // 下の入力欄の高さ（px）
 const POLL_MS = 4000;
 const PM_OF: Record<string, string> = Object.fromEntries([
   ...["s01", "s02", "s03", "s04", "s05"].map((s) => [s, "事業PM"]),
@@ -34,6 +33,21 @@ function where(path: string, choices: MentionT[], mentions: MentionT[]): { label
   return { label: page?.label ?? (seg ? seg : "ダッシュボード"), who: "内容から PM が決まります" };
 }
 
+// チャットを開くボタン：各ページの見出しのボタン（Issue・掲示板など）の並びに置く。閉じているときだけ出る
+type ChatCtl = { open: boolean; setOpen: (v: boolean) => void; unread: number; pending: number; mount: (d: number) => void };
+const ChatContext = createContext<ChatCtl | null>(null);
+export function ChatToggle() {
+  const c = useContext(ChatContext);
+  useEffect(() => { c?.mount(1); return () => c?.mount(-1); }, [c?.mount]); // eslint-disable-line react-hooks/exhaustive-deps
+  if (!c || c.open) return null;
+  return (
+    <button onClick={() => c.setOpen(true)} className="btn-secondary gap-1.5" aria-label="チャットを開く">
+      <MessageSquare size={14} />チャット{c.unread > 0 && <span className="rounded-full bg-brand-600 px-1.5 text-[10px] text-white">{c.unread}</span>}
+      {c.pending > 0 && <span className="rounded-full bg-amber-500 px-1.5 text-[10px] text-white">承認 {c.pending}</span>}
+    </button>
+  );
+}
+
 // ファクトリー全体で1つのチャット：右端に対話、下に入力欄。どのページにいても同じ1本の対話
 export function AssistantShell({ children, initialOpen }: { children: React.ReactNode; initialOpen: boolean }) {
   const path = usePathname();
@@ -43,13 +57,26 @@ export function AssistantShell({ children, initialOpen }: { children: React.Reac
   const [msgs, setMsgs] = useState<AssistantMsg[]>([]);
   const [seen, setSeen] = useState(0);
   const setOpen = (v: boolean) => { setOpenState(v); document.cookie = `pf_chat=${v ? "open" : "closed"}; path=/; max-age=31536000; samesite=lax`; };
+  const [incoming, setIncoming] = useState<{ text?: string; mention?: MentionT; n: number } | null>(null);
+  // 対話はプロダクトごと（プロダクトの外のページでは、ファクトリー全体の対話）
   const load = useCallback(async () => {
     if (document.visibilityState !== "visible") return;
     try {
-      const r = await fetch("/api/assistant/feed", { cache: "no-store" });
+      const r = await fetch(`/api/assistant/feed?product=${pid ?? ""}`, { cache: "no-store" });
       if (r.ok) setMsgs(await r.json());
     } catch { /* 次の回で読む */ }
-  }, []);
+  }, [pid]);
+  useEffect(() => { setMsgs([]); }, [pid]);
+  // ⌘K などから「チャットで話す」：チャットを開いて入力欄に入れる
+  useEffect(() => {
+    const onCompose = (e: Event) => {
+      const d = (e as CustomEvent<{ text?: string; mention?: MentionT }>).detail ?? {};
+      setOpen(true);
+      setIncoming((x) => ({ ...d, n: (x?.n ?? 0) + 1 }));
+    };
+    window.addEventListener("pf:compose", onCompose);
+    return () => window.removeEventListener("pf:compose", onCompose);
+  });
   useEffect(() => {
     load();
     const t = setInterval(load, POLL_MS);
@@ -59,11 +86,14 @@ export function AssistantShell({ children, initialOpen }: { children: React.Reac
   useEffect(() => { if (open) setSeen(lastId); }, [open, lastId]);
   const unread = msgs.filter((m) => m.id > seen && m.role === "agent").length;
   const pending = msgs.reduce((n, m) => n + m.actions.filter((a) => a.status === "pending").length, 0);
+  const [toggles, setToggles] = useState(0);
+  const mount = useCallback((d: number) => setToggles((n) => n + d), []);
   return (
-    <div className="flex min-h-screen" style={{ ["--pf-composer" as string]: `${COMPOSER}px` }}>
-      <div className="min-w-0 flex-1" style={{ paddingBottom: COMPOSER }}>{children}</div>
+    <ChatContext.Provider value={{ open, setOpen, unread, pending, mount }}>
+    <div className="flex min-h-screen">
+      <div className="min-w-0 flex-1">{children}</div>
       {open ? (
-        <aside className="sticky top-0 flex w-[400px] shrink-0 flex-col border-l border-zinc-200 bg-white" style={{ height: `calc(100vh - ${COMPOSER}px)` }} aria-label="チャット">
+        <aside className="sticky top-0 flex h-screen w-[400px] shrink-0 flex-col border-l border-zinc-200 bg-white" aria-label="チャット">
           <div className="flex items-center gap-2 border-b border-zinc-100 px-4 py-2.5">
             <MessageSquare size={15} className="text-brand-600" />
             <h2 className="text-[14px] font-semibold">チャット</h2>
@@ -71,15 +101,16 @@ export function AssistantShell({ children, initialOpen }: { children: React.Reac
             <button onClick={() => setOpen(false)} className="btn-ghost btn-sm ml-auto h-7 w-7 p-0" aria-label="チャットを閉じる"><PanelRightClose size={15} /></button>
           </div>
           <Feed msgs={msgs} onChanged={(m) => { setMsgs((xs) => xs.map((x) => (x.id === m.id ? m : x))); router.refresh(); }} />
+          <Composer path={path} pid={pid} incoming={incoming} onSent={(m) => { setMsgs((xs) => [...xs.filter((x) => x.id < m.id), m]); load(); }} />
         </aside>
-      ) : (
+      ) : toggles > 0 ? null : (
         <button onClick={() => setOpen(true)} className="btn-secondary fixed right-3 top-3 z-40 gap-1.5" aria-label="チャットを開く">
           <MessageSquare size={14} />チャット{unread > 0 && <span className="rounded-full bg-brand-600 px-1.5 text-[10px] text-white">{unread}</span>}
           {pending > 0 && <span className="rounded-full bg-amber-500 px-1.5 text-[10px] text-white">承認 {pending}</span>}
         </button>
       )}
-      <Composer path={path} pid={pid} onSent={(m) => { setMsgs((xs) => [...xs.filter((x) => x.id < m.id), m]); setOpen(true); load(); }} />
     </div>
+    </ChatContext.Provider>
   );
 }
 
@@ -150,7 +181,7 @@ function ActionCard({ m, a, onChanged }: { m: AssistantMsg; a: ChatActionT; onCh
   );
 }
 
-function Composer({ path, pid, onSent }: { path: string; pid: string | null; onSent: (m: AssistantMsg) => void }) {
+function Composer({ path, pid, incoming, onSent }: { path: string; pid: string | null; incoming: { text?: string; mention?: MentionT; n: number } | null; onSent: (m: AssistantMsg) => void }) {
   const [text, setText] = useState("");
   const [mentions, setMentions] = useState<MentionT[]>([]);
   const [choices, setChoices] = useState<MentionT[]>([]);
@@ -164,17 +195,14 @@ function Composer({ path, pid, onSent }: { path: string; pid: string | null; onS
   useEffect(() => {
     fetch(`/api/assistant/mentions?product=${pid ?? ""}`).then((r) => (r.ok ? r.json() : [])).then(setChoices).catch(() => setChoices([]));
   }, [pid]);
-  // ⌘K などから「チャットで話す」
+  // ⌘K などから「チャットで話す」（シェルが受けて渡す）
   useEffect(() => {
-    const onCompose = (e: Event) => {
-      const d = (e as CustomEvent<{ text?: string; mention?: MentionT }>).detail ?? {};
-      if (d.mention) setMentions((x) => (x.some((y) => y.ref === d.mention!.ref) ? x : [...x, d.mention!]));
-      if (d.text) setText(d.text);
-      setTimeout(() => box.current?.focus(), 10);
-    };
-    window.addEventListener("pf:compose", onCompose);
-    return () => window.removeEventListener("pf:compose", onCompose);
-  }, []);
+    if (!incoming) return;
+    const m = incoming.mention;
+    if (m) setMentions((x) => (x.some((y) => y.ref === m.ref) ? x : [...x, m]));
+    if (incoming.text) setText(incoming.text);
+    setTimeout(() => box.current?.focus(), 10);
+  }, [incoming]);
   const stage = path.match(/^\/p\/[0-9a-f]+\/s\/(s\d\d)/)?.[1] ?? null;
   const w = where(path, choices, mentions);
   const hits = useMemo(() => (query === null ? [] : choices.filter((c) => c.label.toLowerCase().includes(query.toLowerCase())).slice(0, 8)), [query, choices]);
@@ -204,9 +232,9 @@ function Composer({ path, pid, onSent }: { path: string; pid: string | null; onS
     });
   };
   return (
-    <div className="fixed inset-x-0 bottom-0 z-40 border-t border-zinc-200 bg-white/95 px-4 py-2 backdrop-blur" style={{ height: COMPOSER }} aria-label="チャットの入力">
+    <div className="relative border-t border-zinc-200 bg-white px-3 py-2" aria-label="チャットの入力">
       {query !== null && hits.length > 0 && (
-        <ul className="absolute bottom-full left-4 mb-1 w-80 overflow-hidden rounded-lg border border-zinc-200 bg-white shadow-pop" role="listbox" aria-label="メンションの候補">
+        <ul className="absolute inset-x-3 bottom-full z-10 mb-1 overflow-hidden rounded-lg border border-zinc-200 bg-white shadow-pop" role="listbox" aria-label="メンションの候補">
           {hits.map((c, i) => (
             <li key={c.kind + c.ref} role="option" aria-selected={i === idx}>
               <button onMouseDown={(e) => { e.preventDefault(); pick(c); }} className={`flex w-full items-center gap-2 px-3 py-1.5 text-left text-[12.5px] ${i === idx ? "bg-brand-50" : ""}`}>
@@ -217,7 +245,7 @@ function Composer({ path, pid, onSent }: { path: string; pid: string | null; onS
         </ul>
       )}
       {importing && pid && stage && (
-        <div className="absolute bottom-full left-4 mb-1 w-[520px]">
+        <div className="absolute inset-x-3 bottom-full z-10 mb-1">
           <ResearchImport busy={pending} onClose={() => setImporting(false)} onSend={(n, issue, label) => start(async () => {
             setImporting(false);
             const b = await researchBrief(n, issue);
@@ -227,7 +255,7 @@ function Composer({ path, pid, onSent }: { path: string; pid: string | null; onS
           })} />
         </div>
       )}
-      <div className="flex items-center gap-2 text-[11px] text-zinc-500">
+      <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[11px] text-zinc-500">
         <span>話題：<span className="font-medium text-zinc-700">{w.label}</span></span>
         <span>答える人：<span className="font-medium text-zinc-700">{w.who}</span></span>
         {mentions.map((m) => (
@@ -239,10 +267,10 @@ function Composer({ path, pid, onSent }: { path: string; pid: string | null; onS
         {error && <span className="text-rose-600">{error}</span>}
         {pending && <span className="text-brand-700">{w.who === "内容から PM が決まります" ? "考えています…" : `${w.who}が考えています…`}</span>}
       </div>
-      <div className="mt-1 flex items-end gap-2">
-        <textarea ref={box} rows={2} value={text} aria-label="チャットに話す" onPaste={pid ? files.onPaste : undefined}
-          placeholder="このページについて指示・質問する（@ で別のページ・工程・エージェントを指す）。Enter で送る、Shift+Enter で改行"
-          className="input min-h-0 flex-1 resize-none text-[13px]"
+      <div className="mt-1 space-y-1.5">
+        <textarea ref={box} rows={3} value={text} aria-label="チャットに話す" onPaste={pid ? files.onPaste : undefined}
+          placeholder="このページについて指示・質問（@ で別のページ・工程・エージェント）。Enter で送る・Shift+Enter で改行"
+          className="input min-h-0 w-full resize-none text-[13px]"
           onChange={(e) => onType(e.target.value)}
           onKeyDown={(e) => {
             if (query !== null && hits.length) {
@@ -253,7 +281,7 @@ function Composer({ path, pid, onSent }: { path: string; pid: string | null; onS
             }
             if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) { e.preventDefault(); send(); }
           }} />
-        <div className="flex flex-col gap-1">
+        <div className="flex items-center justify-between gap-1">
           <div className="flex gap-1">
             <button className="btn-ghost btn-sm h-8 w-8 p-0" title="メンション（@）" aria-label="メンションする" onClick={() => { onType(text + "@"); setText(text + "@"); box.current?.focus(); }}><AtSign size={14} /></button>
             {pid ? <AttachButton a={files} disabled={pending} /> : null}

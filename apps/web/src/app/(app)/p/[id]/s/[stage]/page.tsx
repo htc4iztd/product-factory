@@ -10,6 +10,7 @@ import { AiDrawer } from "@/components/stage/AiDrawer";
 import { DocEditor } from "@/components/stage/DocEditor";
 import { ApprovalPanel, ClosedBanner, CommitButton, RecheckBanner } from "@/components/stage/StageActions";
 import { AutodevButton } from "@/components/autodev/AutodevButton";
+import { ChatToggle } from "@/components/assistant/AssistantShell";
 
 type Props = { params: Promise<{ id: string; stage: string }>; searchParams: Promise<{ tab?: string; session?: string; pp?: string }> };
 
@@ -65,6 +66,7 @@ export default async function StagePage({ params, searchParams }: Props) {
             {st.enabled && !awaiting && !pp && (
               <CommitButton pid={id} sid={stage} missing={st.missing} dirty={st.dirty} approval={st.approval_required} hasVersion={st.current_version > 0} />
             )}
+            <ChatToggle />
           </div>
         </div>
         {main.variants.length > 0 && (

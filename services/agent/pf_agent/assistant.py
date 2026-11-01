@@ -419,12 +419,14 @@ def message_dict(m: AssistantMessage) -> dict:
     }
 
 
-def feed(tenant: str, user: str, limit: int = 80, after: int = 0) -> list[dict]:
+def feed(tenant: str, user: str, limit: int = 80, after: int = 0, product_id: str | None = None) -> list[dict]:
+    """チャットの対話。プロダクトのページではそのプロダクトの対話だけ、プロダクトの外ではファクトリー全体の対話だけ。"""
     with session() as s:
         q = select(AssistantMessage).where(
             AssistantMessage.tenant_id == tenant,
             or_(AssistantMessage.user == user, AssistantMessage.user.is_(None)),
             AssistantMessage.id > after,
+            AssistantMessage.product_id == product_id if product_id else AssistantMessage.product_id.is_(None),
         )
         rows = list(s.execute(q.order_by(AssistantMessage.id.desc()).limit(limit)).scalars())
         return [message_dict(m) for m in reversed(rows)]
@@ -507,7 +509,7 @@ def send(
         out = _stub(product, ctx, responder, text)
     else:
         prep = agentrun.prepare(tenant, product, responder)
-        history = feed(tenant, user, 12)
+        history = feed(tenant, user, 12, product_id=ctx.get("product_id"))
         prompt = _prompt(
             product, ctx, responder, text, prep.header(), _material(product, ctx, mentions), extra, history
         )

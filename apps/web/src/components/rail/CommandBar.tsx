@@ -61,7 +61,7 @@ export function CommandBar({ pid, places, agents, stages, versions }: {
   function run(it: Item) {
     setOpen(false); setQ("");
     if (it.kind === "go") { router.push(it.href); return; }
-    // 話すのは画面下のチャット（ファクトリー全体で1つ）。宛先をメンションにして入力欄に入れる
+    // 話すのは右のチャット（ファクトリー全体で1つ）。宛先をメンションにして入力欄に入れる
     const mention = it.stage
       ? { kind: "stage" as const, ref: it.stage, label: stages.find((s) => s.id === it.stage)?.label ?? it.stage }
       : { kind: "agent" as const, ref: it.to, label: agents.find((a) => a.key === it.to)?.name ?? it.to };

@@ -23,8 +23,9 @@ export function RunTeamButton({ pid, running }: { pid: string; running: boolean 
   return (
     <span className="flex items-center gap-2">
       {msg && <span className="text-[11px] text-rose-600">{msg}</span>}
-      <button className="btn-secondary" disabled={pending || running} onClick={() => start(async () => { const r = await runTeam(pid); setMsg(r.error ?? null); })}>
-        <Play size={14} />{running ? "エージェントが動いています…" : pending ? "動かしています…" : "全員を今すぐ確かめる"}
+      <button className="btn-secondary" disabled={pending || running} onClick={() => start(async () => { const r = await runTeam(pid); setMsg(r.error ?? null); })}
+        title="定期実行の予定を待たずに、PM の状況確認と、各担当の自分宛ての Issue の処理を今すぐ1回行います">
+        <Play size={14} />{running ? "エージェントが動いています…" : pending ? "動かしています…" : "全エージェントを今すぐ動かす"}
       </button>
     </span>
   );

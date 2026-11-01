@@ -28,7 +28,7 @@ async function createProduct(name, idea) {
 const shot = (n, full = false) => page.screenshot({ path: `${SHOTS}/${n}.png`, fullPage: full });
 const btn = (name, exact = false) => page.getByRole("button", { name, exact });
 
-// ファクトリー全体で1つのチャット：画面下の欄に書いて送る → 変更は承認依頼に「承認」で答える
+// ファクトリー全体で1つのチャット：右のチャット欄の下の入力欄に書いて送る → 変更は承認依頼に「承認」で答える
 const chatSay = async (text) => {
   await page.getByLabel("チャットに話す").fill(text);
   await page.getByLabel("チャットに話す").press("Enter");
@@ -212,9 +212,9 @@ await page.getByText("事業フェーズの成果物").waitFor();
 await page.getByRole("button", { name: /④ プロダクト戦略/ }).click();
 await page.getByText("北極星指標").first().waitFor();
 await shot("11b-reference");
-// 担当エージェントとは直接話さない：案タブは届いた案の採用・却下だけ（話すのは画面下のチャット）
+// 担当エージェントとは直接話さない：案タブは届いた案の採用・却下だけ（話すのは右のチャット）
 await btn("案タブ").click();
-await page.getByText(/話しかけるのは画面下のチャットから/).waitFor();
+await page.getByText(/話しかけるのは右のチャットから/).waitFor();
 await shot("11c-props");
 
 await page.goto(`${BASE}/p/${pid}/g/P1`);

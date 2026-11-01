@@ -101,7 +101,7 @@ export default async function PlatformPage({ params }: { params: Promise<{ id: s
           </div>
           <section className="card h-fit p-4 text-[12.5px] text-zinc-600" aria-label="プラットフォームと話す">
             <div className="flex items-center gap-2 text-[14px] font-semibold text-zinc-900"><Avatar k="platform" v={versions.platform} size={24} />プラットフォームと話す</div>
-            <p className="mt-2">このページを開いたまま画面下のチャットで話すと、プラットフォームが答えます（ほかのページからは「@プラットフォーム」）。重い問題が出たときは、チャットに【要対応】で知らせ、対処があれば承認依頼を付けます。</p>
+            <p className="mt-2">このページを開いたまま右のチャットで話すと、プラットフォームが答えます（ほかのページからは「@プラットフォーム」）。重い問題が出たときは、チャットに【要対応】で知らせ、対処があれば承認依頼を付けます。</p>
           </section>
         </div>
       </div>

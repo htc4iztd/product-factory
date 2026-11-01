@@ -547,10 +547,12 @@ def assistant_send(body: AssistantBody, c: Caller = Depends(caller)):
 
 
 @router.get("/assistant/messages")
-def assistant_feed(after: int = 0, limit: int = 80, c: Caller = Depends(caller)):
+def assistant_feed(after: int = 0, limit: int = 80, product: str = "", c: Caller = Depends(caller)):
     from . import assistant
 
-    return assistant.feed(c.tenant, c.user, min(max(limit, 1), 200), after)
+    if product:
+        _p(c, product)
+    return assistant.feed(c.tenant, c.user, min(max(limit, 1), 200), after, product or None)
 
 
 class ApproveBody(BaseModel):

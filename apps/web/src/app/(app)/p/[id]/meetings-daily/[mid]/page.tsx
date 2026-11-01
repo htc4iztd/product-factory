@@ -59,7 +59,7 @@ export default async function MeetingPage({ params }: { params: Promise<{ id: st
           })}
         </div>
         {m.status !== "preparing" && (
-          <div className="card"><PmLog pid={id} messages={m.messages ?? []} versions={versions} title="会議での対話" empty="このページを開いたまま画面下のチャットで話すと、会議での発言として PM が答えます。" height="max-h-[420px]" /></div>
+          <div className="card"><PmLog pid={id} messages={m.messages ?? []} versions={versions} title="会議での対話" empty="このページを開いたまま右のチャットで話すと、会議での発言として PM が答えます。" height="max-h-[420px]" /></div>
         )}
       </div>
     </>
