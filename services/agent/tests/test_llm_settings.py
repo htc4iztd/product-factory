@@ -145,7 +145,16 @@ def test_openai_compatible_local_llm_via_app_default(client):
         assert ms == {"ok": True, "provider": "openai", "models": ["llama3", "qwen2.5"]}
         assert c.post("/settings/llm/models", headers=H, json={"scope": "app"}).status_code == 403
         pid = c.post("/products", headers=H, json={"name": "x", "idea": "家計簿"}).json()["id"]
-        st = c.post(f"/products/{pid}/stages/s01/chat", headers=H, json={"message": "課題を詰めたい"}).json()
+        import asyncio
+
+        from pf_agent import api
+        from pf_agent.db import Product, session
+
+        with session() as s:
+            p = s.get(Product, pid)
+            s.expunge(p)
+        sess = asyncio.run(api.engine.chat(p, "s01", "u", "課題を詰めたい", None, []))
+        st = c.get(f"/products/{pid}/stages/s01?session={sess}", headers=H).json()
         msg = st["chat"][-1]
         assert msg["text"].startswith("ローカルLLMです") and msg["proposals"][0]["field"] == "problem"
         assert "llama3" in msg["actor"]

@@ -25,8 +25,22 @@ def new_product(c, **kw):
     return c.post("/products", headers=H, json=body).json()["id"]
 
 
+def stage_say(c, pid, sid, message, session_id=None, attachments=()):
+    """工程の対話（AI の案）を内部の関数で動かす。API は閉じた（PdM は担当と直接話さない）。"""
+    import asyncio
+
+    from pf_agent import api
+    from pf_agent.db import Product, session
+
+    with session() as s:
+        p = s.get(Product, pid)
+        s.expunge(p)
+    sess = asyncio.run(api.engine.chat(p, sid, "owner@example.com", message, session_id, list(attachments)))
+    return c.get(f"/products/{pid}/stages/{sid}?session={sess}", headers=H).json()
+
+
 def accept_all(c, pid, sid):
-    st = c.post(f"/products/{pid}/stages/{sid}/chat", headers=H, json={"message": "下書きを作って"}).json()
+    st = stage_say(c, pid, sid, "下書きを作って")
     msg = st["chat"][-1]
     assert msg["role"] == "assistant" and msg["proposals"], st["chat"]
     for p in msg["proposals"]:
@@ -65,7 +79,7 @@ def test_any_stage_can_start_and_reject_proposal(client):
     c = client
     pid = new_product(c)
     # 順序のロックはない：④から始められる
-    st = c.post(f"/products/{pid}/stages/s04/chat", headers=H, json={"message": "下書きを作って"}).json()
+    st = stage_say(c, pid, "s04", "下書きを作って")
     msg = st["chat"][-1]
     first = msg["proposals"][0]
     st = c.post(f"/products/{pid}/stages/s04/proposals", headers=H,
@@ -132,7 +146,11 @@ def test_settings_close_stage_and_poc(client):
     ov = c.get(f"/products/{pid}", headers=H).json()
     enabled = {s["id"]: s["enabled"] for s in ov["stages"]}
     assert enabled["s02"] is False and enabled["s01"] is True
-    assert c.post(f"/products/{pid}/stages/s02/chat", headers=H, json={"message": "x"}).status_code == 409
+    from pf_agent.engine import FactoryError
+
+    with pytest.raises(FactoryError):
+        stage_say(c, pid, "s02", "x")
+    assert c.post(f"/products/{pid}/stages/s02/chat", headers=H, json={"message": "x"}).status_code == 410
     ov = c.put(f"/products/{pid}/settings", headers=H,
                json={"stages": {"s02": {"enabled": True}, "s07": {"enabled": False}}}).json()
     enabled = {s["id"]: s["enabled"] for s in ov["stages"]}
@@ -156,7 +174,10 @@ def test_gate_review_is_a_record_not_a_lock(client):
     st = c.get(f"/products/{pid}/stages/s03", headers=H).json()
     assert st["status"] == "revising" and "競合が浅い" in st["chat"][-1]["text"]
     r = c.post(f"/products/{pid}/phases/P1/review", headers=H, json={"decision": "stop", "reason": "撤退条件に該当"})
-    assert c.post(f"/products/{pid}/stages/s01/chat", headers=H, json={"message": "x"}).status_code == 409
+    from pf_agent.engine import FactoryError
+
+    with pytest.raises(FactoryError):
+        stage_say(c, pid, "s01", "x")
 
 
 def test_tenant_isolation(client):
@@ -200,21 +221,27 @@ def test_chat_sessions_and_report(client):
     st = accept_all(c, pid, "s01")
     first = st["session_id"]
     assert [x["title"] for x in st["sessions"]] == ["セッション1"] and st["sessions"][0]["messages"] == 2
-    st = c.post(f"/products/{pid}/stages/s01/sessions", headers=H, json={"title": "価格の論点"}).json()
-    second = st["session_id"]
+    from pf_agent import api
+    from pf_agent.db import Product, session
+
+    with session() as s:
+        p = s.get(Product, pid)
+        s.expunge(p)
+    second = api.engine.new_session(p, "s01", "owner@example.com", "価格の論点")
+    st = c.get(f"/products/{pid}/stages/s01?session={second}", headers=H).json()
     assert second != first and st["chat"] == [] and st["sessions"][0]["title"] == "価格の論点"
-    st = c.post(f"/products/{pid}/stages/s01/chat", headers=H,
-                json={"message": "課題を直したい", "session_id": second}).json()
+    st = stage_say(c, pid, "s01", "課題を直したい", second)
     assert st["session_id"] == second and [m["role"] for m in st["chat"]] == ["user", "assistant"]
     # 前のセッションに戻ると、前の対話が見える
     st = c.get(f"/products/{pid}/stages/s01?session={first}", headers=H).json()
     assert st["session_id"] == first and len(st["chat"]) == 2
-    c.put(f"/products/{pid}/stages/s01/sessions/{first}", headers=H, json={"title": "最初の下書き"})
+    api.engine.rename_session(p, "s01", "owner@example.com", first, "最初の下書き")
+    assert c.post(f"/products/{pid}/stages/s01/sessions", headers=H, json={"title": "x"}).status_code == 410
     st = c.post(f"/products/{pid}/stages/s01/report", headers=H).json()
     rep = st["report"]
     assert rep["newer_messages"] == 0 and "## 決まったこと（採用した案）" in rep["content"]
     assert "課題：" in rep["content"] and "## 未決事項・次に詰めること" in rep["content"]
-    c.post(f"/products/{pid}/stages/s01/chat", headers=H, json={"message": "もう一度", "session_id": second})
+    stage_say(c, pid, "s01", "もう一度", second)
     assert c.get(f"/products/{pid}/stages/s01", headers=H).json()["report"]["newer_messages"] == 2
 
 
@@ -318,7 +345,7 @@ def test_old_messages_move_to_first_session(client):
         s.commit()
     st = c.get(f"/products/{pid}/stages/s02", headers=H).json()
     assert [x["title"] for x in st["sessions"]] == ["これまでの対話"] and st["chat"][0]["text"] == "昔の発言"
-    st = c.post(f"/products/{pid}/stages/s02/chat", headers=H, json={"message": "続き"}).json()
+    st = stage_say(c, pid, "s02", "続き")
     assert [m["text"] for m in st["chat"]][:2] == ["昔の発言", "続き"]
 
 

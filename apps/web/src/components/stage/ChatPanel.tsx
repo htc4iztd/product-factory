@@ -3,13 +3,13 @@ import { useEffect, useRef, useState, useTransition } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import Markdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-import { ArrowUp, Check, CheckCheck, FileText, Library, MessageSquareWarning, PanelRightClose, Pencil, Plus, Sparkles, X } from "lucide-react";
+import { Check, CheckCheck, FileText, Library, MessageSquareWarning, PanelRightClose, Sparkles, X } from "lucide-react";
 import type { ChatMsg, ChatSession, FieldSpec, Proposal, StageReport, TeamMember } from "@/lib/agent";
-import { acceptAll, decideProposal, makeReport, newSession, renameSession, sendChat } from "@/app/(app)/p/[id]/s/[stage]/actions";
-import { researchChoices, sendResearchToStage } from "@/app/(app)/research/actions";
+import { acceptAll, decideProposal, makeReport } from "@/app/(app)/p/[id]/s/[stage]/actions";
+import { researchChoices } from "@/app/(app)/research/actions";
 import { FieldView } from "./FieldEditor";
 import { Avatar } from "@/components/rail/Avatar";
-import { AttachButton, AttachChips, SentAttachments, useAttachments } from "@/components/chat/Attachments";
+import { SentAttachments } from "@/components/chat/Attachments";
 
 type Choice = Awaited<ReturnType<typeof researchChoices>>[number];
 
@@ -109,47 +109,19 @@ export function ChatPanel({ pid, sid, chat, fields, prompts, disabled, onClose, 
     q.set("session", id);
     router.replace(`${path}?${q.toString()}`, { scroll: false });
   };
-  const current = sessions.find((x) => x.id === sessionId) ?? null;
-  const [text, setText] = useState("");
-  const [sent, setSent] = useState<string | null>(null);
+  const sent: string | null = null;
   const [error, setError] = useState<string | null>(null);
-  const [importing, setImporting] = useState(false);
   const [pending, start] = useTransition();
   const end = useRef<HTMLDivElement>(null);
   const byKey = Object.fromEntries(fields.map((f) => [f.key, f]));
-  const files = useAttachments(pid, sid);
 
   useEffect(() => { end.current?.scrollIntoView({ block: "end" }); }, [chat.length, sent]);
 
-  function send(message: string) {
-    if (!message.trim() || pending) return;
-    setError(null);
-    setSent(message);
-    setText("");
-    const ids = files.items.map((a) => a.id);
-    start(async () => {
-      const r = await sendChat(pid, sid, message, sessionId, ids);
-      if (r.error) { setError(r.error); setText(message); } else files.clear();
-      setSent(null);
-    });
-  }
-  function sendResearch(n: number, issue: string, label: string) {
-    if (pending) return;
-    setError(null);
-    setSent(label);
-    setImporting(false);
-    start(async () => {
-      const r = await sendResearchToStage(pid, sid, n, issue, sessionId);
-      if (r.error) setError(r.error);
-      setSent(null);
-    });
-  }
   function run(fn: () => Promise<{ error?: string }>) {
     setError(null);
     start(async () => { const r = await fn(); if (r.error) setError(r.error); });
   }
 
-  const quick = ["下書きを作って", "矛盾や抜けを指摘して", ...prompts].slice(0, 5);
 
   return (
     <div className="flex h-full flex-col">
@@ -178,14 +150,6 @@ export function ChatPanel({ pid, sid, chat, fields, prompts, disabled, onClose, 
           {sessions.length === 0 && <option value="">セッション1（未開始）</option>}
           {sessions.map((x) => <option key={x.id} value={x.id}>{x.title}（{x.messages}件）</option>)}
         </select>
-        {current && !disabled && (
-          <button onClick={() => { const t = prompt("セッションの名前", current.title); if (t && t.trim()) run(() => renameSession(pid, sid, current.id, t)); }}
-            className="btn-ghost btn-sm h-7 w-7 p-0" title="名前を変える" aria-label="セッションの名前を変える"><Pencil size={12} /></button>
-        )}
-        {!disabled && (
-          <button disabled={pending} onClick={() => start(async () => { const r = await newSession(pid, sid, ""); if (r.error) setError(r.error); else if (r.sessionId) { setView("chat"); go(r.sessionId); } })}
-            className="btn-secondary btn-sm h-7 w-7 shrink-0 p-0" title="新しいセッションを始める" aria-label="新しいセッション"><Plus size={13} /></button>
-        )}
         <div className="ml-1 flex shrink-0 rounded-md bg-zinc-100 p-0.5">
           {([["chat", "対話"], ["report", "レポート"]] as const).map(([k, l]) => (
             <button key={k} onClick={() => setView(k)} className={`rounded px-2 py-0.5 text-[11px] font-medium ${view === k ? "bg-white text-zinc-900 shadow-card" : "text-zinc-500"}`}>{l}</button>
@@ -254,43 +218,7 @@ export function ChatPanel({ pid, sid, chat, fields, prompts, disabled, onClose, 
 
       <div className="border-t border-zinc-200 p-3">
         {error && <p className="mb-2 rounded-md bg-rose-50 px-2 py-1 text-xs text-rose-700">{error}</p>}
-        {disabled ? (
-          <p className="text-center text-xs text-zinc-400">{disabled}</p>
-        ) : (
-          <>
-            {importing && <ResearchImport busy={pending} onSend={sendResearch} onClose={() => setImporting(false)} />}
-            <div className="-mx-3 mb-2 flex gap-1.5 overflow-x-auto px-3 pb-1 [scrollbar-width:none]">
-              {!importing && (
-                <button disabled={pending} onClick={() => setImporting(true)} className="flex shrink-0 items-center gap-1 rounded-full border border-brand-200 bg-brand-50 px-2.5 py-1 text-[11px] text-brand-700 hover:border-brand-300">
-                  <Library size={11} />リサーチから取り込む
-                </button>
-              )}
-              {quick.map((q) => (
-                <button key={q} disabled={pending} onClick={() => send(q)} className="shrink-0 rounded-full border border-zinc-200 bg-white px-2.5 py-1 text-[11px] text-zinc-600 hover:border-brand-200 hover:text-brand-700">
-                  {q}
-                </button>
-              ))}
-            </div>
-            <AttachChips a={files} />
-            <div className="relative" onDragOver={(e) => e.preventDefault()} onDrop={(e) => { e.preventDefault(); if (e.dataTransfer.files.length) void files.add(e.dataTransfer.files); }}>
-              <textarea
-                value={text}
-                onPaste={files.onPaste}
-                onChange={(e) => setText(e.target.value)}
-                onKeyDown={(e) => { if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) { e.preventDefault(); send(text); } }}
-                rows={3}
-                placeholder="例：対象を共働きの子育て世帯に絞りたい"
-                aria-label="AIへの発言"
-                className="input resize-none pr-20"
-              />
-              <span className="absolute bottom-2 right-11"><AttachButton a={files} disabled={pending} /></span>
-              <button disabled={pending || !text.trim() || files.busy} onClick={() => send(text)} aria-label="送信" className="btn-brand absolute bottom-2 right-2 h-8 w-8 rounded-lg p-0">
-                <ArrowUp size={15} />
-              </button>
-            </div>
-            <div className="mt-1 text-right text-[10px] text-zinc-400"><span className="kbd">⌘</span>+<span className="kbd">Enter</span> で送信</div>
-          </>
-        )}
+        <p className="text-center text-xs text-zinc-400">{disabled ?? "話しかけるのは右のチャットからです。ここでは届いた案の採用・却下ができます。"}</p>
       </div>
       </>}
     </div>

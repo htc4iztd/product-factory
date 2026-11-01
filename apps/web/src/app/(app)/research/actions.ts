@@ -74,44 +74,13 @@ export async function analyze(n: number, question: string, filters: Record<strin
   return { note: r.ok };
 }
 
-// 発言の上限に収まるよう、行の切れ目で切る
-function fit(text: string, max: number): string {
-  if (text.length <= max) return text;
-  const cut = text.slice(0, max);
-  return cut.slice(0, cut.lastIndexOf("\n")) + "\n…（以下省略）";
-}
-
 // ステージの対話から：ライブラリの一覧と、要約を AI への発言として送る
 export async function researchChoices(): Promise<{ number: number; key: string; name: string; issues: string[]; facts: number }[]> {
   const libs = await agent<ResearchLibrary[]>("/research");
   return libs.map((l) => ({ number: l.number, key: l.key, name: l.name, issues: l.issues, facts: l.facts ?? 0 }));
 }
 
-export async function sendResearchToStage(pid: string, sid: string, n: number, issue: string, sessionId: string | null): Promise<Result> {
-  const r = await run(async () => {
-    const { brief } = await agent<{ brief: string }>(`/research/${n}/brief${issue ? `?issue=${encodeURIComponent(issue)}` : ""}`);
-    const message = "次のリサーチ結果を根拠にして、この工程の項目の案を出してください。数字や主張には根拠のファクト番号 [RF-n] か記事番号 [RA-n] を添え、"
-      + "【原文未確認】のファクトは確かめが要ると書いてください。\n\n" + fit(brief, 18000);
-    return agent(`/products/${pid}/stages/${sid}/chat`, { method: "POST", body: { message, session_id: sessionId } });
-  });
-  if ("error" in r) return r;
-  revalidatePath(`/p/${pid}`, "layout");
-  return {};
-}
-
 // リサーチの要約を、工程の領域の PM に渡す（PM が担当への Issue にする）
-export async function sendResearchToPm(pid: string, pm: string, sid: string, n: number, issue: string): Promise<Result> {
-  const r = await run(async () => {
-    const { brief } = await agent<{ brief: string }>(`/research/${n}/brief${issue ? `?issue=${encodeURIComponent(issue)}` : ""}`);
-    const text = `リサーチライブラリ RL-${n}${issue ? `の論点「${issue}」` : ""}を根拠に、この工程（${sid}）の項目を見直すよう担当に依頼してください。`
-      + "数字や主張には根拠のファクト番号 [RF-n] か記事番号 [RA-n] を添え、【原文未確認】のファクトは確かめが要ると伝えてください。\n\n" + fit(brief, 18000);
-    return agent(`/products/${pid}/pm/${pm}/talk`, { method: "POST", body: { text, stage_id: sid } });
-  });
-  if ("error" in r) return r;
-  revalidatePath(`/p/${pid}`, "layout");
-  return {};
-}
-
 // ---------------- 画面の中の操作（記事・ファクト・質問・プレーヤー・調査レポート） ----------------
 async function act(n: number, fn: () => Promise<unknown>): Promise<Result> {
   const r = await run(fn);

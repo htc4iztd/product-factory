@@ -204,19 +204,9 @@ class IntakeBody(BaseModel):
     messages: list[IntakeMessage] = Field(max_length=60)
 
 
-class Chat(BaseModel):
-    message: str = Field(min_length=1, max_length=20000)  # リサーチの要約を貼れる長さ
-    session_id: str | None = None
-    attachments: list[int] = Field(default_factory=list, max_length=5)
-
-
 class AttachBody(BaseModel):
     filename: str = Field(min_length=1, max_length=300)
     content_b64: str = Field(min_length=1, max_length=28_000_000)
-
-
-class SessionBody(BaseModel):
-    title: str = Field(default="", max_length=200)
 
 
 class FieldValue(BaseModel):
@@ -431,11 +421,13 @@ def _stage_product(c: Caller, product_id: str, stage_id: str, op: str):
     return _product(c, product_id, STAGE_GROUP.get(stage_id, "business"), op)
 
 
+CLOSED_CHAT = "工程の担当とは直接話せません。右のチャットで話すと、その工程の領域の PM が答えます"
+
+
 @app.post("/products/{product_id}/stages/{stage_id}/chat")
-async def chat(product_id: str, stage_id: str, body: Chat, c: Caller = Depends(caller)):
-    p = _stage_product(c, product_id, stage_id, "create")
-    session_id = await engine.chat(p, stage_id, c.user, body.message, body.session_id, body.attachments)
-    return engine.stage_detail(p, stage_id, session_id)
+def chat(product_id: str, stage_id: str, c: Caller = Depends(caller)):
+    """閉じた API：PdM は担当と直接話さない（ファクトリー全体のチャット /assistant/messages を使う）。"""
+    raise HTTPException(410, CLOSED_CHAT)
 
 
 @app.post("/products/{product_id}/agents/{agent}/attachments")
@@ -445,17 +437,13 @@ def attach(product_id: str, agent: str, body: AttachBody, c: Caller = Depends(ca
 
 
 @app.post("/products/{product_id}/stages/{stage_id}/sessions")
-def new_session(product_id: str, stage_id: str, body: SessionBody, c: Caller = Depends(caller)):
-    p = _stage_product(c, product_id, stage_id, "create")
-    session_id = engine.new_session(p, stage_id, c.user, body.title)
-    return engine.stage_detail(p, stage_id, session_id)
+def new_session(product_id: str, stage_id: str, c: Caller = Depends(caller)):
+    raise HTTPException(410, CLOSED_CHAT)
 
 
 @app.put("/products/{product_id}/stages/{stage_id}/sessions/{session_id}")
-def rename_session(product_id: str, stage_id: str, session_id: str, body: SessionBody, c: Caller = Depends(caller)):
-    p = _stage_product(c, product_id, stage_id, "create")
-    engine.rename_session(p, stage_id, c.user, session_id, body.title)
-    return engine.stage_detail(p, stage_id, session_id)
+def rename_session(product_id: str, stage_id: str, session_id: str, c: Caller = Depends(caller)):
+    raise HTTPException(410, CLOSED_CHAT)
 
 
 @app.post("/products/{product_id}/stages/{stage_id}/report")

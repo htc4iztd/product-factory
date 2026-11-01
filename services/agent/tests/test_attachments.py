@@ -28,6 +28,20 @@ def b64(x: bytes) -> str:
     return base64.b64encode(x).decode()
 
 
+def stage_say(c, pid, sid, message, session_id=None, attachments=()):
+    """工程の対話（AI の案）を内部の関数で動かす。API は閉じた（PdM は担当と直接話さない）。"""
+    import asyncio
+
+    from pf_agent import api
+    from pf_agent.db import Product, session
+
+    with session() as s:
+        p = s.get(Product, pid)
+        s.expunge(p)
+    sess = asyncio.run(api.engine.chat(p, sid, "owner@example.com", message, session_id, list(attachments)))
+    return c.get(f"/products/{pid}/stages/{sid}?session={sess}", headers=H).json()
+
+
 def test_chat_attachments_reach_the_ai_once(client, monkeypatch):
     from pf_agent import llm
     seen = []
@@ -50,16 +64,18 @@ def test_chat_attachments_reach_the_ai_once(client, monkeypatch):
     assert c.post(f"/products/{pid}/agents/x/attachments", headers=H,
                   json={"filename": "a.md", "content_b64": b64(b"x")}).status_code == 422
     # 別の担当の対話には使えない
-    assert c.post(f"/products/{pid}/stages/s02/chat", headers=H,
-                  json={"message": "読んで", "attachments": [doc["id"]]}).status_code == 404
-    st = c.post(f"/products/{pid}/stages/s01/chat", headers=H,
-                json={"message": "この資料を読んで", "attachments": [doc["id"], img["id"]]}).json()
+    from pf_agent.engine import FactoryError
+
+    with pytest.raises(FactoryError):
+        stage_say(c, pid, "s02", "読んで", attachments=[doc["id"]])
+    assert c.post(f"/products/{pid}/stages/s01/chat", headers=H, json={"message": "x"}).status_code == 410
+    st = stage_say(c, pid, "s01", "この資料を読んで", attachments=[doc["id"], img["id"]])
     user = [m for m in st["chat"] if m["role"] == "user"][-1]
     assert [a["filename"] for a in user["attachments"]] == ["メモ.md", "画面.png"]
     msg, images, _ = seen[-1]
     assert "共働きの夫婦" in msg and "画面.png" in msg and images[0][1] == "image/png"
     # 次の発言では、添付の中身は渡さず、名前だけが履歴に残る
-    c.post(f"/products/{pid}/stages/s01/chat", headers=H, json={"message": "続けて"})
+    stage_say(c, pid, "s01", "続けて")
     msg, images, history = seen[-1]
     assert "共働きの夫婦" not in msg and images == [] and any("［添付：メモ.md］" in h["text"] for h in history)
     # PM との対話にも添えられる

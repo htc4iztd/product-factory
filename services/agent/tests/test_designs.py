@@ -69,10 +69,24 @@ def test_legacy_sections_move_to_overview():
     assert "sec1" not in d and d["architecture"] == {"nodes": [], "edges": []}
 
 
+def stage_say(c, pid, sid, message, session_id=None, attachments=()):
+    """工程の対話（AI の案）を内部の関数で動かす。API は閉じた（PdM は担当と直接話さない）。"""
+    import asyncio
+
+    from pf_agent import api
+    from pf_agent.db import Product, session
+
+    with session() as s:
+        p = s.get(Product, pid)
+        s.expunge(p)
+    sess = asyncio.run(api.engine.chat(p, sid, "owner@example.com", message, session_id, list(attachments)))
+    return c.get(f"/products/{pid}/stages/{sid}?session={sess}", headers=H).json()
+
+
 def test_app_design_draft_and_markdown(client):
     c = client
     pid = c.post("/products", headers=H, json={"name": "設計", "idea": "申込の受付"}).json()["id"]
-    st = c.post(f"/products/{pid}/stages/s09/chat", headers=H, json={"message": "下書きを作って"}).json()
+    st = stage_say(c, pid, "s09", "下書きを作って")
     msg = st["chat"][-1]
     for p in msg["proposals"]:
         r = c.post(f"/products/{pid}/stages/s09/proposals", headers=H,
