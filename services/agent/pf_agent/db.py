@@ -268,6 +268,8 @@ class Doc(Base):
     title: Mapped[str] = mapped_column(String(300))
     body: Mapped[str] = mapped_column(Text, default="")
     refs: Mapped[list | None] = mapped_column(JSON, nullable=True)
+    # 読んでいいエージェント（pm・sNN）。None は全員（手で書いたドキュメントはプロダクト全体のもの）
+    readers: Mapped[list | None] = mapped_column(JSON, nullable=True)
     updated_by: Mapped[str] = mapped_column(String(200))
     created_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), default=_now)
     updated_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), default=_now, onupdate=_now)
@@ -684,6 +686,8 @@ class AgentIssue(Base):
     start_date: Mapped[str | None] = mapped_column(String(10), nullable=True)
     due_date: Mapped[str | None] = mapped_column(String(10), nullable=True)
     done_ratio: Mapped[int] = mapped_column(Integer, default=0)
+    # GitHub Issues とつないだとき {repo, number, url, state, synced_at, pushed, seen}（同期は人が押したときだけ）
+    github: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     created_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), default=_now)
     updated_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), default=_now, onupdate=_now)
 
@@ -976,6 +980,8 @@ _ADDED_COLUMNS = {
                  "gh_synced_at": "VARCHAR(30)"},
     "chat_messages": {"session_id": "VARCHAR(32)", "attachments": "JSON"},
     "import_docs": {"readers": "JSON"},
+    "docs": {"readers": "JSON"},
+    "agent_issues": {"github": "JSON"},
     "llm_settings": {"platform_granted": "BOOLEAN DEFAULT {false}"},
     "job_runs": {"tasks": "JSON"},
     "product_images": {"base_id": "VARCHAR(32)"},

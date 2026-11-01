@@ -5,7 +5,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import Response
 from pydantic import BaseModel, Field
 
-from . import agents, autodev, imports, issues, jobs, meetings, platform_agent, pms, reports, team
+from . import agents, autodev, ghsync, imports, issues, jobs, meetings, platform_agent, pms, reports, team
 from .api_collab import _p
 from .authz import Caller, caller
 from .stages import STAGE_BY_ID
@@ -250,6 +250,27 @@ def update_issue(product_id: str, number: int, body: IssueBody, c: Caller = Depe
     return issues.update(_p(c, product_id, True), c.user, number, notes=body.notes, status=body.status,
                          assignee=body.assignee, priority=body.priority, done_ratio=body.done_ratio,
                          due_date=body.due_date, subject=body.subject)
+
+
+class GithubSyncBody(BaseModel):
+    numbers: list[int] | None = Field(default=None, max_length=500)
+    include_open: bool = False
+
+
+# GitHub Issues との同期は、人が押したときだけ（自動では動かない）
+@router.get(P + "/github")
+def github_status(product_id: str, c: Caller = Depends(caller)):
+    return ghsync.status(_p(c, product_id))
+
+
+@router.post(P + "/github/sync")
+def github_sync(product_id: str, body: GithubSyncBody, c: Caller = Depends(caller)):
+    return ghsync.sync_many(_p(c, product_id, True), c.user, body.numbers, body.include_open)
+
+
+@router.post(P + "/issues/{number}/github")
+def github_sync_issue(product_id: str, number: int, c: Caller = Depends(caller)):
+    return ghsync.sync_issue(_p(c, product_id, True), c.user, number)
 
 
 @router.get(P + "/meetings-daily")

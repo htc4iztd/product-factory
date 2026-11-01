@@ -142,7 +142,10 @@ export type AgentIssueT = {
   priority: string; priority_label: string; author: string; author_name: string; assignee: string; assignee_name: string;
   watchers: string[]; stage_id: string | null; parent: number | null; start_date: string | null; due_date: string | null;
   done_ratio: number; created_at: string; updated_at: string; journals?: IssueJournalT[];
+  github?: IssueGithub | null;
 };
+// GitHub Issues とのつながり（同期は人が押したときだけ）
+export type IssueGithub = { repo: string; number: number; url: string; state: "open" | "closed"; synced_at: string | null; error: string | null };
 export type PmMessageT = {
   id: number; pm: PmKey; pm_name: string; role: "pdm" | "pm"; author: string; text: string; stage_id: string | null;
   meeting_id: number | null; attachments: { id: number; filename: string; kind: string }[]; issues: number[]; created_at: string;
@@ -340,15 +343,13 @@ export type Meeting = {
   source: { provider?: string; url?: string } | null; has_minutes: boolean; created_by: string; created_at: string;
 };
 export type MeetingDetail = Meeting & { agenda: string; transcript: string; minutes: string; decisions: Decision[]; tickets: Ticket[] };
-export type DocSummary = { number: number; key: string; title: string; refs: string[]; updated_by: string; updated_at: string };
+export type DocSummary = { number: number; key: string; title: string; refs: string[]; updated_by: string; updated_at: string; readers: string[]; readers_custom: boolean };
 export type DocDetail = DocSummary & { body: string };
 export type Notices = { unread: number; items: { id: number; kind: string; text: string; link: string; actor: string; read: boolean; product_id: string; created_at: string }[] };
 
-export type GithubLink = { repo: string; number: number; url: string; state: string; synced_at: string; error: string | null };
-export type GithubStatus = {
-  repo: string | null; sync: "off" | "build" | "all"; import: boolean; synced_at: string | null;
-  token: { source: "tenant" | "server" | "none"; hint: string | null };
-};
+export type GithubSyncStatus = { repo: string | null; token: "tenant" | "server" | "none"; linked: number; open_unlinked: number; synced_at: string | null };
+export type GithubSyncOne = { number: number; created: boolean; pulled: number; pushed: number; state_from: "github" | null; url: string; github_number: number };
+export type GithubSyncMany = GithubSyncStatus & { done: GithubSyncOne[]; errors: { number: number; error: string }[] };
 export type GithubToken = { source: "tenant" | "server" | "none"; hint: string | null; can_edit: boolean };
 
 // ---------------- ジョブとプリプロダクト ----------------

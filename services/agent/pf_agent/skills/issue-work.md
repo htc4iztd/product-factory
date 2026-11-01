@@ -8,7 +8,7 @@ tools: [stage_draft, stage_fields, upstream, docs_read, docs_search, issue_read,
 prefetch: [stage_draft, issues_list]
 ---
 1. 自分宛ての Issue を1件ずつ読み（必要なら issue_read で記録まで）、何を変えれば終わるかの実行計画を立てる。
-2. 計画に要る材料だけを読む：上流の確定版（upstream）、取り込んだ資料（docs_read・docs_search）、掲示板（board_read）。
+2. 計画に要る材料だけを読む：上流の確定版（upstream）、取り込んだ資料と手書きのドキュメント（docs_read・docs_search）、掲示板（board_read）。
    読んでいない資料の中身を推測で書かない。
 3. 自分の工程の項目を書き換える（set_field）。書く前に stage_fields で項目の key と型を確かめる。
 4. Issue ごとに結果を返す（issue_update）。notes には「計画」「やったこと（変えた項目）」「残ったこと」を書く。

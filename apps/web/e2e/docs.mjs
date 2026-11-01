@@ -43,8 +43,18 @@ await page.getByLabel("または、新しく書く（Markdown）").fill("競合�
 await btn("書き始める").click();
 await page.waitForURL(/docs\/1$/);
 await page.getByLabel("本文（Markdown）").fill("# 競合\nUS-01 を踏まえて価格を比べる");
-await btn("保存", true).click();
+await btn("保存", true).first().click();
 await page.getByText("保存しました").waitFor();
+// 手で書いたドキュメントも、読んでいいエージェントを決められる（既定は全員）
+const readers = page.getByLabel("読んでいいエージェント");
+await readers.getByText("既定（全員）").waitFor();
+await readers.getByRole("button", { name: "誰にも読ませない" }).click();
+await readers.getByRole("button", { name: "事業PM" }).click();
+await readers.getByRole("button", { name: "保存", exact: true }).click();
+await readers.getByText("次に動くとき・話すときから読みます").waitFor();
+await page.reload();
+await page.getByLabel("読んでいいエージェント").getByText("割り当て済み・1人").waitFor();
+await shot("docs-readers", true);
 // 取り込む（同じページ）→ 一覧に書いたものと並ぶ
 await page.goto(`${BASE}/p/${pid}/docs`);
 await page.getByLabel("取り込む資料").setInputFiles({ name: "運用メモ.md", mimeType: "text/markdown", buffer: Buffer.from("# 監視\n申込の受付が5分止まったら通知する\n") });
@@ -57,5 +67,8 @@ await shot("docs1", true);
 // 古い取り込みのページはドキュメントへ
 await page.goto(`${BASE}/p/${pid}/import`);
 await page.waitForURL(/\/docs$/);
+// Issue の GitHub 同期は押したときだけ。リポジトリをつないでいなければ、つなぎ方を案内する
+await page.goto(`${BASE}/p/${pid}/issues`);
+await page.getByLabel("GitHub との同期").or(page.getByText("でリポジトリをつなぎます")).first().waitFor();
 console.log(`ok product=${pid}`);
 await browser.close();

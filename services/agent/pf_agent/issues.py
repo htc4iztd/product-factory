@@ -60,6 +60,10 @@ def _pms() -> tuple[str, ...]:
 def _name(key: str) -> str:
     from .team import name_of
 
+    if key == "github":
+        return "GitHub"
+    if key.startswith("github:"):
+        return f"GitHub @{key[7:]}"
     return name_of(key) if key in _keys() else "PdM"
 
 
@@ -98,6 +102,9 @@ def issue_dict(i: AgentIssue, journals: list[IssueJournal] | None = None) -> dic
         "start_date": i.start_date,
         "due_date": i.due_date,
         "done_ratio": i.done_ratio,
+        "github": {k: (i.github or {}).get(k) for k in ("repo", "number", "url", "state", "synced_at", "error")}
+        if i.github
+        else None,
         "created_at": i.created_at.isoformat(),
         "updated_at": i.updated_at.isoformat(),
     }

@@ -322,32 +322,40 @@ def _sections(text: str) -> list[tuple[str, str]]:
 
 
 def docs_context(product_id: str, key: str, limit: int = 16000) -> str:
-    """エージェントが読む取り込んだ資料（読んでいいと決めた資料だけ）。工程の担当は、
-    項目名・工程名がよく出てくる章を多い順に。司令塔・PM は資料の一覧・割り当て先と冒頭。"""
+    """エージェントが読む資料（読んでいいと決めたものだけ）：取り込んだ資料と、手で書いたドキュメント（DOC-n）。
+    工程の担当は、項目名・工程名がよく出てくる章を多い順に。司令塔・PM は資料の一覧・割り当て先と冒頭。"""
+    from .collab import readable_docs
+
     with session() as s:
         docs = list(s.execute(select(ImportDoc).where(ImportDoc.product_id == product_id, ImportDoc.status == "done")
                               .order_by(ImportDoc.id.desc()).limit(20)).scalars())
-        rows = [(d.id, d.filename, d.text or "", d.result or [], d.created_at) for d in docs if key in readers_of(d)]
-    if not rows:
+        rows = [(f"資料{d.id}「{d.filename}」", d.text or "", d.result or [], d.created_at)
+                for d in docs if key in readers_of(d)]
+    written = [(head, body, None, at) for head, body, at in readable_docs(product_id, key)]
+    if not rows and not written:
         return ""
     if key not in STAGE_BY_ID:
         lines = []
-        for i, name, text, result, at in rows:
+        for head, text, result, at in rows:
             stages = sorted({r["stage"] for r in result})
             where = "、".join(f"{STAGE_BY_ID[x].no}{STAGE_BY_ID[x].name}" for x in stages if x in STAGE_BY_ID)
-            lines.append(f"- 資料{i}「{name}」（{at:%m/%d}）→ {where or '割り当てなし'}\n  冒頭：{text[:1200]}")
+            lines.append(f"- {head}（{at:%m/%d}）→ {where or '割り当てなし'}\n  冒頭：{text[:1200]}")
+        for head, text, _, at in written:
+            lines.append(f"- {head}（手書き・{at:%m/%d}）\n  冒頭：{text[:1200]}")
         return "\n".join(lines)
     st, fw = STAGE_BY_ID[key], fwlib.of(product_id, key)
     words = [st.name, *(f.label for f in fw.fields)]
-    mine = rows
     out, used = [], 0
-    for i, name, text, result, _ in mine[:3]:
-        got = "、".join(f"{x['label']}（{ACTION_JA[x['action']]}）" for x in result if x["stage"] == key)
-        got = got or "読むことを許された資料"
+    for head, text, result, _ in [*rows[:3], *written[:3]]:
+        if result is None:
+            got = "手で書いたドキュメント"
+        else:
+            got = "、".join(f"{x['label']}（{ACTION_JA[x['action']]}）" for x in result if x["stage"] == key)
+            got = f"この工程に：{got or '読むことを許された資料'}"
         secs = sorted(_sections(text), key=lambda hs: -sum((hs[0] + hs[1]).count(w) for w in words))
-        part = f"### 資料{i}「{name}」（この工程に：{got}）\n"
+        part = f"### {head}（{got}）\n"
         for h, body in secs:
-            chunk = f"#### {h}\n{body.strip()}\n"
+            chunk = (f"#### {h}\n" if h else "") + f"{body.strip()}\n"
             if used + len(part) + len(chunk) > limit:
                 break
             part += chunk

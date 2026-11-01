@@ -1,10 +1,12 @@
 import Link from "next/link";
-import { agent, type AgentIssueT, type TeamInfo } from "@/lib/agent";
+import { Github } from "lucide-react";
+import { agent, type AgentIssueT, type GithubSyncStatus, type TeamInfo } from "@/lib/agent";
 import { PageHeader } from "@/components/PageHeader";
 import { AutoRefresh } from "@/components/autodev/AutoRefresh";
 import { Avatar } from "@/components/rail/Avatar";
 import { ISSUE_STATUS_TONE } from "@/components/org/bits";
 import { NewIssue, STATUSES } from "@/components/issues/IssueForms";
+import { GithubSyncBar } from "@/components/issues/GithubSync";
 
 const day = (t: string) => new Date(t).toLocaleString("ja-JP", { timeZone: "Asia/Tokyo", month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit" });
 
@@ -17,9 +19,10 @@ export default async function IssuesPage({ params, searchParams }: {
   if (sp.assignee) qs.set("assignee", sp.assignee);
   if (sp.status) qs.set("status", sp.status);
   if (!sp.all && !sp.status) qs.set("open_only", "true");
-  const [list, team, versions] = await Promise.all([
+  const [list, team, versions, gh] = await Promise.all([
     agent<AgentIssueT[]>(`/products/${id}/issues?${qs}`), agent<TeamInfo>(`/products/${id}/team`),
     agent<Record<string, string>>("/avatars").catch(() => ({} as Record<string, string>)),
+    agent<GithubSyncStatus>(`/products/${id}/github`).catch(() => null),
   ]);
   const link = (p: Record<string, string | undefined>) => {
     const q = new URLSearchParams(Object.entries({ assignee: sp.assignee, status: sp.status, all: sp.all, ...p }).filter(([, v]) => v) as [string, string][]);
@@ -35,6 +38,7 @@ export default async function IssuesPage({ params, searchParams }: {
         actions={<NewIssue pid={id} />}
       />
       <div className="space-y-3 px-8 py-6">
+        {gh && <GithubSyncBar pid={id} status={gh} />}
         <div className="flex flex-wrap items-center gap-1.5 text-[12px]">
           <Link href={link({ assignee: undefined })} className={`rounded-full border px-2.5 py-0.5 ${!sp.assignee ? "border-zinc-900 bg-zinc-900 text-white" : "border-zinc-200"}`}>全員</Link>
           {team.agents.map((a) => (
@@ -61,7 +65,8 @@ export default async function IssuesPage({ params, searchParams }: {
                   <td className="px-2 py-2">{i.tracker_label}</td>
                   <td className="px-2 py-2"><span className={`rounded px-1.5 py-0.5 text-[11px] ${ISSUE_STATUS_TONE[i.status]}`}>{i.status_label}</span></td>
                   <td className={`px-2 py-2 ${["urgent", "immediate"].includes(i.priority) ? "font-semibold text-rose-600" : ""}`}>{i.priority_label}</td>
-                  <td className="max-w-[28rem] px-2 py-2"><Link href={`/p/${id}/issues/${i.number}`} className="font-medium hover:underline">{i.subject}</Link></td>
+                  <td className="max-w-[28rem] px-2 py-2"><Link href={`/p/${id}/issues/${i.number}`} className="font-medium hover:underline">{i.subject}</Link>
+                    {i.github && <a href={i.github.url} target="_blank" rel="noreferrer" className="ml-1.5 inline-flex items-center gap-0.5 text-[11px] text-zinc-400 hover:text-zinc-700" title="GitHub の Issue"><Github size={11} />#{i.github.number}</a>}</td>
                   <td className="whitespace-nowrap px-2 py-2"><span className="flex items-center gap-1"><Avatar k={i.assignee} v={versions[i.assignee]} size={18} />{i.assignee_name}</span></td>
                   <td className="whitespace-nowrap px-2 py-2 text-zinc-500">{i.author_name}</td>
                   <td className="px-2 py-2"><div className="h-1.5 w-16 overflow-hidden rounded-full bg-zinc-100"><div className="h-full bg-emerald-500" style={{ width: `${i.done_ratio}%` }} /></div></td>

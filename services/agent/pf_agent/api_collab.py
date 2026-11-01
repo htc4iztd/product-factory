@@ -58,6 +58,15 @@ def put_doc(product_id: str, number: int, body: DocBody, c: Caller = Depends(cal
     return collab.save_doc(_p(c, product_id, True), c.user, body.model_dump(exclude_none=True), number)
 
 
+class DocReadersBody(BaseModel):
+    readers: list[str] = Field(default_factory=list, max_length=20)
+
+
+@router.put(P + "/docs/{number}/readers")
+def put_doc_readers(product_id: str, number: int, body: DocReadersBody, c: Caller = Depends(caller)):
+    return collab.set_doc_readers(_p(c, product_id, True), c.user, number, body.readers)
+
+
 @router.get(P + "/refs/{ref}")
 def lookup(product_id: str, ref: str, c: Caller = Depends(caller)):
     found = collab.lookup(_p(c, product_id), ref)

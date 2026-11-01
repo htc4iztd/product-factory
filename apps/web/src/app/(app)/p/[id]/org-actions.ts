@@ -33,6 +33,9 @@ export async function closeMeeting(pid: string, mid: number) { return call(pid, 
 export async function setReaders(pid: string, doc: number, readers: string[]) {
   return call(pid, `/imports/${doc}/readers`, "PUT", { readers });
 }
+export async function setDocReaders(pid: string, doc: number, readers: string[]) {
+  return call(pid, `/docs/${doc}/readers`, "PUT", { readers });
+}
 export async function drawAvatars(keys: string[], redo: boolean): Promise<R> {
   try {
     await agent("/avatars/generate", { method: "POST", body: { keys, redo } });

@@ -135,12 +135,13 @@ def _docs_read(ctx: Ctx, a: StageArg) -> str:
     from .imports import docs_context
 
     p = _need_product(ctx)
-    return docs_context(p.id, ctx.key) or "（読んでいいと割り当てられた取り込み資料はありません）"
+    return docs_context(p.id, ctx.key) or "（読んでいいと割り当てられた資料・ドキュメントはありません）"
 
 
 def _docs_search(ctx: Ctx, a: QueryArg) -> str:
     from sqlalchemy import select
 
+    from .collab import readable_docs
     from .db import ImportDoc, session
     from .imports import _sections, readers_of
 
@@ -150,18 +151,19 @@ def _docs_search(ctx: Ctx, a: QueryArg) -> str:
         raise ToolError("探す言葉が空です")
     with session() as s:
         docs = [
-            (d.id, d.filename, d.text or "")
+            (f"資料{d.id}「{d.filename}」", d.text or "")
             for d in s.execute(
                 select(ImportDoc).where(ImportDoc.product_id == p.id, ImportDoc.status == "done").limit(30)
             ).scalars()
             if ctx.key in readers_of(d)
         ]
+    docs += [(head, body) for head, body, _ in readable_docs(p.id, ctx.key, 30)]
     hits = []
-    for i, name, text in docs:
+    for name, text in docs:
         for h, body in _sections(text):
             n = (h + body).count(q)
             if n:
-                hits.append((n, f"### 資料{i}「{name}」— {h}\n{body.strip()[:2500]}"))
+                hits.append((n, f"### {name}" + (f"— {h}" if h else "") + f"\n{body.strip()[:2500]}"))
     hits.sort(key=lambda x: -x[0])
     return "\n\n".join(h for _, h in hits[:5]) or f"「{q}」を含む箇所は、読める資料にありません"
 
@@ -306,18 +308,18 @@ TOOLS: dict[str, Tool] = {
         ),
         Tool(
             "docs_read",
-            "取り込んだ資料を読む",
+            "資料・ドキュメントを読む",
             "read",
-            "読んでいいと割り当てられた取り込み資料のうち、自分の工程に関係する章を読む",
+            "読んでいいと割り当てられた取り込み資料と手書きのドキュメント（DOC-n）のうち、自分の工程に関係する章を読む",
             StageArg,
             _docs_read,
             ("stage", "pm"),
         ),
         Tool(
             "docs_search",
-            "取り込んだ資料を探す",
+            "資料・ドキュメントを探す",
             "read",
-            "読んでいいと割り当てられた取り込み資料から、言葉を含む章を探して読む",
+            "読んでいいと割り当てられた取り込み資料と手書きのドキュメント（DOC-n）から、言葉を含む章を探して読む",
             QueryArg,
             _docs_search,
             ("stage", "pm"),

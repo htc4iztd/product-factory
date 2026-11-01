@@ -1,10 +1,12 @@
 import Link from "next/link";
+import { Github } from "lucide-react";
 import { agent, type AgentIssueT } from "@/lib/agent";
 import { PageHeader } from "@/components/PageHeader";
 import { AutoRefresh } from "@/components/autodev/AutoRefresh";
 import { Avatar } from "@/components/rail/Avatar";
 import { ISSUE_STATUS_TONE } from "@/components/org/bits";
 import { IssueReply } from "@/components/issues/IssueForms";
+import { IssueGithubPanel } from "@/components/issues/GithubSync";
 
 const day = (t: string) => new Date(t).toLocaleString("ja-JP", { timeZone: "Asia/Tokyo", year: "numeric", month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit" });
 const NAMES: Record<string, string> = { status: "状態", assignee: "担当", priority: "優先度", done_ratio: "進捗率" };
@@ -42,7 +44,8 @@ export default async function IssuePage({ params }: { params: Promise<{ id: stri
             {(i.journals ?? []).length === 0 && <p className="px-5 py-3 text-[12px] text-zinc-400">まだありません。担当は10分ごとに確かめて動きます</p>}
             {(i.journals ?? []).map((j, k) => (
               <div key={j.id} className="flex gap-3 px-5 py-3 text-[13px]">
-                {j.author.includes("@") ? <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-zinc-900 text-[9px] font-bold text-white">PdM</span>
+                {j.author.startsWith("github") ? <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-zinc-800 text-white"><Github size={14} /></span>
+                  : j.author.includes("@") ? <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-zinc-900 text-[9px] font-bold text-white">PdM</span>
                   : <Avatar k={j.author} v={versions[j.author]} size={28} />}
                 <div className="min-w-0 flex-1">
                   <div className="text-[11px] text-zinc-500"><span className="font-semibold text-zinc-800">{j.author_name}</span>・{day(j.created_at)}・#{k + 1}</div>
@@ -59,10 +62,11 @@ export default async function IssuePage({ params }: { params: Promise<{ id: stri
           {pmOwned ? <IssueReply pid={id} issue={i} />
             : <p className="text-[12px] text-zinc-500">この Issue は {i.assignee_name}が担当しています。PdM から伝えたいことは、その領域の PM に話してください。</p>}
         </div>
-        <aside className="card h-fit p-4">
+        <aside className="card h-fit space-y-3 p-4">
           <dl className="space-y-2 text-[12.5px]">
             {rows.map(([k, v]) => <div key={k} className="flex items-center justify-between gap-2"><dt className="text-zinc-500">{k}</dt><dd className="text-right">{v}</dd></div>)}
           </dl>
+          <IssueGithubPanel pid={id} number={i.number} github={i.github} />
         </aside>
       </div>
     </>

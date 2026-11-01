@@ -40,9 +40,16 @@ def _iso(d: dt.datetime | None) -> str | None:
 
 
 # ---------------- 共有ドキュメント ----------------
+def doc_readers(d: Doc) -> list[str]:
+    """読んでいいエージェント。決めていなければ全員（PM と各工程の担当）。"""
+    from .team import KEYS
+    return list(d.readers) if d.readers is not None else list(KEYS)
+
+
 def doc_dict(d: Doc, full: bool = False) -> dict:
     out = {"number": d.number, "key": f"DOC-{d.number}", "title": d.title, "refs": d.refs or [],
-           "updated_by": d.updated_by, "updated_at": _iso(d.updated_at)}
+           "updated_by": d.updated_by, "updated_at": _iso(d.updated_at), "readers": doc_readers(d),
+           "readers_custom": d.readers is not None}
     if full:
         out["body"] = d.body
     return out
@@ -84,6 +91,30 @@ def doc(product: Product, number: int) -> dict:
         if d is None:
             raise CollabError(404, f"DOC-{number} はありません")
         return doc_dict(d, True)
+
+
+def set_doc_readers(product: Product, user: str, number: int, readers: list[str]) -> dict:
+    from .team import KEYS
+    bad = [r for r in readers if r not in KEYS]
+    if bad:
+        raise CollabError(422, f"不明なエージェント：{', '.join(bad)}")
+    with session() as s:
+        d = s.execute(select(Doc).where(Doc.product_id == product.id, Doc.number == number)).scalar_one_or_none()
+        if d is None:
+            raise CollabError(404, f"DOC-{number} はありません")
+        d.readers = [k for k in KEYS if k in readers]
+        s.commit()
+        out = doc_dict(d, True)
+    repo.log(product.id, None, "human", user, "doc.readers", {"doc": out["key"], "readers": out["readers"]})
+    return out
+
+
+def readable_docs(product_id: str, key: str, limit: int = 20) -> list[tuple[str, str, dt.datetime]]:
+    """エージェント key が読んでいい手書きのドキュメント（新しい順）：[(見出し, 本文, 更新日時)]。"""
+    with session() as s:
+        rows = s.execute(select(Doc).where(Doc.product_id == product_id).order_by(Doc.updated_at.desc()).limit(limit))
+        return [(f"DOC-{d.number}「{d.title}」", d.body or "", d.updated_at) for d in rows.scalars()
+                if key in doc_readers(d)]
 
 
 # ---------------- 通知 ----------------
