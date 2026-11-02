@@ -1,7 +1,6 @@
 "use client";
 import { useState, useTransition } from "react";
-import Markdown from "react-markdown";
-import remarkGfm from "remark-gfm";
+import { Md } from "@/components/md/Md";
 import type { DocDetail } from "@/lib/agent";
 import { saveDoc } from "@/app/(app)/p/[id]/team-actions";
 
@@ -24,7 +23,7 @@ export function DocForm({ pid, doc }: { pid: string; doc: DocDetail }) {
       <div className="grid gap-4 lg:grid-cols-2">
         <textarea value={body} onChange={(e) => { setBody(e.target.value); setMsg(null); }} aria-label="本文（Markdown）"
           className="input min-h-[60vh] font-mono text-[12px] leading-relaxed" placeholder="# 見出し&#10;本文を Markdown で書きます" />
-        <div className="card prose-md overflow-y-auto p-5"><Markdown remarkPlugins={[remarkGfm]}>{body || "_（プレビュー）_"}</Markdown></div>
+        <div className="card prose-md overflow-y-auto p-5"><Md>{body || "_（プレビュー）_"}</Md></div>
       </div>
     </div>
   );

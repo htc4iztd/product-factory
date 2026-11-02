@@ -1,6 +1,5 @@
 import Link from "next/link";
-import Markdown from "react-markdown";
-import remarkGfm from "remark-gfm";
+import { Md } from "@/components/md/Md";
 import { AlertTriangle, CheckCircle2 } from "lucide-react";
 import { agent, type DailyMeetingT } from "@/lib/agent";
 import { PM_KEYS, PM_NAME } from "@/lib/pm";
@@ -41,7 +40,7 @@ export default async function MeetingPage({ params }: { params: Promise<{ id: st
                   {r && <span className={`ml-auto h-2.5 w-2.5 rounded-full ${HEALTH[r.health]}`} />}
                 </div>
                 <div className="prose-md max-h-[460px] flex-1 overflow-y-auto px-4 py-3">
-                  {r ? <Markdown remarkPlugins={[remarkGfm]}>{r.text}</Markdown> : <p className="text-zinc-400">準備中…</p>}
+                  {r ? <Md>{r.text}</Md> : <p className="text-zinc-400">準備中…</p>}
                 </div>
                 {about.length > 0 && (
                   <div className="space-y-1.5 border-t border-zinc-100 px-4 py-3">

@@ -1,6 +1,5 @@
 import Link from "next/link";
-import Markdown from "react-markdown";
-import remarkGfm from "remark-gfm";
+import { Md } from "@/components/md/Md";
 import { Target } from "lucide-react";
 import { agent, type ReviewData } from "@/lib/agent";
 import { PageHeader } from "@/components/PageHeader";
@@ -103,7 +102,7 @@ export default async function ReviewPage({ params }: { params: Promise<{ id: str
                     ))}
                   </div>
                 )}
-                <div className="prose-md max-h-[70vh] overflow-y-auto"><Markdown remarkPlugins={[remarkGfm]}>{d.markdown}</Markdown></div>
+                <div className="prose-md max-h-[70vh] overflow-y-auto"><Md>{d.markdown}</Md></div>
               </div>
             </section>
           ))}

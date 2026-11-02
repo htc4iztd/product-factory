@@ -1,6 +1,5 @@
 import Link from "next/link";
-import Markdown from "react-markdown";
-import remarkGfm from "remark-gfm";
+import { Md } from "@/components/md/Md";
 import { ExternalLink } from "lucide-react";
 import { agent, type Overview, type PreProductDetail } from "@/lib/agent";
 import { PageHeader } from "@/components/PageHeader";
@@ -34,7 +33,7 @@ export default async function PreProductPage({ params, searchParams }: { params:
           <div className="flex flex-wrap gap-1.5">
             {p.stages.map((s) => <Link key={s} href={`/p/${id}/preproducts/${p.number}?stage=${s}`} className={`chip ${s === stage ? "border-zinc-900 bg-zinc-900 text-white" : "hover:border-zinc-300"}`}>{name[s] ?? s}</Link>)}
           </div>
-          <div className="card prose-md max-h-[64vh] overflow-y-auto p-5 text-[13px]"><Markdown remarkPlugins={[remarkGfm]}>{p.markdown[stage] ?? "（なし）"}</Markdown></div>
+          <div className="card prose-md max-h-[64vh] overflow-y-auto p-5 text-[13px]"><Md>{p.markdown[stage] ?? "（なし）"}</Md></div>
         </section>
       </div>
     </>

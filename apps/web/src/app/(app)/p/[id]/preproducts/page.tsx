@@ -1,6 +1,5 @@
 import Link from "next/link";
-import Markdown from "react-markdown";
-import remarkGfm from "remark-gfm";
+import { Md } from "@/components/md/Md";
 import { AlertTriangle, ExternalLink } from "lucide-react";
 import { agent, type AutodevRun, type Overview, type PreProductDetail } from "@/lib/agent";
 import { PageHeader } from "@/components/PageHeader";
@@ -81,7 +80,7 @@ export default async function PreProductsPage({ params, searchParams }: { params
                     {details.slice().reverse().map((d) => (
                       <div key={d.key} className="min-w-0 rounded-lg border border-zinc-200 p-3">
                         <div className="mb-2 text-xs font-semibold">{d.key} {d.title}</div>
-                        <div className="prose-md max-h-[60vh] overflow-y-auto text-[12px]"><Markdown remarkPlugins={[remarkGfm]}>{d.markdown[stage] ?? "（なし）"}</Markdown></div>
+                        <div className="prose-md max-h-[60vh] overflow-y-auto text-[12px]"><Md>{d.markdown[stage] ?? "（なし）"}</Md></div>
                       </div>
                     ))}
                   </div>

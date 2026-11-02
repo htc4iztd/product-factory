@@ -1,7 +1,6 @@
 "use client";
 import { useState, useTransition } from "react";
-import Markdown from "react-markdown";
-import remarkGfm from "remark-gfm";
+import { Md } from "@/components/md/Md";
 import { CheckCircle2, Info, Pencil } from "lucide-react";
 import type { FieldSpec } from "@/lib/agent";
 import { setMarkdown } from "@/app/(app)/p/[id]/s/[stage]/actions";
@@ -40,7 +39,7 @@ export function DocEditor({ pid, sid, markdown, fields, readOnly }: { pid: strin
           {!readOnly && (
             <button onClick={() => { setText(markdown); setEditing(true); setResult(null); }} className="btn-secondary btn-sm absolute right-4 top-4"><Pencil size={12} />文書を編集</button>
           )}
-          <div className="prose-md"><Markdown remarkPlugins={[remarkGfm]}>{markdown}</Markdown></div>
+          <div className="prose-md"><Md>{markdown}</Md></div>
         </div>
       </div>
     );
@@ -62,7 +61,7 @@ export function DocEditor({ pid, sid, markdown, fields, readOnly }: { pid: strin
           className="input h-[70vh] resize-none font-mono text-[12px] leading-6" />
         <div className="card h-[70vh] overflow-y-auto p-6">
           <div className="section-title mb-2">プレビュー</div>
-          <div className="prose-md"><Markdown remarkPlugins={[remarkGfm]}>{text}</Markdown></div>
+          <div className="prose-md"><Md>{text}</Md></div>
         </div>
       </div>
     </div>
