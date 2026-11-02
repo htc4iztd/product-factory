@@ -30,6 +30,9 @@ def env(tmp_path, monkeypatch):
             p = s.get(Product, pid)
             s.expunge(p)
         yield c, p
+        # 裏で動いているジョブが終わってから片付ける（次のテストの DB と取り合わないように）
+        wait_idle(c, pid)
+        time.sleep(0.3)
 
 
 def wait_idle(c, pid):
@@ -147,6 +150,7 @@ def test_cycle_review_and_next(env):
     # 手動でもレビューを始められる。二重には始められない
     assert c.post(P + "/review/start", headers=H).json()["state"] == "review"
     assert c.post(P + "/review/start", headers=H).status_code == 409
+    wait_idle(c, p.id)
 
 
 def test_cycle_plan(env):
