@@ -6,6 +6,8 @@ import { agent, type ReviewData } from "@/lib/agent";
 import { PageHeader } from "@/components/PageHeader";
 import { StatusBadge } from "@/components/StatusBadge";
 import { CyclePlanEditor, NextCycleForm, StartReviewButton } from "@/components/review/ReviewForms";
+import { ReviewRounds } from "@/components/review/ReviewRounds";
+import { AutoRefresh } from "@/components/autodev/AutoRefresh";
 import { auth } from "@/lib/auth";
 import { srcDoc } from "@/lib/uikit";
 
@@ -19,6 +21,10 @@ export default async function ReviewPage({ params }: { params: Promise<{ id: str
   const [r, session] = await Promise.all([agent<ReviewData>(`/products/${id}/review`), auth()]);
   const viewer = session?.user?.role === "VIEWER";
   const review = r.state === "review";
+  const rounds = r.current.review?.rounds ?? [];
+  const busy = rounds.some((x) => x.status === "reviewing" || x.status === "fixing") || ["onboarding", "releasing"].includes(r.state);
+  const stageName = Object.fromEntries(r.deliverables.map((d) => [d.id, `${d.no}${d.name}`]));
+  const RELEASE_STATES = ["onboarding", "prerelease", "releasing"];
   const phases = [...new Set(r.deliverables.map((d) => d.phase))];
   return (
     <>
@@ -26,10 +32,13 @@ export default async function ReviewPage({ params }: { params: Promise<{ id: str
         crumbs={<><Link href={`/p/${id}`} className="hover:text-zinc-700">ダッシュボード</Link><span>/</span><span>プロダクトレビュー</span></>}
         title={`プロダクトレビュー（サイクル ${r.cycle}${r.current.label ? `：${r.current.label}` : ""}）`}
         sub={review
-          ? "全工程の成果物を読み、次のサイクルの戦略と、PM への追加指示を決めます。レビューの間、エージェントの定期実行は止めています。"
-          : `サイクル ${r.cycle} を進めています（全体 ${r.progress.total}%）。全工程が100%になると、レビューに入ります。`}
+          ? "各 PM のレビューと、①〜⑬の成果物を読み、直すところを PM に指示します。納得したら完了して、リリースに進むか、リリースせずにサイクルを終えます。その間、エージェントの定期実行は止めています。"
+          : r.state === "running"
+            ? `サイクル ${r.cycle} を進めています（全体 ${r.progress.total}%）。①〜⑬の全工程が100%になると、レビューに入ります（⑭リリースはサイクルの外）。`
+            : r.state === "done" ? `サイクル ${r.cycle} は終わりました。次のサイクルの戦略を決めて始めます。` : `いまは${r.state_label}です。`}
         actions={!review ? <StartReviewButton pid={id} complete={r.progress.complete} /> : undefined}
       />
+      <AutoRefresh active={busy} ms={4000} />
       <div className="grid gap-6 px-8 py-6 xl:grid-cols-[220px_minmax(0,1fr)]">
         <nav className="hidden xl:block" aria-label="工程の目次">
           <div className="sticky top-4 space-y-3 text-[12.5px]">
@@ -59,7 +68,14 @@ export default async function ReviewPage({ params }: { params: Promise<{ id: str
             {Object.entries(r.current.directives).map(([k, v]) => <p key={k} className="mt-1 whitespace-pre-wrap text-[12.5px] text-zinc-600"><span className="font-medium">{PM_NAME[k]}への追加指示：</span>{v}</p>)}
           </section>
           <CyclePlanEditor key={JSON.stringify(r.plan)} pid={id} plan={r.plan} current={r.cycle} example={r.example} planned={r.planned} readOnly={viewer} />
-          {review && <NextCycleForm pid={id} next={r.cycle + 1} planned={r.planned} position={r.plan[r.cycle] ?? null} />}
+          {RELEASE_STATES.includes(r.state) && (
+            <section className="flex flex-wrap items-center gap-3 rounded-xl border border-violet-300 bg-violet-50 px-5 py-3">
+              <div className="min-w-0 flex-1 text-[13px] text-violet-900">プロダクトレビューは完了しました。いまは<span className="font-semibold">{r.state_label}</span>です。</div>
+              <Link href={`/p/${id}/release`} className="btn-primary">リリースを開く</Link>
+            </section>
+          )}
+          {rounds.length > 0 && <ReviewRounds pid={id} rounds={rounds} issueStatus={r.current.review.issue_status ?? {}} active={review} readOnly={viewer} stageName={stageName} />}
+          {r.state === "done" && <NextCycleForm pid={id} next={r.cycle + 1} planned={r.planned} position={r.plan[r.cycle] ?? null} />}
           {r.deliverables.map((d) => (
             <section key={d.id} id={d.id} className="card scroll-mt-4 overflow-hidden" aria-label={`${d.no}${d.name}の成果物`}>
               <header className="flex flex-wrap items-center gap-2 border-b border-zinc-100 bg-zinc-50/70 px-5 py-3">

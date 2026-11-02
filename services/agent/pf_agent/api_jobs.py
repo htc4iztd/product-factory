@@ -5,7 +5,21 @@ from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import Response
 from pydantic import BaseModel, Field
 
-from . import agents, autodev, cycles, ghsync, imports, issues, jobs, meetings, platform_agent, pms, reports, team
+from . import (
+    agents,
+    autodev,
+    cycles,
+    ghsync,
+    imports,
+    issues,
+    jobs,
+    meetings,
+    platform_agent,
+    pms,
+    releases,
+    reports,
+    team,
+)
 from .api_collab import _p
 from .authz import Caller, caller
 from .stages import STAGE_BY_ID
@@ -201,6 +215,10 @@ def edit_team_agent(product_id: str, key: str, body: TeamAgentBody, c: Caller = 
 @router.post(P + "/team/run")
 def run_team(product_id: str, body: TeamRunBody, c: Caller = Depends(caller)):
     p = _p(c, product_id, True)
+    if cycles.paused(p.id):
+        st = cycles.state_of(p.id)
+        label = cycles.STATE_LABEL.get(st, st)
+        raise HTTPException(409, f"いまは{label}です（定期実行と「今すぐ動かす」は止めています）")
     return {"job_id": team.start(p, c.user, body.keys or list(team.KEYS))}
 
 
@@ -289,6 +307,84 @@ def start_review(product_id: str, c: Caller = Depends(caller)):
 @router.post(P + "/review/next")
 def next_cycle(product_id: str, body: NextCycleBody, c: Caller = Depends(caller)):
     return cycles.start_next(_p(c, product_id, True), c.user, body.strategy, body.directives, body.notes, body.label)
+
+
+class FixBody(BaseModel):
+    notes: str = Field(default="", max_length=4000)
+    directives: dict[str, str] = Field(default_factory=dict)  # PM ごとの修正の指示
+
+
+class CompleteBody(BaseModel):
+    next: str = Field(pattern="^(release|skip)$")  # release：リリースに進む・skip：リリースせずにサイクルを終える
+
+
+@router.post(P + "/review/fix")
+def review_fix(product_id: str, body: FixBody, c: Caller = Depends(caller)):
+    return cycles.instruct(_p(c, product_id, True), c.user, body.notes, body.directives)
+
+
+@router.post(P + "/review/again")
+def review_again(product_id: str, c: Caller = Depends(caller)):
+    return cycles.rereview(_p(c, product_id, True), c.user)
+
+
+@router.post(P + "/review/complete")
+def review_complete(product_id: str, body: CompleteBody, c: Caller = Depends(caller)):
+    return cycles.complete_review(_p(c, product_id, True), c.user, body.next)
+
+
+class TargetBody(BaseModel):
+    kind: str
+    repo: str = ""
+    workflow: str = ""
+    ref: str = ""
+    url: str = ""
+    pass_plan: bool = False
+    note: str = ""
+
+
+class SecretBody(BaseModel):
+    secret: str | None = Field(default=None, max_length=500)
+
+
+class FeedbackBody(BaseModel):
+    feedback: str = Field(default="", max_length=4000)
+
+
+class ManualBody(BaseModel):
+    ok: bool = True
+    note: str = Field(default="", max_length=2000)
+
+
+# リリース（サイクルの外）：接続先・オンボーディング・リリース前レビュー・リリース
+@router.get(P + "/release")
+def get_release(product_id: str, c: Caller = Depends(caller)):
+    return releases.view(_p(c, product_id))
+
+
+@router.put(P + "/release/target")
+def put_release_target(product_id: str, body: TargetBody, c: Caller = Depends(caller)):
+    return releases.set_target(_p(c, product_id, True), c.user, body.model_dump())
+
+
+@router.put(P + "/release/secret")
+def put_release_secret(product_id: str, body: SecretBody, c: Caller = Depends(caller)):
+    return releases.set_secret(_p(c, product_id, True), c.user, body.secret)
+
+
+@router.post(P + "/release/approve")
+def release_approve(product_id: str, c: Caller = Depends(caller)):
+    return releases.approve(_p(c, product_id, True), c.user)
+
+
+@router.post(P + "/release/changes")
+def release_changes(product_id: str, body: FeedbackBody, c: Caller = Depends(caller)):
+    return releases.request_changes(_p(c, product_id, True), c.user, body.feedback)
+
+
+@router.post(P + "/release/manual")
+def release_manual(product_id: str, body: ManualBody, c: Caller = Depends(caller)):
+    return releases.finish_manual(_p(c, product_id, True), c.user, body.ok, body.note)
 
 
 @router.put(P + "/cycle-plan")

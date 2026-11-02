@@ -3,7 +3,22 @@ from __future__ import annotations
 
 import sys
 
-from . import agents, autodev, avatars, canvasjob, imports, jobs, meetings, pms, reports, research, research_jobs, team  # noqa: F401  ジョブの処理を登録する
+from . import (  # noqa: F401  ジョブの処理を登録する
+    agents,
+    autodev,
+    avatars,
+    canvasjob,
+    cycles,
+    imports,
+    jobs,
+    meetings,
+    pms,
+    releases,
+    reports,
+    research,
+    research_jobs,
+    team,
+)
 from .db import init_db
 
 

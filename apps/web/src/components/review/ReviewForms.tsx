@@ -5,7 +5,7 @@ import { ListOrdered, Play, Plus, RotateCcw, Save, Trash2 } from "lucide-react";
 import type { CyclePlanItem } from "@/lib/agent";
 import { saveCyclePlan, startNextCycle, startReview } from "@/app/(app)/p/[id]/cycle-actions";
 
-const PMS: [string, string, string][] = [["pm_biz", "事業PM", "①〜⑤ 事業"], ["pm_design", "設計PM", "⑥〜⑪ 要求・設計"], ["pm_impl", "実装PM", "⑫〜⑭ 構築・リリース"]];
+const PMS: [string, string, string][] = [["pm_biz", "事業PM", "①〜⑤ 事業"], ["pm_design", "設計PM", "⑥〜⑪ 要求・設計"], ["pm_impl", "実装PM", "⑫〜⑬ 構築"]];
 
 // レビューを始める（全工程が100%になる前でも、PdM が始められる）
 export function StartReviewButton({ pid, complete }: { pid: string; complete: boolean }) {

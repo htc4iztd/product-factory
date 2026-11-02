@@ -465,15 +465,13 @@ def wakes_from(product_id: str, sender: str, posted: list[dict]) -> list[str]:
 def start(
     product: Product, user: str, keys: list[str], reason: str = "今すぐ動かす", plan_cycle: int | None = None
 ) -> str:
-    """エージェントを動かすジョブを作る。plan_cycle を渡すと、PM はサイクルの計画（工程ごとの目標と Issue）を立てる。"""
-    from . import cycles
-
+    """エージェントを動かすジョブを作る。plan_cycle を渡すと、PM はサイクルの計画（工程ごとの目標と Issue）を立てる。
+    プロダクトレビュー・リリースの間も、修正の Issue などで起こされた担当は動く
+    （止めるのは定期実行と「今すぐ動かす」）。"""
     ensure(product)
     keys = [k for k in (*KEYS, PM_SYNC) if k in keys]
     if not keys:
         raise TeamError(422, "動かすエージェントを選んでください")
-    if cycles.in_review(product.id):
-        raise TeamError(409, "プロダクトレビュー中です。次のサイクルを始めると、エージェントが動きます")
     conn = llmconf.resolve(product.tenant_id)
     job_id = jobs.create(
         "team",
@@ -595,7 +593,7 @@ def tick(now: dt.datetime | None = None) -> list[str]:
     claimed: dict[tuple[str, str], tuple[int, dt.datetime]] = {}
     from . import cycles
 
-    paused = {pid for _, pid, *_ in due if cycles.in_review(pid)}
+    paused = {pid for _, pid, *_ in due if cycles.paused(pid)}
     for aid, pid, key, at, expr, tz in due:
         with session() as s:
             try:

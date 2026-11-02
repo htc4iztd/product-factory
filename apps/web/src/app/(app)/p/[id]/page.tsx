@@ -21,7 +21,15 @@ export default async function ProductPage({ params }: { params: Promise<{ id: st
     agent<ApprovalItem[]>(`/products/${id}/approvals`).catch(() => [] as ApprovalItem[]),
     agent<CycleState>(`/products/${id}/cycle`).catch(() => null),
   ]);
-  const review = cy?.state === "review";
+  const review = !!cy && cy.state !== "running";
+  const toRelease = !!cy && ["onboarding", "prerelease", "releasing"].includes(cy.state);
+  const NEXT: Record<string, string> = {
+    review: "各 PM のレビューを読み、直すところを PM に指示してください。",
+    onboarding: "リリースエージェントが、リリース先の環境と方式を定義しています。",
+    prerelease: "リリースの定義を確かめ、承認するか直させてください。",
+    releasing: "接続先でリリースしています。",
+    done: "次のサイクルの戦略を決めて始めてください。",
+  };
   const active = d.stages.filter((s) => s.enabled);
   const done = active.filter((s) => s.status === "completed").length;
   const waiting = active.filter((s) => s.pending_kind === "approval");
@@ -63,11 +71,11 @@ export default async function ProductPage({ params }: { params: Promise<{ id: st
       </PageHeader>
       <div className="space-y-6 px-8 py-6">
         {review && (
-          <section className="flex flex-wrap items-center gap-3 rounded-xl border border-amber-300 bg-amber-50 px-5 py-3" aria-label="プロダクトレビュー中">
+          <section className="flex flex-wrap items-center gap-3 rounded-xl border border-amber-300 bg-amber-50 px-5 py-3" aria-label={cy!.state_label}>
             <div className="min-w-0 flex-1 text-[13px] text-amber-900">
-              <span className="font-semibold">プロダクトレビュー中（サイクル {cy!.cycle}）</span>：全工程の成果物を確かめ、次のサイクルの戦略を決めてください。その間、エージェントの定期実行は止めています。
+              <span className="font-semibold">{cy!.state_label}（サイクル {cy!.cycle}）</span>：{NEXT[cy!.state]}その間、エージェントの定期実行は止めています。
             </div>
-            <Link href={`/p/${id}/review`} className="btn-primary">レビューを開く</Link>
+            <Link href={`/p/${id}/${toRelease ? "release" : "review"}`} className="btn-primary">{toRelease ? "リリースを開く" : cy!.state === "done" ? "次のサイクルへ" : "レビューを開く"}</Link>
           </section>
         )}
         {cy && !review && cy.progress.complete && (

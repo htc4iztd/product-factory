@@ -91,7 +91,7 @@ export type StageSummary = {
 export type Product = {
   id: string; name: string; idea: string; scope: string; mode: string; status: string;
   cover_image_id: string | null; repo: string | null; repo_branch: string | null; created_at: string;
-  cycle?: number; cycle_state?: "running" | "review";
+  cycle?: number; cycle_state?: string;
 };
 // サイクルとプロダクトレビュー
 export type CycleGoal = { goal: string; plan: string; done_when: string; by: string };
@@ -99,10 +99,31 @@ export type CyclePlanItem = { label: string; purpose: string; exit: string };
 export type CycleT = {
   number: number; label: string; purpose: string; started_at: string | null; review_at: string | null; ended_at: string | null; strategy: string;
   directives: Record<string, string>; goals: Record<string, CycleGoal>; review_notes: string; snapshot: Record<string, number>; decided_by: string;
+  review: ReviewT; release: ReleaseT;
 };
+// プロダクトレビュー：回ごとに PM のレビュー → PdM の修正指示 → 担当が直す
+export type PmFinding = { stage: string; severity: "high" | "medium" | "low"; text: string; fix: string };
+export type ReviewRound = {
+  n: number; status: "reviewing" | "ready" | "fixing" | "fixed"; started_at: string; reviewed_at?: string; fixed_at?: string; job_id?: string;
+  pm: Record<string, { verdict: "ok" | "issues"; summary: string; findings: PmFinding[] }>; notes: string; fixes: { pm: string; text: string; issues: number[] }[];
+};
+export type ReviewT = { rounds: ReviewRound[]; done_at?: string; next?: "release" | "skip"; issue_status: Record<string, string> };
+// リリース（サイクルの外）
+export type ReleasePlan = {
+  environment: { kind: string; provider: string; region: string; summary: string }; method: { strategy: string; summary: string };
+  steps: { title: string; detail: string }[]; configs: { name: string; value: string }[]; checks: string[]; rollback: string; risks: string[];
+};
+export type ReleaseT = {
+  status?: "defining" | "review" | "releasing" | "waiting_manual" | "released" | "failed"; plan?: ReleasePlan; feedback?: string; error?: string | null;
+  history?: { plan: ReleasePlan; feedback: string; at: string }[]; approved_by?: string; approved_at?: string; defined_at?: string;
+  result?: { status: string; detail: string; log: string[]; at: string };
+};
+export type ReleaseTarget = { kind?: "github_actions" | "webhook" | "manual"; kind_label: string; repo?: string; workflow?: string; ref?: string; url?: string; pass_plan?: boolean; note?: string; has_secret: boolean };
+export type ReleaseView = CycleState & { target: ReleaseTarget; kinds: Record<string, string>; releases: ({ number: number; label: string } & ReleaseT)[] };
 export type CycleProgress = { stages: { id: string; no: string; name: string; pct: number; status: string }[]; total: number; complete: boolean };
+export type CycleStateName = "running" | "review" | "onboarding" | "prerelease" | "releasing" | "done";
 export type CycleState = {
-  cycle: number; state: "running" | "review"; current: CycleT; progress: CycleProgress; past: CycleT[];
+  cycle: number; state: CycleStateName; state_label: string; current: CycleT; progress: CycleProgress; past: CycleT[];
   plan: CyclePlanItem[]; planned: boolean; example: CyclePlanItem[];
 };
 export type Deliverable = {

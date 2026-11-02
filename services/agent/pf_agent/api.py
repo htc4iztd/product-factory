@@ -29,6 +29,7 @@ from . import (
     ontology,
     personas,
     platform_agent,
+    releases,
     reports,
     research,
     team,
@@ -72,6 +73,11 @@ async def _sync_error(_, exc: ghsync.SyncError):
 
 @app.exception_handler(autodev.AutodevError)
 async def _autodev_error(_, exc: autodev.AutodevError):
+    return JSONResponse(status_code=exc.status, content={"detail": exc.message})
+
+
+@app.exception_handler(releases.ReleaseError)
+async def _release_error(_, exc: releases.ReleaseError):
     return JSONResponse(status_code=exc.status, content={"detail": exc.message})
 
 

@@ -35,3 +35,26 @@ export async function startNextCycle(pid: string, body: { strategy: string; dire
     throw e;
   }
 }
+
+async function post(pid: string, path: string, method: string, body?: unknown): Promise<{ error?: string }> {
+  try {
+    await agent(`/products/${pid}${path}`, { method, body });
+    revalidatePath(`/p/${pid}`, "layout");
+    return {};
+  } catch (e) {
+    if (e instanceof AgentError) return { error: e.message };
+    throw e;
+  }
+}
+
+// プロダクトレビューの回：PM に修正を指示する・もう一度レビューさせる・完了する
+export async function reviewFix(pid: string, notes: string, directives: Record<string, string>) { return post(pid, "/review/fix", "POST", { notes, directives }); }
+export async function reviewAgain(pid: string) { return post(pid, "/review/again", "POST"); }
+export async function reviewComplete(pid: string, next: "release" | "skip") { return post(pid, "/review/complete", "POST", { next }); }
+
+// リリース
+export async function saveReleaseTarget(pid: string, body: Record<string, unknown>) { return post(pid, "/release/target", "PUT", body); }
+export async function saveReleaseSecret(pid: string, secret: string | null) { return post(pid, "/release/secret", "PUT", { secret }); }
+export async function approveRelease(pid: string) { return post(pid, "/release/approve", "POST"); }
+export async function requestReleaseChanges(pid: string, feedback: string) { return post(pid, "/release/changes", "POST", { feedback }); }
+export async function finishManualRelease(pid: string, ok: boolean, note: string) { return post(pid, "/release/manual", "POST", { ok, note }); }
