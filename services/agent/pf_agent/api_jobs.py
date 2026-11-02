@@ -256,6 +256,17 @@ class NextCycleBody(BaseModel):
     strategy: str = Field(min_length=1, max_length=8000)
     directives: dict[str, str] = Field(default_factory=dict)  # PM ごとの追加指示 {pm_biz: ...}
     notes: str = Field(default="", max_length=8000)  # このサイクルのレビューの所見
+    label: str = Field(default="", max_length=60)  # 計画にないサイクルを始めるときの位置付け
+
+
+class PlanItem(BaseModel):
+    label: str = Field(max_length=60)
+    purpose: str = Field(default="", max_length=2000)
+    exit: str = Field(default="", max_length=1000)
+
+
+class PlanBody(BaseModel):
+    items: list[PlanItem] = Field(max_length=12)
 
 
 # サイクルとプロダクトレビュー
@@ -277,7 +288,12 @@ def start_review(product_id: str, c: Caller = Depends(caller)):
 
 @router.post(P + "/review/next")
 def next_cycle(product_id: str, body: NextCycleBody, c: Caller = Depends(caller)):
-    return cycles.start_next(_p(c, product_id, True), c.user, body.strategy, body.directives, body.notes)
+    return cycles.start_next(_p(c, product_id, True), c.user, body.strategy, body.directives, body.notes, body.label)
+
+
+@router.put(P + "/cycle-plan")
+def put_cycle_plan(product_id: str, body: PlanBody, c: Caller = Depends(caller)):
+    return cycles.set_plan(_p(c, product_id, True), c.user, [x.model_dump() for x in body.items])
 
 
 class GithubSyncBody(BaseModel):

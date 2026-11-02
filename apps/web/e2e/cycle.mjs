@@ -31,11 +31,24 @@ await page.getByLabel("プロダクト名").fill("ふたりの家計簿");
 await btn("この内容でプロダクトをつくる").click();
 await page.waitForURL(/\/p\/[0-9a-f]+$/);
 const pid = page.url().split("/p/")[1];
-await page.getByText("サイクル 1", { exact: true }).waitFor();
+await page.getByText(/^サイクル 1/).first().waitFor();
 
-// レールからプロダクトレビューへ。100%前でも PdM が始められる（確認のダイアログあり）
+// レールからプロダクトレビューへ。まずサイクルの計画（数と位置付け）を決める
 await page.getByRole("navigation", { name: "エージェント" }).getByRole("link", { name: "プロダクトレビュー" }).click();
 await page.waitForURL(/\/review$/);
+const plan = page.getByLabel("サイクルの計画");
+await plan.getByRole("button", { name: "例を入れる" }).click();
+await plan.getByLabel("サイクル 3 の位置付け").waitFor();
+await plan.getByLabel("サイクル 1 の位置付け").fill("PoC用プロトタイプ");
+await plan.getByRole("button", { name: "保存" }).click();
+await plan.getByText("保存しました").waitFor();
+await page.getByRole("heading", { name: /プロダクトレビュー（サイクル 1：PoC用プロトタイプ）/ }).waitFor();
+await page.goto(`${BASE}/p/${pid}`);
+await page.getByText("サイクル 1：PoC用プロトタイプ（全 3）").waitFor();
+await page.goto(`${BASE}/p/${pid}/s/s01`);
+await page.getByLabel("このサイクルの目標").getByText(/PoC用プロトタイプ/).waitFor();
+await page.goto(`${BASE}/p/${pid}/review`);
+// 100%前でも PdM がレビューを始められる（確認のダイアログあり）
 await btn("プロダクトレビューを始める").click();
 await page.getByText("レビューの間、エージェントの定期実行は止めています。").first().waitFor();
 // 全工程の成果物が1画面に並ぶ
@@ -46,20 +59,21 @@ await page.goto(`${BASE}/p/${pid}`);
 await page.getByLabel("プロダクトレビュー中").waitFor();
 await page.getByRole("link", { name: "レビューを開く" }).click();
 await page.waitForURL(/\/review$/);
-// 次のサイクルの戦略と、PM への追加指示
+// 次のサイクルの位置付け（計画の MVP）が出る。戦略と、PM への追加指示を書く
+await page.getByLabel("次のサイクル").getByText("サイクル 2 の位置付け：MVP").waitFor();
 await page.getByLabel("レビューの所見").fill("入力が面倒という声が多い");
 await page.getByLabel("次のサイクルの戦略").fill("継続率を上げる。夫婦で同じ家計を見られるようにする");
 await page.getByLabel("事業PMへの追加指示").fill("競合の共有機能を調べ直す");
 await btn("サイクル 2 を始める").click();
 await page.waitForURL(new RegExp(`/p/${pid}$`));
-await page.getByText("サイクル 2", { exact: true }).waitFor();
+await page.getByText(/サイクル 2：MVP/).first().waitFor();
 // PM が工程ごとの目標を決め、担当に Issue を出す
 await page.goto(`${BASE}/p/${pid}/issues?all=1`);
 for (let i = 0; i < 30 && !(await page.getByText(/サイクル 2 の目標/).count()); i++) { await page.waitForTimeout(1000); await page.reload(); }
 await page.getByText(/サイクル 2 の目標/).first().waitFor();
 // 工程の画面に、このサイクルの目標が出る
 await page.goto(`${BASE}/p/${pid}/s/s01`);
-await page.getByLabel("このサイクルの目標").getByText("サイクル 2 の目標：").waitFor();
+await page.getByLabel("このサイクルの目標").getByText(/の目標：/).waitFor();
 await shot("c2-stage-goal");
 // レビュー画面に、これまでのサイクルが残る
 await page.goto(`${BASE}/p/${pid}/review`);

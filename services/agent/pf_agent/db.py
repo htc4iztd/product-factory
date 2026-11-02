@@ -52,6 +52,8 @@ class Product(Base):
     gh_synced_at: Mapped[str | None] = mapped_column(String(30), nullable=True)   # 最後に取り込んだ時刻
     # サイクル（全工程が100%になったら1回り。プロダクトレビューを経て次のサイクルへ）
     cycle: Mapped[int] = mapped_column(Integer, default=1)
+    # サイクルの計画（PdM が決める）：[{label: 位置付け, purpose: 目的, exit: 終える条件}]。並べた数がサイクル数
+    cycle_plan: Mapped[list | None] = mapped_column(JSON, nullable=True)
     # running | review（レビュー中は定期実行を止める）
     cycle_state: Mapped[str] = mapped_column(String(10), default="running")
     created_by: Mapped[str] = mapped_column(String(200))
@@ -103,6 +105,9 @@ class ProductCycle(Base):
     started_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), default=_now)
     review_at: Mapped[dt.datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     ended_at: Mapped[dt.datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    # 位置付け（PoC用プロトタイプ・MVP など。計画から写す）
+    label: Mapped[str] = mapped_column(String(60), default="")
+    purpose: Mapped[str] = mapped_column(Text, default="")           # 位置付けの目的と終える条件（計画から写す）
     strategy: Mapped[str] = mapped_column(Text, default="")          # このサイクルの戦略（前のレビューで PdM が決めた）
     directives: Mapped[dict | None] = mapped_column(JSON, nullable=True)  # PM ごとの追加指示 {pm: text}
     goals: Mapped[dict | None] = mapped_column(JSON, nullable=True)       # 工程ごとの目標 {sid: {goal, plan, by}}
@@ -997,7 +1002,7 @@ _ADDED_COLUMNS = {
                    "approval_required": "BOOLEAN DEFAULT {false}"},
     "artifacts": {"data": "JSON"},
     "products": {"cover_image_id": "VARCHAR(32)", "repo": "VARCHAR(200)", "repo_branch": "VARCHAR(100)",
-                 "cycle": "INTEGER DEFAULT 1", "cycle_state": "VARCHAR(10) DEFAULT 'running'",
+                 "cycle": "INTEGER DEFAULT 1", "cycle_state": "VARCHAR(10) DEFAULT 'running'", "cycle_plan": "JSON",
                  "gh_sync": "VARCHAR(8) DEFAULT 'off'", "gh_import": "BOOLEAN DEFAULT {false}",
                  "gh_synced_at": "VARCHAR(30)"},
     "chat_messages": {"session_id": "VARCHAR(32)", "attachments": "JSON"},
@@ -1010,6 +1015,7 @@ _ADDED_COLUMNS = {
     "research_libraries": {"issue_defs": "JSON", "layers": "JSON", "topics": "JSON"},
     "research_articles": {"title_ja": "VARCHAR(500) DEFAULT ''", "country": "VARCHAR(8) DEFAULT ''"},
     "research_notes": {"data": "JSON"},
+    "product_cycles": {"label": "VARCHAR(60) DEFAULT ''", "purpose": "TEXT DEFAULT ''"},
 }
 
 

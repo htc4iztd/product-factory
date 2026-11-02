@@ -119,3 +119,40 @@ def test_cycle_review_and_next(env):
     # 手動でもレビューを始められる。二重には始められない
     assert c.post(P + "/review/start", headers=H).json()["state"] == "review"
     assert c.post(P + "/review/start", headers=H).status_code == 409
+
+
+def test_cycle_plan(env):
+    """サイクル数と位置付けは PdM が決める。位置付けは AI の指示と工程の画面に入り、
+    計画を超えるときは位置付けを書いて足す。"""
+    from pf_agent import cycles, team
+
+    c, p = env
+    P = f"/products/{p.id}"
+    st = c.get(P + "/cycle", headers=H).json()
+    assert st["plan"] == [{"label": "MVP", "purpose": "", "exit": ""}] and not st["planned"] and len(st["example"]) == 3
+    items = [{"label": "PoC用プロトタイプ", "purpose": "仮説を確かめる", "exit": "続けるかを決められる"},
+             {"label": "MVP", "purpose": "最初の利用者に届ける"}]
+    assert c.put(P + "/cycle-plan", headers=VIEWER, json={"items": items}).status_code == 403
+    assert c.put(P + "/cycle-plan", headers=H, json={"items": [{"label": " "}]}).status_code == 422
+    st = c.put(P + "/cycle-plan", headers=H, json={"items": items}).json()
+    assert st["planned"] and st["current"]["label"] == "PoC用プロトタイプ"
+    assert "続けるかを決められる" in st["current"]["purpose"]
+    # 位置付けは担当の指示（プロンプト）と工程の画面に入る
+    assert "位置付け：PoC用プロトタイプ" in team._goal_md(p.id, "s01")
+    assert c.get(P + "/stages/s01", headers=H).json()["cycle_goal"]["label"] == "PoC用プロトタイプ"
+    # サイクル 2 は計画の MVP
+    finish_all(p)
+    cycles.check_all()
+    r = c.post(P + "/review/next", headers=H, json={"strategy": "最初の利用者に出す"}).json()
+    assert r["current"]["label"] == "MVP" and r["past"][0]["label"] == "PoC用プロトタイプ"
+    wait_idle(c, p.id)
+    assert "MVP" in r["current"]["label"]
+    # 今のサイクルより短い計画にはできない
+    assert c.put(P + "/cycle-plan", headers=H, json={"items": items[:1]}).status_code == 422
+    # 計画を超える：位置付けを書かないと始められない。書くと計画に足す
+    c.post(P + "/review/start", headers=H)
+    assert c.post(P + "/review/next", headers=H, json={"strategy": "売る"}).status_code == 422
+    r = c.post(P + "/review/next", headers=H, json={"strategy": "売る", "label": "MMP"}).json()
+    assert r["cycle"] == 3 and r["current"]["label"] == "MMP"
+    assert [x["label"] for x in r["plan"]] == ["PoC用プロトタイプ", "MVP", "MMP"]
+    wait_idle(c, p.id)

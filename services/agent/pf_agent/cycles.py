@@ -21,6 +21,16 @@ from .db import Product, ProductCycle, TeamAgent, session
 from .stages import COMPLETED, NOT_STARTED, STAGE_BY_ID, STAGES
 
 REVIEW, RUNNING = "review", "running"
+MAX_CYCLES = 12
+# 位置付けの例（画面の「例を入れる」）
+EXAMPLE_PLAN = [
+    {"label": "PoC用プロトタイプ", "purpose": "一番大事な仮説が成り立つかを、最小の作りで確かめる。作り込まない",
+     "exit": "仮説の判定ができる（続ける・変える・やめるを決められる）"},
+    {"label": "MVP", "purpose": "最初の利用者に使ってもらい、価値が届くかを測れる最小の製品にする",
+     "exit": "最初の利用者が主要な使い方を最後まで通せる。主要指標が取れる"},
+    {"label": "MMP", "purpose": "お金を払ってもらえる品質・機能・運用まで仕上げ、市場に出す",
+     "exit": "販売・サポート・運用の準備ができ、出してよいと判断できる"},
+]
 
 
 class CycleError(Exception):
@@ -37,8 +47,26 @@ def _iso(t: dt.datetime | None) -> str | None:
     return (t if t.tzinfo else t.replace(tzinfo=dt.UTC)).isoformat() if t else None
 
 
+def plan_of(p: Product) -> list[dict]:
+    """サイクルの計画。決めていなければ、作ったときの範囲（MVP・PoC）を1サイクル目にする。"""
+    if p.cycle_plan:
+        return [dict(x) for x in p.cycle_plan]
+    return [{"label": "PoC" if p.scope == "poc" else "MVP", "purpose": "", "exit": ""}]
+
+
+def entry(p: Product, n: int) -> dict | None:
+    pl = plan_of(p)
+    return pl[n - 1] if 0 < n <= len(pl) else None
+
+
+def _purpose(e: dict | None) -> str:
+    if not e:
+        return ""
+    return "\n".join(x for x in (e.get("purpose", ""), f"終える条件：{e['exit']}" if e.get("exit") else "") if x)
+
+
 def current(product_id: str) -> ProductCycle:
-    """今のサイクルの記録（なければ作る）。"""
+    """今のサイクルの記録（なければ作る。位置付けは計画から写す）。"""
     with session() as s:
         p = s.get(Product, product_id)
         n = p.cycle or 1
@@ -46,7 +74,9 @@ def current(product_id: str) -> ProductCycle:
             select(ProductCycle).where(ProductCycle.product_id == product_id, ProductCycle.number == n)
         ).scalar_one_or_none()
         if c is None:
-            c = ProductCycle(product_id=product_id, number=n, started_at=p.created_at if n == 1 else _now())
+            e = entry(p, n) or {}
+            c = ProductCycle(product_id=product_id, number=n, started_at=p.created_at if n == 1 else _now(),
+                             label=e.get("label", ""), purpose=_purpose(e))
             s.add(c)
             s.commit()
         s.expunge(c)
@@ -80,6 +110,8 @@ def progress(product_id: str) -> dict:
 def cycle_dict(c: ProductCycle) -> dict:
     return {
         "number": c.number,
+        "label": c.label or "",
+        "purpose": c.purpose or "",
         "started_at": _iso(c.started_at),
         "review_at": _iso(c.review_at),
         "ended_at": _iso(c.ended_at),
@@ -106,8 +138,36 @@ def state(product: Product) -> dict:
             ).scalars()
         ]
         st = p.cycle_state or RUNNING
+        plan, planned = plan_of(p), bool(p.cycle_plan)
     return {"cycle": cur.number, "state": st, "current": cycle_dict(cur), "progress": progress(product.id),
-            "past": past}
+            "past": past, "plan": plan, "planned": planned, "example": EXAMPLE_PLAN}
+
+
+def set_plan(product: Product, actor: str, items: list[dict]) -> dict:
+    """サイクルの計画を決める（PdM）。今のサイクルより短くはできない。今のサイクルの位置付けも書き換わる。"""
+    rows = []
+    for x in items:
+        label = str(x.get("label") or "").strip()[:60]
+        if not label:
+            raise CycleError(422, "位置付け（PoC用プロトタイプ・MVP など）が空のサイクルがあります")
+        rows.append({"label": label, "purpose": str(x.get("purpose") or "").strip()[:2000],
+                     "exit": str(x.get("exit") or "").strip()[:1000]})
+    if not rows or len(rows) > MAX_CYCLES:
+        raise CycleError(422, f"サイクルは1〜{MAX_CYCLES}個で決めてください")
+    with session() as s:
+        p = s.get(Product, product.id)
+        n = p.cycle or 1
+        if len(rows) < n:
+            raise CycleError(422, f"いまサイクル {n} です。それより少ない計画にはできません")
+        p.cycle_plan = rows
+        c = s.execute(
+            select(ProductCycle).where(ProductCycle.product_id == product.id, ProductCycle.number == n)
+        ).scalar_one_or_none()
+        if c is not None:
+            c.label, c.purpose = rows[n - 1]["label"], _purpose(rows[n - 1])
+        s.commit()
+    repo.log(product.id, None, "human", actor, "cycle.plan", {"plan": [r["label"] for r in rows]})
+    return state(product)
 
 
 def in_review(product_id: str) -> bool:
@@ -182,7 +242,9 @@ class PlanOut(BaseModel):
     goals: list[GoalOut]
 
 
-def start_next(product: Product, actor: str, strategy: str, directives: dict[str, str], notes: str = "") -> dict:
+def start_next(
+    product: Product, actor: str, strategy: str, directives: dict[str, str], notes: str = "", label: str = ""
+) -> dict:
     """次のサイクルを始める：%を0に戻し、PM を先に動かす（PM が工程ごとの目標と計画を決めて担当に Issue を出す）。"""
     from .team import PMS, start
 
@@ -195,16 +257,26 @@ def start_next(product: Product, actor: str, strategy: str, directives: dict[str
         if (p.cycle_state or RUNNING) != REVIEW:
             raise CycleError(409, "プロダクトレビュー中ではありません")
         old = p.cycle or 1
+        n = old + 1
+        e = entry(p, n)
+        if e is None or (label.strip() and not p.cycle_plan):
+            # 計画を超える：位置付けを書いてもらい、計画に足す（計画を決めていなければ、位置付けなしでも進める）
+            if label.strip():
+                e = {"label": label.strip()[:60], "purpose": "", "exit": ""}
+                p.cycle_plan = [*plan_of(p)[: n - 1], e]
+            elif p.cycle_plan:
+                raise CycleError(422, f"サイクル {n} は計画にありません。位置付けを書くと、計画に足して始めます")
+            else:
+                e = {"label": "", "purpose": "", "exit": ""}
         c = s.execute(
             select(ProductCycle).where(ProductCycle.product_id == product.id, ProductCycle.number == old)
         ).scalar_one_or_none()
         if c is not None:
             c.ended_at, c.review_notes, c.decided_by = _now(), notes.strip()[:8000], actor
-        n = old + 1
         s.add(
             ProductCycle(
                 product_id=product.id, number=n, started_at=_now(), strategy=strategy[:8000], directives=directives,
-                goals={}, decided_by=actor,
+                goals={}, decided_by=actor, label=e["label"], purpose=_purpose(e),
             )
         )
         p.cycle, p.cycle_state = n, RUNNING
@@ -240,7 +312,8 @@ def plan_for(product: Product, pm: str, n: int, conn, job_id: str) -> tuple[list
     if conn.provider == "stub":
         llm._record("stub", 0, 0)
         out = PlanOut(goals=[
-            GoalOut(stage=sid, goal=f"サイクル {n}：{c.strategy[:60]} に沿って{STAGE_BY_ID[sid].name}を見直す",
+            GoalOut(stage=sid, goal=f"サイクル {n}（{c.label}）"
+                f"：{c.strategy[:40]} に沿って{STAGE_BY_ID[sid].name}を見直す",
                     plan="- 戦略に関係する項目を見直す\n- 下流への影響を掲示板で確かめる",
                     done_when="見直した項目が戦略に沿っていて、必須が埋まっている")
             for sid in mine
@@ -256,6 +329,7 @@ def plan_for(product: Product, pm: str, n: int, conn, job_id: str) -> tuple[list
             f"あなたはプロダクト「{product.name}」（{product.idea}）の{name_of(pm)}です。"
             f"サイクル {n} が始まりました（前のサイクルの成果物はそのまま残っています。作り直しではなくエンハンス）。\n"
             + prep.header()
+            + _position_md(c)
             + f"\n\n## このサイクルの戦略（PdM がレビューで決めた）\n{c.strategy}\n"
             + (f"\n## {name_of(pm)}への追加指示\n{directive}\n" if directive else "")
             + "\n## 出力\n- goals：領域の工程ごとに1つ（stage は "
@@ -295,6 +369,18 @@ def plan_for(product: Product, pm: str, n: int, conn, job_id: str) -> tuple[list
     return wake, f"サイクル {n} の目標 {len([g for g in out.goals if g.stage in mine])} 件・Issue {len(wake)} 件"
 
 
+def _position_md(c: ProductCycle) -> str:
+    """サイクルの位置付け（PdM が計画で決めた）。作り込みの深さはこれに合わせる。"""
+    if not c.label:
+        return ""
+    return (
+        f"\n\n## このサイクルの位置付け：{c.label}\n"
+        + (f"{c.purpose}\n" if c.purpose else "")
+        + "作り込みの深さ・やること・やらないことは、この位置付けに合わせる（PoC なら確かめるのに要る最小限、"
+        "MVP なら最初の利用者に価値が届く最小限、MMP なら売れる品質まで）。\n"
+    )
+
+
 def goal_of(product_id: str, stage_id: str) -> dict | None:
     with session() as s:
         p = s.get(Product, product_id)
@@ -306,9 +392,8 @@ def goal_of(product_id: str, stage_id: str) -> dict | None:
         if c is None:
             return None
         g = (c.goals or {}).get(stage_id)
-        return {"cycle": c.number, "strategy": c.strategy, **g} if g else (
-            {"cycle": c.number, "strategy": c.strategy} if c.strategy else None
-        )
+        base = {"cycle": c.number, "strategy": c.strategy, "label": c.label or "", "purpose": c.purpose or ""}
+        return {**base, **g} if g else (base if c.strategy or c.label else None)
 
 
 def pm_md(product_id: str, pm: str) -> str:
@@ -316,7 +401,7 @@ def pm_md(product_id: str, pm: str) -> str:
     from .team import DOMAIN
 
     c = current(product_id)
-    if not c.strategy and not c.goals:
+    if not c.strategy and not c.goals and not c.label:
         return ""
     goals = "\n".join(
         f"- {sid} {STAGE_BY_ID[sid].no}{STAGE_BY_ID[sid].name}：{g['goal']}（完了の条件：{g.get('done_when', '')}）"
@@ -325,7 +410,9 @@ def pm_md(product_id: str, pm: str) -> str:
     )
     d = (c.directives or {}).get(pm, "")
     return (
-        f"## サイクル {c.number}\n戦略：{c.strategy}\n"
+        f"## サイクル {c.number}" + (f"（位置付け：{c.label}）" if c.label else "") + "\n"
+        + (f"{c.purpose}\n" if c.purpose else "")
+        + (f"戦略：{c.strategy}\n" if c.strategy else "")
         + (f"あなたへの追加指示：{d}\n" if d else "")
         + (f"領域の工程の目標：\n{goals}\n" if goals else "")
         + "\n"

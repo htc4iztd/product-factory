@@ -51,7 +51,7 @@ export default async function ProductPage({ params }: { params: Promise<{ id: st
         </>}
       >
         <div className="mt-5 flex items-center gap-3">
-          {cy && <span className="rounded-full bg-zinc-900 px-2 py-0.5 text-[11px] font-medium text-white">サイクル {cy.cycle}</span>}
+          {cy && <Link href={`/p/${id}/review`} className="whitespace-nowrap rounded-full bg-zinc-900 px-2 py-0.5 text-[11px] font-medium text-white" title="サイクルの計画とプロダクトレビュー">サイクル {cy.cycle}{cy.current.label ? `：${cy.current.label}` : ""}{cy.plan.length > 1 ? `（全 ${cy.plan.length}）` : ""}</Link>}
           <div className="h-1.5 flex-1 overflow-hidden rounded-full bg-zinc-100">
             <div className="h-full rounded-full bg-gradient-to-r from-brand-500 to-violet-500" style={{ width: `${pct}%` }} />
           </div>

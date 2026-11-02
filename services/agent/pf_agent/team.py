@@ -751,7 +751,9 @@ def _goal_md(product_id: str, key: str) -> str:
     if not g:
         return ""
     return (
-        f"## サイクル {g['cycle']}（このサイクルの戦略と、この工程の目標。これに沿って動く）\n"
+        f"## サイクル {g['cycle']}（このサイクルの位置付け・戦略と、この工程の目標。これに沿って動く）\n"
+        + (f"位置付け：{g['label']}（作り込みの深さはこれに合わせる）\n" if g.get("label") else "")
+        + (f"{g['purpose']}\n" if g.get("purpose") else "")
         + (f"戦略：{g['strategy']}\n" if g.get("strategy") else "")
         + (
             f"目標：{g['goal']}\n計画：{g.get('plan', '')}\n完了の条件：{g.get('done_when', '')}\n"

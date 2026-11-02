@@ -95,15 +95,19 @@ export type Product = {
 };
 // サイクルとプロダクトレビュー
 export type CycleGoal = { goal: string; plan: string; done_when: string; by: string };
+export type CyclePlanItem = { label: string; purpose: string; exit: string };
 export type CycleT = {
-  number: number; started_at: string | null; review_at: string | null; ended_at: string | null; strategy: string;
+  number: number; label: string; purpose: string; started_at: string | null; review_at: string | null; ended_at: string | null; strategy: string;
   directives: Record<string, string>; goals: Record<string, CycleGoal>; review_notes: string; snapshot: Record<string, number>; decided_by: string;
 };
 export type CycleProgress = { stages: { id: string; no: string; name: string; pct: number; status: string }[]; total: number; complete: boolean };
-export type CycleState = { cycle: number; state: "running" | "review"; current: CycleT; progress: CycleProgress; past: CycleT[] };
+export type CycleState = {
+  cycle: number; state: "running" | "review"; current: CycleT; progress: CycleProgress; past: CycleT[];
+  plan: CyclePlanItem[]; planned: boolean; example: CyclePlanItem[];
+};
 export type Deliverable = {
   id: string; no: string; name: string; phase: string; status: string; pct: number; version: number; missing: string[]; markdown: string;
-  goal: ({ cycle: number; strategy: string } & Partial<CycleGoal>) | null; ui?: { id: string; name: string; screen: string; html: string; css: string }[];
+  goal: ({ cycle: number; strategy: string; label?: string; purpose?: string } & Partial<CycleGoal>) | null; ui?: { id: string; name: string; screen: string; html: string; css: string }[];
 };
 export type ReviewData = CycleState & { deliverables: Deliverable[] };
 export type CanvasImage = { id: string; kind: string; note: string; prompt: string; model: string; base_id: string | null; created_by: string; created_at: string };
@@ -276,7 +280,7 @@ export type StageDetail = {
   id: string; no: string; name: string; phase: string;
   framework: { view: string; title: string; summary: string; fields: FieldSpec[]; prompts: string[]; parts?: FrameworkPart[] };
   status: string; enabled: boolean; approval_required: boolean;
-  cycle_goal?: ({ cycle: number; strategy: string } & Partial<CycleGoal>) | null;
+  cycle_goal?: ({ cycle: number; strategy: string; label?: string; purpose?: string } & Partial<CycleGoal>) | null;
   pending: { kind: string; version: number } | null; audit_findings: string[] | null; missing: string[];
   current_version: number; approved_version: number; dirty: boolean;
   draft: Draft; chat: ChatMsg[]; markdown: string;
