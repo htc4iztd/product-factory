@@ -18,6 +18,7 @@ from . import (
     avatars,
     canvasjob,
     collab,
+    cycles,
     fwlib,
     ghsync,
     imports,
@@ -71,6 +72,11 @@ async def _sync_error(_, exc: ghsync.SyncError):
 
 @app.exception_handler(autodev.AutodevError)
 async def _autodev_error(_, exc: autodev.AutodevError):
+    return JSONResponse(status_code=exc.status, content={"detail": exc.message})
+
+
+@app.exception_handler(cycles.CycleError)
+async def _cycle_error(_, exc: cycles.CycleError):
     return JSONResponse(status_code=exc.status, content={"detail": exc.message})
 
 
@@ -188,6 +194,7 @@ def scheduler_tick(x_pf_internal_token: str = Header(default="")):
     if not on_cloud_run and x_pf_internal_token != os.environ.get("PF_INTERNAL_TOKEN", "dev-internal-token"):
         raise HTTPException(401, "invalid internal token")
     started = agents.tick() + team.tick()
+    cycles.check_all()  # 全工程が100%になったプロダクトは、プロダクトレビューに入れる（定期実行を止める）
     platform_agent.tick()
     return {"started": started}
 

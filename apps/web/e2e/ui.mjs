@@ -35,7 +35,7 @@ await page.goto(`${BASE}/p/${pid}/s/s06`);
 await page.getByRole("link", { name: "UI エディタを開く" }).click();
 await page.waitForURL(/\/s\/s06\/ui$/);
 const ed = page.getByLabel("UI エディタ");
-await page.locator(".gjs-cv-canvas").waitFor();
+const canvas = page.frameLocator('iframe[title="UI のキャンバス"]');
 await page.getByText("答える人：設計PM").waitFor();
 // チャットで頼む → 下見つきの承認依頼 → 承認すると、エディタの画面一覧に入る
 await page.getByLabel("チャットに話す").fill("申込画面を作って");
@@ -46,11 +46,41 @@ await shot("u1-proposal");
 await card.getByRole("button", { name: "承認", exact: true }).click();
 await card.getByText(/承認しました/).waitFor();
 await ed.getByRole("button", { name: /申込/ }).waitFor();
-await page.frameLocator(".gjs-frame").getByText("申込", { exact: true }).waitFor();
-// 表示の幅を切り替える（スマホは 375px）
-await ed.getByText("スマホ", { exact: true }).click();
-await page.waitForFunction(() => Math.round(document.querySelector(".gjs-frame")?.getBoundingClientRect().width ?? 0) === 375);
-await ed.getByText("PC", { exact: true }).click();
+await canvas.getByText("申込", { exact: true }).waitFor();
+// クリックで部品を選ぶ → 右に「選んだ部品」
+await canvas.getByText("申込", { exact: true }).click();
+await ed.getByRole("navigation", { name: "部品の位置" }).waitFor();
+// ダブルクリックで文字を直接書き換える
+await canvas.getByText("申込", { exact: true }).dblclick();
+await page.keyboard.press("ControlOrMeta+A");
+await page.keyboard.type("お申し込み");
+await page.keyboard.press("Escape");
+await canvas.getByText("お申し込み", { exact: true }).waitFor();
+await ed.getByText("保存していない変更があります").waitFor();
+// 部品を足す → 元に戻す
+await ed.getByRole("tab", { name: "部品を足す" }).click();
+await ed.getByRole("button", { name: "数値カード（3つ）" }).click();
+await canvas.getByText("今月の支出").waitFor();
+await ed.getByRole("button", { name: "元に戻す" }).click();
+await canvas.getByText("お申し込み", { exact: true }).waitFor();
+if (await canvas.getByText("今月の支出").count()) throw new Error("元に戻せていない");
+// 選んだ部品の見た目（角丸・背景）と、クラスの切り替え
+await canvas.getByText("お申し込み", { exact: true }).click();
+await ed.getByLabel("背景").fill("#eef2ff");
+await ed.getByLabel("背景").press("Tab");
+await ed.getByRole("button", { name: "複製" }).click();
+if ((await canvas.getByText("お申し込み", { exact: true }).count()) !== 2) throw new Error("複製できていない");
+await ed.getByRole("button", { name: "部品を消す" }).click();
+await shot("u2-select");
+// 表示の幅を切り替える（スマホは 390px）
+await ed.getByRole("button", { name: "スマホ" }).click();
+await page.waitForFunction(() => document.querySelector('iframe[title="UI のキャンバス"]')?.style.width === "390px");
+await ed.getByRole("button", { name: "PC" }).click();
+// コードを直接書く
+await ed.getByRole("tab", { name: "コード" }).click();
+await ed.getByLabel("CSS").fill("h1{color:#7c3aed}");
+await ed.getByRole("button", { name: "キャンバスに反映" }).click();
+await canvas.getByText("お申し込み", { exact: true }).waitFor();
 // 手で画面を足して保存
 await ed.getByRole("button", { name: "画面を足す" }).click();
 await ed.getByLabel("画面名").fill("一覧");

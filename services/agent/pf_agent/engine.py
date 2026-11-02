@@ -14,7 +14,7 @@ from google.adk.sessions import DatabaseSessionService
 from google.genai import types
 from sqlalchemy import select
 
-from . import autodev, code, fwlib, ghsync, images, llm, llmconf, repo, team
+from . import autodev, code, cycles, fwlib, ghsync, images, llm, llmconf, repo, team
 from . import frameworks as fx
 from .db import (
     PhaseReview,
@@ -454,6 +454,7 @@ class Engine:
             "trace": self._trace(product, stage_id, d),
             "autodev_targets": [STAGE_BY_ID[t].no + STAGE_BY_ID[t].name for t in autodev.targets(product.id, stage_id)],
             "variants": autodev.stage_variants(product.id, stage_id),
+            "cycle_goal": cycles.goal_of(product.id, stage_id),
             "decisions": [],
             "agent": team.member(product, stage_id),
         }
@@ -533,5 +534,5 @@ class Engine:
 def product_dict(p: Product) -> dict:
     return {"id": p.id, "name": p.name, "idea": p.idea, "scope": p.scope, "mode": p.mode,
             "status": p.status, "cover_image_id": p.cover_image_id, "repo": p.repo, "repo_branch": p.repo_branch,
-            "created_by": p.created_by,
+            "created_by": p.created_by, "cycle": p.cycle or 1, "cycle_state": p.cycle_state or "running",
             "created_at": p.created_at.isoformat()}

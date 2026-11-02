@@ -462,18 +462,25 @@ def wakes_from(product_id: str, sender: str, posted: list[dict]) -> list[str]:
 
 
 # ---------------- 実行（ジョブ） ----------------
-def start(product: Product, user: str, keys: list[str], reason: str = "今すぐ動かす") -> str:
+def start(
+    product: Product, user: str, keys: list[str], reason: str = "今すぐ動かす", plan_cycle: int | None = None
+) -> str:
+    """エージェントを動かすジョブを作る。plan_cycle を渡すと、PM はサイクルの計画（工程ごとの目標と Issue）を立てる。"""
+    from . import cycles
+
     ensure(product)
     keys = [k for k in (*KEYS, PM_SYNC) if k in keys]
     if not keys:
         raise TeamError(422, "動かすエージェントを選んでください")
+    if cycles.in_review(product.id):
+        raise TeamError(409, "プロダクトレビュー中です。次のサイクルを始めると、エージェントが動きます")
     conn = llmconf.resolve(product.tenant_id)
     job_id = jobs.create(
         "team",
         product.tenant_id,
         product.id,
         user,
-        {"keys": keys, "reason": reason},
+        {"keys": keys, "reason": reason, **({"plan_cycle": plan_cycle} if plan_cycle else {})},
         total=len(keys),
         model=conn.chat_model,
         tasks=[{"id": k, "name": name_of(k) if k == PM_SYNC else f"{name_of(k)}が動く", "group": "予定", "deps": []}
@@ -586,6 +593,9 @@ def tick(now: dt.datetime | None = None) -> list[str]:
         ).all()
     by: dict[str, list[str]] = {}
     claimed: dict[tuple[str, str], tuple[int, dt.datetime]] = {}
+    from . import cycles
+
+    paused = {pid for _, pid, *_ in due if cycles.in_review(pid)}
     for aid, pid, key, at, expr, tz in due:
         with session() as s:
             try:
@@ -596,7 +606,7 @@ def tick(now: dt.datetime | None = None) -> list[str]:
                 update(TeamAgent).where(TeamAgent.id == aid, TeamAgent.next_run_at == at).values(next_run_at=nxt)
             ).rowcount
             s.commit()
-        if ok != 1:
+        if ok != 1 or pid in paused:  # プロダクトレビュー中は動かさない（予定の時刻だけ進める）
             continue
         if key in STAGE_BY_ID:
             with session() as s:  # 確かめた時刻を残す（Issue がなくても、確認はした）
@@ -733,6 +743,25 @@ def turn_schema(writes: list[str]) -> type[BaseModel]:
     return create_model("TurnOut", **fields)
 
 
+def _goal_md(product_id: str, key: str) -> str:
+    """このサイクルの戦略と、この工程の目標（PM が決めた）。"""
+    from . import cycles
+
+    g = cycles.goal_of(product_id, key)
+    if not g:
+        return ""
+    return (
+        f"## サイクル {g['cycle']}（このサイクルの戦略と、この工程の目標。これに沿って動く）\n"
+        + (f"戦略：{g['strategy']}\n" if g.get("strategy") else "")
+        + (
+            f"目標：{g['goal']}\n計画：{g.get('plan', '')}\n完了の条件：{g.get('done_when', '')}\n"
+            if g.get("goal")
+            else ""
+        )
+        + "\n"
+    )
+
+
 def _prompt(
     product: Product, key: str, mission: str, header: str, issues_md: str, writes: list[str], box_md: str = ""
 ) -> str:
@@ -742,7 +771,8 @@ def _prompt(
         "掲示板で自分宛てに来た確認に答えます。"
         f"PdM には直接話しかけず、聞きたいことは {pm}（{name_of(pm)}）に返します。\n"
         f"## 使命（このプロダクトで）\n{mission}\n\n{header}\n\n"
-        f"## 自分宛ての Issue（これを実行する）\n{issues_md or '（なし）'}\n\n"
+        + _goal_md(product.id, key)
+        + f"## 自分宛ての Issue（これを実行する）\n{issues_md or '（なし）'}\n\n"
         + (
             f"## 掲示板の未読（自分宛て。確認には、posts でそのスレッドに answer で答える）\n{box_md}\n\n"
             if box_md
@@ -887,6 +917,7 @@ def run(job_id: str) -> None:
         product = s.get(Product, j.product_id)
         s.expunge(product)
         queue = list(j.params["keys"])
+        plan_cycle = j.params.get("plan_cycle")
     first = set(queue)  # 予定・「今すぐ動かす」で動くもの（PM は定時の状況確認をする）。起こされた PM は答えるだけ
     conn = llmconf.resolve(product.tenant_id)
     done: list[str] = []
@@ -912,6 +943,12 @@ def run(job_id: str) -> None:
         if key == PM_SYNC:
             with jobs.task(job_id, tid):
                 wake, detail = pms.sync(product, job_id, conn)
+                jobs.set_task(job_id, tid, detail=detail)
+        elif key in PMS and plan_cycle and key in first and key not in done:
+            from . import cycles
+
+            with jobs.task(job_id, tid):  # 新しいサイクル：PM が先に工程ごとの目標と計画を決め、担当に Issue を出す
+                wake, detail = cycles.plan_for(product, key, plan_cycle, conn, job_id)
                 jobs.set_task(job_id, tid, detail=detail)
         elif key in PMS:
             with jobs.task(job_id, tid):

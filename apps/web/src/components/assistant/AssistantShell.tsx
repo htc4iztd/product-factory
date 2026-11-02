@@ -139,6 +139,9 @@ function Feed({ msgs, onChanged }: { msgs: AssistantMsg[]; onChanged: (m: Assist
               </div>
               {m.context.reply_to && <QuoteBox q={m.context.reply_to} dark={me} />}
               <div className="whitespace-pre-wrap">{m.text}</div>
+              {(m.context as { link?: string }).link && (
+                <a href={(m.context as { link?: string }).link} className="btn-secondary btn-sm mt-2">{m.context.label ?? "開く"}を開く</a>
+              )}
               <SentAttachments items={m.attachments as never} dark={me} />
               {m.actions.map((a) => <ActionCard key={a.id} m={m} a={a} onChanged={onChanged} />)}
               {(m.context.ask === "question" || m.context.ask === "consult") && (

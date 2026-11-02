@@ -251,6 +251,8 @@ def _detect_product(p: Product, now: dt.datetime) -> list[dict]:
     from .team import ACTIONABLE, KEYS, OPEN, PMS, name_of
 
     out: list[dict] = []
+    if (p.cycle_state or "running") == "review":  # プロダクトレビュー中は止めているので、遅れ・止まりとは扱わない
+        return out
     with session() as s:
         agents = {a.key: a for a in s.execute(select(TeamAgent).where(TeamAgent.product_id == p.id)).scalars()}
         issues = list(

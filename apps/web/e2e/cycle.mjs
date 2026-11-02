@@ -1,0 +1,68 @@
+// サイクルとプロダクトレビュー：レビューを始める（定期実行を止める）→ 全工程の成果物を1画面で読む →
+// 次のサイクルの戦略と PM への追加指示を書く → サイクル 2 が始まり、PM が工程ごとの目標を決めて担当に Issue を出す
+// 使い方: BASE=http://localhost:3000 SHOTS=./shots node e2e/cycle.mjs
+import { chromium } from "playwright";
+import fs from "node:fs";
+
+const BASE = process.env.BASE ?? "http://localhost:3000";
+const SHOTS = process.env.SHOTS ?? "./shots";
+fs.mkdirSync(SHOTS, { recursive: true });
+const browser = await chromium.launch();
+const page = await browser.newPage({ viewport: { width: 1600, height: 1000 } });
+page.setDefaultTimeout(30000);
+page.on("dialog", (d) => d.accept());
+const shot = (n, full = false) => page.screenshot({ path: `${SHOTS}/${n}.png`, fullPage: full });
+const btn = (name, exact = false) => page.getByRole("button", { name, exact });
+
+await page.goto(`${BASE}/register`);
+await page.fill("input[name=name]", "CYCLE");
+await page.fill("input[name=email]", `cycle-${Date.now()}@example.com`);
+await page.fill("input[name=password]", "password123");
+await btn("登録して始める").click();
+await page.waitForURL(`${BASE}/`);
+await page.goto(`${BASE}/new`);
+for (const a of ["共働き世帯の家計簿アプリ", "夫婦で家計を共有できない", "レシートを撮るだけで記録できる。MVP で"]) {
+  await page.getByText("考えています…").waitFor({ state: "detached" });
+  await page.getByLabel("返事").fill(a);
+  await btn("送信", true).click();
+}
+await page.getByText("作れます", { exact: true }).waitFor();
+await page.getByLabel("プロダクト名").fill("ふたりの家計簿");
+await btn("この内容でプロダクトをつくる").click();
+await page.waitForURL(/\/p\/[0-9a-f]+$/);
+const pid = page.url().split("/p/")[1];
+await page.getByText("サイクル 1", { exact: true }).waitFor();
+
+// レールからプロダクトレビューへ。100%前でも PdM が始められる（確認のダイアログあり）
+await page.getByRole("navigation", { name: "エージェント" }).getByRole("link", { name: "プロダクトレビュー" }).click();
+await page.waitForURL(/\/review$/);
+await btn("プロダクトレビューを始める").click();
+await page.getByText("レビューの間、エージェントの定期実行は止めています。").first().waitFor();
+// 全工程の成果物が1画面に並ぶ
+for (const n of ["①アイディエーションの成果物", "⑨アプリケーション設計の成果物", "⑭リリースの成果物"]) await page.getByLabel(n).waitFor();
+await shot("c1-review", false);
+// レビュー中は動かせない
+await page.goto(`${BASE}/p/${pid}`);
+await page.getByLabel("プロダクトレビュー中").waitFor();
+await page.getByRole("link", { name: "レビューを開く" }).click();
+await page.waitForURL(/\/review$/);
+// 次のサイクルの戦略と、PM への追加指示
+await page.getByLabel("レビューの所見").fill("入力が面倒という声が多い");
+await page.getByLabel("次のサイクルの戦略").fill("継続率を上げる。夫婦で同じ家計を見られるようにする");
+await page.getByLabel("事業PMへの追加指示").fill("競合の共有機能を調べ直す");
+await btn("サイクル 2 を始める").click();
+await page.waitForURL(new RegExp(`/p/${pid}$`));
+await page.getByText("サイクル 2", { exact: true }).waitFor();
+// PM が工程ごとの目標を決め、担当に Issue を出す
+await page.goto(`${BASE}/p/${pid}/issues?all=1`);
+for (let i = 0; i < 30 && !(await page.getByText(/サイクル 2 の目標/).count()); i++) { await page.waitForTimeout(1000); await page.reload(); }
+await page.getByText(/サイクル 2 の目標/).first().waitFor();
+// 工程の画面に、このサイクルの目標が出る
+await page.goto(`${BASE}/p/${pid}/s/s01`);
+await page.getByLabel("このサイクルの目標").getByText("サイクル 2 の目標：").waitFor();
+await shot("c2-stage-goal");
+// レビュー画面に、これまでのサイクルが残る
+await page.goto(`${BASE}/p/${pid}/review`);
+await page.getByLabel("これまでのサイクル").getByText("入力が面倒という声が多い", { exact: false }).waitFor();
+console.log(`ok product=${pid}`);
+await browser.close();

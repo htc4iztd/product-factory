@@ -1,0 +1,108 @@
+import Link from "next/link";
+import Markdown from "react-markdown";
+import remarkGfm from "remark-gfm";
+import { Target } from "lucide-react";
+import { agent, type ReviewData } from "@/lib/agent";
+import { PageHeader } from "@/components/PageHeader";
+import { StatusBadge } from "@/components/StatusBadge";
+import { NextCycleForm, StartReviewButton } from "@/components/review/ReviewForms";
+import { srcDoc } from "@/lib/uikit";
+
+const when = (t: string | null) => (t ? new Date(t).toLocaleString("ja-JP", { timeZone: "Asia/Tokyo", month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit" }) : "—");
+const PM_NAME: Record<string, string> = { pm_biz: "事業PM", pm_design: "設計PM", pm_impl: "実装PM" };
+const PHASE: Record<string, string> = { P1: "探索", P2: "事業定義", P3: "要求・設計", P4: "構築", P5: "リリース" };
+
+// プロダクトレビュー：サイクルが終わったら、全工程の成果物を1つの画面で読み、次のサイクルの戦略と PM への追加指示を決める
+export default async function ReviewPage({ params }: { params: Promise<{ id: string }> }) {
+  const { id } = await params;
+  const r = await agent<ReviewData>(`/products/${id}/review`);
+  const review = r.state === "review";
+  const phases = [...new Set(r.deliverables.map((d) => d.phase))];
+  return (
+    <>
+      <PageHeader
+        crumbs={<><Link href={`/p/${id}`} className="hover:text-zinc-700">ダッシュボード</Link><span>/</span><span>プロダクトレビュー</span></>}
+        title={`プロダクトレビュー（サイクル ${r.cycle}）`}
+        sub={review
+          ? "全工程の成果物を読み、次のサイクルの戦略と、PM への追加指示を決めます。レビューの間、エージェントの定期実行は止めています。"
+          : `サイクル ${r.cycle} を進めています（全体 ${r.progress.total}%）。全工程が100%になると、レビューに入ります。`}
+        actions={!review ? <StartReviewButton pid={id} complete={r.progress.complete} /> : undefined}
+      />
+      <div className="grid gap-6 px-8 py-6 xl:grid-cols-[220px_minmax(0,1fr)]">
+        <nav className="hidden xl:block" aria-label="工程の目次">
+          <div className="sticky top-4 space-y-3 text-[12.5px]">
+            {phases.map((ph) => (
+              <div key={ph}>
+                <div className="mb-1 text-[11px] font-semibold text-zinc-400">{ph} {PHASE[ph]}</div>
+                {r.deliverables.filter((d) => d.phase === ph).map((d) => (
+                  <a key={d.id} href={`#${d.id}`} className="flex items-center gap-2 rounded px-1.5 py-0.5 hover:bg-zinc-100">
+                    <span className="min-w-0 flex-1 truncate">{d.no}{d.name}</span>
+                    <span className={`tabular-nums text-[11px] ${d.pct >= 100 ? "text-emerald-600" : "text-amber-600"}`}>{d.pct}%</span>
+                  </a>
+                ))}
+              </div>
+            ))}
+          </div>
+        </nav>
+        <div className="min-w-0 space-y-6">
+          <section className="card p-5" aria-label="このサイクル">
+            <div className="flex flex-wrap items-center gap-3 text-[12.5px] text-zinc-600">
+              <span className="font-semibold text-zinc-900">サイクル {r.cycle}</span>
+              <span>開始 {when(r.current.started_at)}</span>
+              {r.current.review_at && <span>レビュー開始 {when(r.current.review_at)}</span>}
+              <span>全体 {r.progress.total}%</span>
+            </div>
+            {r.current.strategy && <p className="mt-2 whitespace-pre-wrap text-[13px]"><span className="font-semibold">このサイクルの戦略：</span>{r.current.strategy}</p>}
+            {Object.entries(r.current.directives).map(([k, v]) => <p key={k} className="mt-1 whitespace-pre-wrap text-[12.5px] text-zinc-600"><span className="font-medium">{PM_NAME[k]}への追加指示：</span>{v}</p>)}
+          </section>
+          {review && <NextCycleForm pid={id} next={r.cycle + 1} />}
+          {r.deliverables.map((d) => (
+            <section key={d.id} id={d.id} className="card scroll-mt-4 overflow-hidden" aria-label={`${d.no}${d.name}の成果物`}>
+              <header className="flex flex-wrap items-center gap-2 border-b border-zinc-100 bg-zinc-50/70 px-5 py-3">
+                <h2 className="text-[15px] font-semibold"><span className="text-zinc-400">{d.no}</span>{d.name}</h2>
+                <StatusBadge status={d.status} enabled />
+                <span className={`rounded px-1.5 text-[11px] font-medium tabular-nums ${d.pct >= 100 ? "bg-emerald-50 text-emerald-700" : "bg-amber-50 text-amber-700"}`}>{d.pct}%</span>
+                <span className="text-[11px] text-zinc-400">{d.version ? `最新版 v${d.version}` : "版なし"}</span>
+                <Link href={`/p/${id}/s/${d.id}`} className="ml-auto text-[12px] text-brand-700 hover:underline">工程を開く</Link>
+              </header>
+              <div className="space-y-3 px-5 py-4">
+                {d.goal?.goal && (
+                  <p className="flex gap-1.5 rounded-lg bg-brand-50/60 px-3 py-2 text-[12.5px] text-brand-900"><Target size={14} className="mt-0.5 shrink-0" />
+                    <span><span className="font-semibold">サイクル {d.goal.cycle} の目標：</span>{d.goal.goal}{d.goal.done_when ? `（完了の条件：${d.goal.done_when}）` : ""}</span></p>
+                )}
+                {d.missing.length > 0 && <p className="text-[12px] text-rose-600">必須が空：{d.missing.join("、")}</p>}
+                {d.ui && d.ui.length > 0 && (
+                  <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+                    {d.ui.map((p) => (
+                      <figure key={p.id} className="overflow-hidden rounded-lg border border-zinc-200">
+                        <div className="relative h-56 overflow-hidden bg-white">
+                          <iframe title={`画面：${p.name}`} sandbox="" className="pointer-events-none absolute left-0 top-0 h-[560px] w-[250%] origin-top-left scale-[0.4] border-0" srcDoc={srcDoc(p.html, p.css)} />
+                        </div>
+                        <figcaption className="border-t border-zinc-100 px-2 py-1 text-[11.5px]">{p.name}{p.screen && <span className="ml-1 font-mono text-[10px] text-zinc-400">{p.screen}</span>}</figcaption>
+                      </figure>
+                    ))}
+                  </div>
+                )}
+                <div className="prose-md max-h-[70vh] overflow-y-auto"><Markdown remarkPlugins={[remarkGfm]}>{d.markdown}</Markdown></div>
+              </div>
+            </section>
+          ))}
+          {r.past.length > 0 && (
+            <section className="card p-5" aria-label="これまでのサイクル">
+              <h2 className="mb-2 text-[14px] font-semibold">これまでのサイクル</h2>
+              <ol className="space-y-3 text-[12.5px]">
+                {r.past.map((c) => (
+                  <li key={c.number} className="border-l-2 border-zinc-200 pl-3">
+                    <div className="font-medium">サイクル {c.number}<span className="ml-2 text-[11px] font-normal text-zinc-400">{when(c.started_at)} 〜 {when(c.ended_at)}</span></div>
+                    {c.strategy && <p className="whitespace-pre-wrap text-zinc-700">戦略：{c.strategy}</p>}
+                    {c.review_notes && <p className="whitespace-pre-wrap text-zinc-500">レビューの所見：{c.review_notes}</p>}
+                  </li>
+                ))}
+              </ol>
+            </section>
+          )}
+        </div>
+      </div>
+    </>
+  );
+}

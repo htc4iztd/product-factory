@@ -244,7 +244,7 @@ def _todo(product: Product, pm: str) -> list[tuple]:
 
 
 def _think(product: Product, pm: str, job_id: str, conn, rs: dict, changed: dict, todo: list, box: list):
-    from . import agentrun, asks
+    from . import agentrun, asks, cycles
     from . import issues as iss
 
     prep = agentrun.prepare(product.tenant_id, product, pm)
@@ -300,6 +300,7 @@ def _think(product: Product, pm: str, job_id: str, conn, rs: dict, changed: dict
             + f"## PdM がまだ答えていない、自分からの問いかけ（同じことは聞かない）"
                 f"\n{asks.open_asks_md(product.id, pm)}\n\n"
             + (f"## 掲示板の未読（自分宛て）\n{inbox_md(box)}\n\n" if box else "")
+            + cycles.pm_md(product.id, pm)
             + f"## 変わった担当の状況\n{json.dumps(changed, ensure_ascii=False)}\n\n"
             f"## 変わっていない担当\n{json.dumps(others, ensure_ascii=False)}\n\n"
             "## PM 宛ての Issue\n"

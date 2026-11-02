@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { ArrowRight, Lock } from "lucide-react";
+import { ArrowRight, Lock, Target } from "lucide-react";
 import { agent, AgentError, type FrameworkDefT, type StageDetail, type VariantStage } from "@/lib/agent";
 import { auth } from "@/lib/auth";
 import { PatternStageBar } from "@/components/autodev/PatternStageBar";
@@ -94,6 +94,12 @@ export default async function StagePage({ params, searchParams }: Props) {
             {st.downstream.length > 0 && <span className="ml-2 flex items-center gap-1"><ArrowRight size={11} />下流 {st.downstream.length}</span>}
           </div>
         </div>
+        {st.cycle_goal?.goal && (
+          <p className="mb-3 flex gap-1.5 rounded-lg bg-brand-50/70 px-3 py-1.5 text-[12.5px] text-brand-900" aria-label="このサイクルの目標">
+            <Target size={14} className="mt-0.5 shrink-0" />
+            <span><span className="font-semibold">サイクル {st.cycle_goal.cycle} の目標：</span>{st.cycle_goal.goal}{st.cycle_goal.done_when ? `（完了の条件：${st.cycle_goal.done_when}）` : ""}</span>
+          </p>
+        )}
       </header>
 
       <div className="flex min-h-0 flex-1">

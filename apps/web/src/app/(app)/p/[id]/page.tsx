@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { AlertTriangle, CalendarClock, CheckCircle2, CircleDashed, Clock, ListChecks } from "lucide-react";
-import { agent, type AgentIssueT, type ApprovalItem, type Dashboard } from "@/lib/agent";
+import { agent, type AgentIssueT, type ApprovalItem, type CycleState, type Dashboard } from "@/lib/agent";
+import { StartReviewButton } from "@/components/review/ReviewForms";
 import { ApprovalInbox } from "@/components/org/ApprovalInbox";
 import { PageHeader } from "@/components/PageHeader";
 import { AutoRefresh } from "@/components/autodev/AutoRefresh";
@@ -13,17 +14,20 @@ const when = (t: string | null | undefined) => (t ? new Date(t).toLocaleString("
 // ダッシュボード：工程どうしのつながりと進み具合を、各エージェントが報告する。PdM は PM と話し、毎日の会議で振り返る
 export default async function ProductPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
-  const [d, issues, team, approvals] = await Promise.all([
+  const [d, issues, team, approvals, cy] = await Promise.all([
     agent<Dashboard>(`/products/${id}/dashboard`),
     agent<AgentIssueT[]>(`/products/${id}/issues?open_only=true`),
     agent<{ beats?: Record<string, { at: string; detail: string }> }>(`/products/${id}/team`),
     agent<ApprovalItem[]>(`/products/${id}/approvals`).catch(() => [] as ApprovalItem[]),
+    agent<CycleState>(`/products/${id}/cycle`).catch(() => null),
   ]);
+  const review = cy?.state === "review";
   const active = d.stages.filter((s) => s.enabled);
   const done = active.filter((s) => s.status === "completed").length;
   const waiting = active.filter((s) => s.pending_kind === "approval");
   const recheck = active.filter((s) => s.status === "needs_recheck");
-  const pct = active.length ? Math.round((done / active.length) * 100) : 0;
+  // 進み具合は、このサイクルの工程ごとの%（確定済みは100、そうでなければ担当の報告）の平均
+  const pct = cy ? cy.progress.total : active.length ? Math.round((done / active.length) * 100) : 0;
   const tick = team.beats?.tick;
   const stale = !tick || Date.now() - new Date(tick.at).getTime() > 5 * 60 * 1000;
   const stats = [
@@ -47,6 +51,7 @@ export default async function ProductPage({ params }: { params: Promise<{ id: st
         </>}
       >
         <div className="mt-5 flex items-center gap-3">
+          {cy && <span className="rounded-full bg-zinc-900 px-2 py-0.5 text-[11px] font-medium text-white">サイクル {cy.cycle}</span>}
           <div className="h-1.5 flex-1 overflow-hidden rounded-full bg-zinc-100">
             <div className="h-full rounded-full bg-gradient-to-r from-brand-500 to-violet-500" style={{ width: `${pct}%` }} />
           </div>
@@ -57,6 +62,20 @@ export default async function ProductPage({ params }: { params: Promise<{ id: st
         </div>
       </PageHeader>
       <div className="space-y-6 px-8 py-6">
+        {review && (
+          <section className="flex flex-wrap items-center gap-3 rounded-xl border border-amber-300 bg-amber-50 px-5 py-3" aria-label="プロダクトレビュー中">
+            <div className="min-w-0 flex-1 text-[13px] text-amber-900">
+              <span className="font-semibold">プロダクトレビュー中（サイクル {cy!.cycle}）</span>：全工程の成果物を確かめ、次のサイクルの戦略を決めてください。その間、エージェントの定期実行は止めています。
+            </div>
+            <Link href={`/p/${id}/review`} className="btn-primary">レビューを開く</Link>
+          </section>
+        )}
+        {cy && !review && cy.progress.complete && (
+          <section className="flex flex-wrap items-center gap-3 rounded-xl border border-emerald-300 bg-emerald-50 px-5 py-3">
+            <div className="min-w-0 flex-1 text-[13px] text-emerald-900">全工程が100%になりました。まもなくプロダクトレビューに入ります。</div>
+            <StartReviewButton pid={id} complete />
+          </section>
+        )}
         <section className="grid grid-cols-2 gap-3 lg:grid-cols-5">
           {stats.map(({ label, value, icon: Icon, tone }) => (
             <div key={label} className="card p-4">

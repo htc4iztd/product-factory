@@ -34,6 +34,7 @@ STATUS_JA = {"not_started": "未着手", "in_progress": "作業中", "awaiting_a
 PAGES = {
     "": ("dashboard", "ダッシュボード"),
     "board": ("board", "掲示板"),
+    "review": ("review", "プロダクトレビュー"),
     "issues": ("issues", "Issue"),
     "meetings-daily": ("meetings", "振り返りの会議"),
     "team": ("team", "エージェントの組織"),
@@ -508,7 +509,13 @@ def _prompt(
         "stage_complete（工程を確定して「更新済み（完了）」にする：stages に工程の id。"
         "工程の状態は項目ではないので set_field では変えない。必須が空の工程は確定できない）、"
         "ui_page（⑥UIデザインの画面：page_id は書き換える画面の id か空、subject は画面名、screen は SC-xx、"
-        "html は body の中身、css。クラス pf-nav・pf-main・pf-btn・pf-input・pf-card が使える）。"
+        "html は body の中身、css は画面だけの追加分。そのまま見せられるモックアップにする：部品集のクラス "
+        "pf-nav（.pf-brand・.pf-links）・pf-main（.narrow）・pf-shell＋pf-sidebar・pf-hero・pf-card・pf-grid・pf-row・"
+        "pf-stack・pf-between・pf-list・pf-table・pf-stat（.num・.cap）・pf-badge（.ok・.warn・.bad）・pf-chip・"
+        "pf-progress（中に i）・pf-avatar・pf-empty・pf-field＋pf-label＋pf-input／pf-select＋pf-help・"
+        "pf-btn（.secondary・.ghost・.danger・.sm・.block）・pf-tabbar・pf-footer・pf-muted を使い、"
+        "見出し・余白・揃えを整え、ダミーではなくこのプロダクトらしい具体的な文言と数値を入れる。script・外部の画像や"
+        "フォントは使わない）。"
         "質問への答えだけなら空にする。\n\n"
         + (f"## ページの中身\n{material}\n\n" if material else "")
         + (f"## 添えられたもの\n{extra}\n\n" if extra else "")

@@ -11,8 +11,6 @@
   "dependencies": {
     "@xyflow/react": "^12.11.2",
     "bcryptjs": "^2.4.3",
-    "grapesjs": "0.23.8",
-    "grapesjs-blocks-basic": "1.0.2",
     "lucide-react": "^0.468.0",
     "next": "^16.4.3",
     "next-auth": "^5.0.0-beta.30",

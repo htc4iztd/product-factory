@@ -5,7 +5,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import Response
 from pydantic import BaseModel, Field
 
-from . import agents, autodev, ghsync, imports, issues, jobs, meetings, platform_agent, pms, reports, team
+from . import agents, autodev, cycles, ghsync, imports, issues, jobs, meetings, platform_agent, pms, reports, team
 from .api_collab import _p
 from .authz import Caller, caller
 from .stages import STAGE_BY_ID
@@ -250,6 +250,34 @@ def update_issue(product_id: str, number: int, body: IssueBody, c: Caller = Depe
     return issues.update(_p(c, product_id, True), c.user, number, notes=body.notes, status=body.status,
                          assignee=body.assignee, priority=body.priority, done_ratio=body.done_ratio,
                          due_date=body.due_date, subject=body.subject)
+
+
+class NextCycleBody(BaseModel):
+    strategy: str = Field(min_length=1, max_length=8000)
+    directives: dict[str, str] = Field(default_factory=dict)  # PM ごとの追加指示 {pm_biz: ...}
+    notes: str = Field(default="", max_length=8000)  # このサイクルのレビューの所見
+
+
+# サイクルとプロダクトレビュー
+@router.get(P + "/cycle")
+def get_cycle(product_id: str, c: Caller = Depends(caller)):
+    return cycles.state(_p(c, product_id))
+
+
+@router.get(P + "/review")
+def get_review(product_id: str, c: Caller = Depends(caller)):
+    p = _p(c, product_id)
+    return {**cycles.state(p), "deliverables": cycles.deliverables(p)}
+
+
+@router.post(P + "/review/start")
+def start_review(product_id: str, c: Caller = Depends(caller)):
+    return cycles.start_review(_p(c, product_id, True), c.user)
+
+
+@router.post(P + "/review/next")
+def next_cycle(product_id: str, body: NextCycleBody, c: Caller = Depends(caller)):
+    return cycles.start_next(_p(c, product_id, True), c.user, body.strategy, body.directives, body.notes)
 
 
 class GithubSyncBody(BaseModel):
