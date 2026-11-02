@@ -257,3 +257,79 @@ def test_board_keeps_new_threads_when_old_threads_are_long(env):
     assert o["posts"][-1]["text"] == "返事 399"
     one = c.get(f"/products/{p.id}/board?thread={old['thread']}", headers=H).json()["threads"][0]
     assert len(one["posts"]) == 401 and one["omitted"] == 0
+
+
+def test_no_made_up_release_in_pm_sync(env, monkeypatch):
+    """PM 同士の連絡：リリースが行われていないのに「カナリアデプロイ完了」と書いても載せない。
+    根拠の ID を照合し、実在する成功したリリースのジョブがあるときだけ載せる。普通の連絡は今までどおり。"""
+    from pf_agent import facts, jobs, pms, team
+    from pf_agent.db import PmNote, session
+
+    c, p = env
+    team.ensure(p)
+    # 材料に「システムの状態（事実）」が入り、リリースがないことが明記される
+    f = facts.system_facts(p.id)
+    assert "システムの状態（事実" in f.md and "リリース：行われていない" in f.md and "1つもない" in f.md
+    canary = ("本番環境へのカナリアデプロイが完了し、エラーなく稼働していることを確認した。"
+              "全展開に進めてよいか判断してほしい")
+    normal = "⑨の API の前提が⑫と食い違っています。確かめてください。"
+
+    def run_sync(posts):
+        pms.add_note(p.id, "pm_impl", "s12", "memo", f"材料を変える {len(posts)} {posts[0].text[:5]}")
+        monkeypatch.setattr(pms, "_sync_out", lambda *a, **k: pms.PmSyncOut(posts=posts))
+        team.start(p, "u", ["pm_sync"])
+        wait_idle(c, p.id)
+        b = c.get(f"/products/{p.id}/board", headers=H).json()["threads"]
+        return [x["text"] for t in b if t["title"].startswith("PM 同士の連絡") for x in t["posts"]]
+
+    # 1) 根拠なしの「カナリアデプロイ完了」は載せず、PM の記録に残す。普通の連絡は載る
+    texts = run_sync([pms.SyncPostOut(sender="pm_impl", to="pm_biz", intent="confirm", text=canary),
+                      pms.SyncPostOut(sender="pm_design", to="pm_impl", intent="notice", text=normal)])
+    assert canary not in texts and normal in texts
+    with session() as s:
+        assert any("根拠のない状態の主張" in n.text for n in s.query(PmNote).filter_by(product_id=p.id, pm="pm_impl"))
+    # 2) 実在しない job の ID を根拠にしても載せない。「承認する」も PM には効力がないので載せない
+    texts = run_sync([pms.SyncPostOut(sender="pm_impl", to="pm_biz", intent="confirm", text=canary + "。",
+                                      evidence=["job:deadbeefdeadbeef"]),
+                      pms.SyncPostOut(sender="pm_biz", to="pm_impl", intent="answer", text="全展開の開始を承認する")])
+    assert not any("カナリア" in t or "承認する" in t for t in texts)
+    # 3) 実在し、成功したリリースのジョブを根拠にすれば載る（失敗・実行中のジョブでは載らない）
+    jid = jobs.create("release", p.tenant_id, p.id, "u", {}, total=1)
+    jobs.finish(jid, "failed", "x")
+    texts = run_sync([pms.SyncPostOut(sender="pm_impl", to="pm_biz", intent="notice",
+                                      text="リリースが完了しました。", evidence=[f"job:{jid}"])])
+    assert "リリースが完了しました。" not in texts
+    jid2 = jobs.create("release", p.tenant_id, p.id, "u", {}, total=1)
+    jobs.finish(jid2, "done")
+    texts = run_sync([pms.SyncPostOut(sender="pm_impl", to="pm_biz", intent="notice",
+                                      text="リリースが完了しました（本番）。", evidence=[f"job:{jid2}"])])
+    assert "リリースが完了しました（本番）。" in texts
+
+
+def test_reports_and_notes_drop_unverified_claims(env):
+    """担当の報告：根拠のない状態の主張の文は外して印を残す。Issue の注記：印を付けて残す。"""
+    from pf_agent import issues, team
+
+    c, p = env
+    team.ensure(p)
+    i = issues.create(p, "pm_impl", "s14", "リリースの準備", wake=False)
+    out = team.TurnOut(
+        report=team.ReportOut(health="green", progress=100,
+                              summary="本番にカナリアデプロイしました。リリース手順の定義を更新しました。",
+                              blockers=[], next=["全展開を開始した"]),
+        issue_updates=[team.IssueUpdateOut(number=i["number"], notes="本番に全展開しました。手順書を見直しました。",
+                                           status="resolved", done_ratio=100, assign_to="")],
+        changes=[], new_issues=[],
+        posts=[team.PostOut(to="pm_impl", intent="notice", text="本番リリースが完了しました。", thread=0)],
+    )
+    team._apply(p, "s14", out, "job", "stub")
+    from pf_agent.db import TeamAgent, session
+
+    with session() as s:
+        rep = s.query(TeamAgent).filter_by(product_id=p.id, key="s14").one().report
+    assert rep["summary"] == "リリース手順の定義を更新しました。" and rep["next"] == []
+    assert any("カナリアデプロイ" in x for x in rep["unverified"])
+    notes = issues.get(p, i["number"])["journals"][-1]["notes"]
+    assert "［根拠なし・未確認］本番に全展開しました。" in notes and "手順書を見直しました。" in notes
+    b = c.get(f"/products/{p.id}/board", headers=H).json()["threads"]
+    assert not any("本番リリースが完了しました" in x["text"] for t in b for x in t["posts"])

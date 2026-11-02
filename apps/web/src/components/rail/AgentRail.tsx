@@ -133,7 +133,7 @@ export function AgentRail({ pid, product, agents: initial, platform: initialPlat
         <div className="space-y-0.5">
           {(["pm_biz", "pm_design", "pm_impl"] as const).map((k) => (
             <Person key={k} a={by[k]} href={`/p/${pid}/pm/${k}`} big label={by[k]?.name ?? k}
-              sub={by[k]?.report?.summary ?? ({ pm_biz: "①〜⑤ 事業", pm_design: "⑥〜⑪ 要求・設計", pm_impl: "⑫〜⑭ 構築・リリース" } as Record<string, string>)[k]} />
+              sub={by[k]?.report?.summary ?? ({ pm_biz: "①〜⑤ 事業", pm_design: "⑥〜⑪ 要求・設計", pm_impl: "⑫〜⑬ 構築" } as Record<string, string>)[k]} />
           ))}
         </div>
         {GROUPS.map((g) => (

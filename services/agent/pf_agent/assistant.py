@@ -479,6 +479,13 @@ def _stub(product: Product | None, ctx: dict, responder: str, text: str) -> Assi
     return AssistantReply(reply=head + ("変更の内容を確かめて、承認してください。" if acts else ""), actions=acts)
 
 
+def _facts_rule(product: Product | None) -> str:
+    """事実と権限の決まりと、システムの状態（事実）。"""
+    from . import facts
+
+    return facts.RULE + ("\n\n" + facts.system_facts(product.id).md if product is not None else "")
+
+
 def _prompt(
     product: Product | None,
     ctx: dict,
@@ -501,7 +508,9 @@ def _prompt(
             "自分が次にやること（承認依頼にしたもの）か、"
             "PdM への質問・相談・合意依頼・終了承認依頼のどれかで終える。期限や時刻は書かない。"
             "actions はまだ実行されていない（PdM が承認したら実行される）。reply に「更新しました」「完了にしました」と"
-            "書かず、「〜の承認依頼を出しました」と書く。\n"
+            "書かず、「〜の承認依頼を出しました」と書く。"
+            + _facts_rule(product)
+            + "\n"
         "- actions：何かを変えるときだけ。自分では実行せず、PdM の承認を待つ承認依頼として出す。種類は "
         "set_field（工程の項目を書き換える：stage_id・field・value）、issue_create（担当に動いてもらう：assignee・"
         "subject・description・stage_id。PM のときだけ）、issue_update（number・status・notes。PM のときだけ）、"

@@ -3,7 +3,7 @@ id: issue-work
 name: 自分宛ての Issue を実行する
 kind: agent
 description: 工程の担当が、自分宛てで終わっていない Issue を計画・実行し、結果を Issue に返す手順
-refs: [issue-etiquette, board-vs-issue, field-writing, writing-ja]
+refs: [issue-etiquette, board-vs-issue, field-writing, writing-ja, facts-and-authority]
 tools: [stage_draft, stage_fields, upstream, docs_read, docs_search, issue_read, issues_list, board_read, trace, set_field, issue_update, issue_create, board_post]
 prefetch: [stage_draft, issues_list]
 ---

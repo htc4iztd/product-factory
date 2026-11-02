@@ -22,7 +22,8 @@ GROUPS = (
     ("pmsync", "PM 同士の連絡", (PM_SYNC,)),
     ("biz", "事業の担当（①〜⑤）", DOMAIN["pm_biz"]),
     ("design", "要求・設計の担当（⑥〜⑪）", DOMAIN["pm_design"]),
-    ("impl", "構築・リリースの担当（⑫〜⑭）", DOMAIN["pm_impl"]),
+    ("impl", "構築の担当（⑫〜⑬）", DOMAIN["pm_impl"]),
+    ("release", "リリースエージェント（⑭・サイクルの外）", ("s14",)),
     ("meeting", "振り返りの会議", (MEETING,)),
 )
 GROUP_OF = {k: g for g, _, keys in GROUPS for k in keys}
@@ -30,6 +31,8 @@ WHAT = {
     "pm": "担当の状況を集める（変化か PM 宛ての Issue があるときだけ AI を使う）",
     "stage": "自分宛ての Issue を確かめる（手を動かす Issue があるときだけ AI を使う）",
     "meeting": "PM がレポートと突き合わせを準備する",
+    "release": "自分宛ての Issue があるときだけ動く"
+    "（リリースの定義・実行は、プロダクトレビューのあとのリリースで動く）",
     "pmsync": "事業・設計・実装 PM が、他の領域に関わること（依存・食い違い・確認）を掲示板で伝え合う"
     "（前回から変化があるときだけ AI を使う）",
 }
@@ -93,7 +96,8 @@ def view(product: Product) -> dict:
                     "group": g,
                     "group_label": label,
                     "what": WHAT[
-                        "meeting" if k == MEETING else "pmsync" if k == PM_SYNC else "pm" if k in PMS else "stage"
+                        "meeting" if k == MEETING else "pmsync" if k == PM_SYNC else "pm" if k in PMS
+                        else "release" if k == "s14" else "stage"
                     ],
                     "cron": a.cron,
                     "label": cron.describe(a.cron),

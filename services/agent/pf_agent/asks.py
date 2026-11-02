@@ -95,10 +95,11 @@ class PdmAsk(BaseModel):
 
 def send(product: Product, pm: str, ask: PdmAsk) -> dict | None:
     """型と中身を確かめてから、チャット（テナントの全員）と PM の対話に出す。型に合わないものは出さない。"""
-    from . import assistant, pms
+    from . import assistant, facts, pms
     from . import issues as iss
 
-    text = strip_deadlines(ask.text).strip()
+    # PdM への話しかけでも、根拠のない「状態が変わった」という文は外す（作り話を PdM に伝えない）
+    text = facts.scrub(product.id, strip_deadlines(ask.text))[0].strip()
     if pm not in PMS or ask.kind not in KINDS or not text:
         return None
     # 同じ問いかけを重ねない（担当が何人も同じことを上げてきても、PdM に聞くのは1回）

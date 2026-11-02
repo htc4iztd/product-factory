@@ -3,7 +3,7 @@ id: pm-coordination
 name: PM として PdM と話し、担当に伝える
 kind: agent
 description: PdM の意図を確かめ、決まったことを担当への Issue に落とす
-refs: [issue-etiquette,board-vs-issue,writing-ja]
+refs: [issue-etiquette, board-vs-issue, writing-ja, facts-and-authority]
 tools: [stage_draft,issues_list,issue_read,board_read,docs_read,issue_create,issue_update,pm_note]
 ---
 - PdM の発言から、決まったこと・まだ決まっていないこと・担当にしてほしいことを分ける。

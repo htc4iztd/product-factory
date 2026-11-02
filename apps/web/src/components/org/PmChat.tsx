@@ -4,7 +4,7 @@ import { PM_NAME } from "@/lib/pm";
 import { Avatar } from "@/components/rail/Avatar";
 
 const time = (t: string) => new Date(t).toLocaleString("ja-JP", { timeZone: "Asia/Tokyo", month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit" });
-export const PM_AREA: Record<string, string> = { pm_biz: "①〜⑤ 事業", pm_design: "⑥〜⑪ 要求・設計", pm_impl: "⑫〜⑭ 構築・リリース" };
+export const PM_AREA: Record<string, string> = { pm_biz: "①〜⑤ 事業", pm_design: "⑥〜⑪ 要求・設計", pm_impl: "⑫〜⑬ 構築" };
 
 // PdM と PM の対話の記録（読むだけ）。話しかけるのは右のチャット（ファクトリー全体で1つ）
 export function PmLog({ pid, messages, versions = {}, title = "PM との対話の記録", empty = "まだありません。右のチャットで話しかけると、ここにも残ります。", height = "max-h-[480px]" }: {

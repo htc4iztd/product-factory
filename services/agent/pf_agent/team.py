@@ -2,7 +2,8 @@
 
 指揮系統
 - PdM（人）：話せるのは PM だけ。意思は PM との対話（いつでも）と、1日1回の振り返りの会議（meetings.py）で伝える
-- PM（3人）：事業 PM（①〜⑤）・設計 PM（⑥〜⑪）・実装 PM（⑫〜⑭）。自分の領域のプロジェクト管理をする。
+- PM（3人）：事業 PM（①〜⑤）・設計 PM（⑥〜⑪）・実装 PM（⑫〜⑬）。自分の領域のプロジェクト管理をする。
+  ⑭リリースの担当（リリースエージェント）はサイクルの外で独立して動く。
   1時間ごとに領域の担当へ状況確認を出し、集めたことを PM のタスク管理の場所（PmNote）に置き、会議で PdM に伝える
 - 各工程の担当：10分ごとに、自分宛てで終わっていない Issue（issues.py）を確かめ、あれば実行計画を立てて実行し、
   結果を Issue に返す（工程の下書きに書き込み、状態・進み具合を更新し、起票した人か確認が要るエージェントに返す）
@@ -19,10 +20,10 @@ from __future__ import annotations
 import datetime as dt
 import re
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from sqlalchemy import func, or_, select, update
 
-from . import cron, fwlib, jobs, llm, llmconf, repo
+from . import cron, facts, fwlib, jobs, llm, llmconf, repo
 from . import frameworks as fx
 from .db import AgentIssue, BoardPost, IssueJournal, JobRun, PmMessage, PmNote, Product, TeamAgent, session
 from .stages import STAGE_BY_ID, STAGES
@@ -31,9 +32,12 @@ PMS = ("pm_biz", "pm_design", "pm_impl")
 DOMAIN = {
     "pm_biz": ("s01", "s02", "s03", "s04", "s05"),
     "pm_design": ("s06", "s07", "s08", "s09", "s10", "s11"),
-    "pm_impl": ("s12", "s13", "s14"),
+    "pm_impl": ("s12", "s13"),
 }
-PM_OF = {sid: pm for pm, sids in DOMAIN.items() for sid in sids}
+# ⑭リリースの担当（リリースエージェント）は、サイクルの外で独立して動く。PM の領域（定時の状況確認・PM 同士の連絡・
+# 振り返りの会議・サイクルの目標）には入らない。Issue・質問の窓口だけは実装 PM
+RELEASE_AGENT = "s14"
+PM_OF = {**{sid: pm for pm, sids in DOMAIN.items() for sid in sids}, RELEASE_AGENT: "pm_impl"}
 KEYS = (*PMS, *(s.id for s in STAGES))
 MEETING = "meeting"  # 会議の予定も TeamAgent の行で持つ（エージェントではない）
 PM_SYNC = "pm_sync"  # PM 同士の連絡（10分ごと）の予定。これも TeamAgent の行で持つ
@@ -110,6 +114,13 @@ def default_mission(key: str) -> str:
         )
     st = STAGE_BY_ID[key]
     fw = fwlib.of(None, key)
+    if key == RELEASE_AGENT:
+        return (
+            "リリースエージェント。サイクルの外で、サイクルの間に独立して動く。プロダクトレビューが完了してリリースに進んだら、"
+            "インフラ設計・運用設計・コード・テストと接続先から、リリース先の環境と方式・手順・設定・確認・切り戻しを定義する"
+            "（オンボーディング）。PdM がリリース前レビューで承認したら、接続先でデプロイ・設定を行い、⑭に記録する。"
+            "承認は PdM だけができる。自分宛ての Issue があれば実行して結果を返し、PdM に聞きたいことは実装PMに上げる。"
+        )
     return (
         f"{st.no}{st.name}（{fw.title}）を作り上げる：{fw.summary}。自分宛ての Issue を実行し、結果を Issue に返す。"
         "他の工程に確認が要ることは掲示板で、動いてほしいことは Issue で伝える。PdM に聞きたいことは"
@@ -650,6 +661,7 @@ class ReportOut(BaseModel):
     summary: str
     blockers: list[str]
     next: list[str]
+    evidence: list[str] = Field(default_factory=list)  # 状態の変化を書くときの根拠の ID（job:… / issue:#n など）
 
 
 class IssueUpdateOut(BaseModel):
@@ -658,6 +670,7 @@ class IssueUpdateOut(BaseModel):
     status: str  # new | in_progress | resolved | feedback | closed | rejected
     done_ratio: int
     assign_to: str  # 返す相手（起票したエージェントか確認が要るエージェント。PM まで）。そのままなら空
+    evidence: list[str] = Field(default_factory=list)  # 状態の変化を書くときの根拠の ID
 
 
 class NewIssueOut(BaseModel):
@@ -679,6 +692,7 @@ class PostOut(BaseModel):
     intent: str  # confirm（確認）| answer（回答）| notice（共有）
     text: str
     thread: int
+    evidence: list[str] = Field(default_factory=list)  # 状態の変化を書くときの根拠の ID
 
 
 class TurnOut(BaseModel):
@@ -782,6 +796,9 @@ def _prompt(
         "- report：health は green・yellow・red、progress は 0〜100、summary は2文、blockers と next は短く。\n"
         + "".join(f"- {OUTPUT_RULES[w]}\n" for w in writes if w in OUTPUT_RULES)
         + "割り当てられていない欄はありません。資料にない数値や事実を作らない。\n"
+        + f"- {facts.RULE} 報告・Issue の注記・掲示板の投稿で状態の変化を書くなら、"
+            f"それぞれの evidence に根拠の ID を入れる。\n\n"
+        + facts.system_facts(product.id).md
     )
 
 
@@ -844,6 +861,19 @@ def _apply(product: Product, key: str, out: BaseModel, job_id: str, model: str) 
     from . import issues as iss
 
     rep = out.report.model_dump()
+    # 根拠のない「状態が変わった」という文は、報告から外す（PM の材料に作り話が入らないように）
+    ev = rep.pop("evidence", []) or []
+    rep["summary"], gone = facts.scrub(product.id, rep["summary"], ev)
+    for k in ("blockers", "next"):
+        kept = []
+        for x in rep.get(k) or []:
+            t, g = facts.scrub(product.id, str(x), ev)
+            gone += g
+            if t.strip():
+                kept.append(t)
+        rep[k] = kept
+    if gone:
+        rep["unverified"] = [x.strip()[:200] for x in gone][:5]
     rep["health"] = rep["health"] if rep["health"] in HEALTH else "yellow"
     rep["progress"] = max(0, min(100, int(rep["progress"])))
     rep["at"] = _now().isoformat()
@@ -872,7 +902,8 @@ def _apply(product: Product, key: str, out: BaseModel, job_id: str, model: str) 
     wake: list[str] = []
     for u in getattr(out, "issue_updates", [])[:10]:
         try:
-            notes = u.notes + (f"\n（工程の下書きに書き込んだ項目：{'、'.join(changed)}）" if changed else "")
+            body, _ = facts.scrub(product.id, u.notes, u.evidence, mark=True)  # 根拠のない主張には印を付けて残す
+            notes = body + (f"\n（工程の下書きに書き込んだ項目：{'、'.join(changed)}）" if changed else "")
             iss.update(
                 product,
                 key,
@@ -906,6 +937,8 @@ def _apply(product: Product, key: str, out: BaseModel, job_id: str, model: str) 
     posted = []
     for p in getattr(out, "posts", [])[:6]:
         if p.to == key or p.to not in (*KEYS, "all") or not p.text.strip():
+            continue
+        if facts.check(product.id, p.text, p.evidence)[1]:  # 根拠のない状態の主張を含む投稿は載せない
             continue
         posted.append(post(product, key, p.to, p.intent, p.text, p.thread or None, author=model, job_id=job_id))
     return wake + wakes_from(product.id, key, posted)

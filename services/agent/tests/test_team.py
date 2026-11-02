@@ -246,7 +246,7 @@ def test_schedule_view_bulk_preview_and_overview(client):
     # すべてのプロダクトを並べる
     o = c.get("/schedule-overview", headers=H).json()
     g = {x["key"]: x for x in o["products"][0]["groups"]}
-    assert g["biz"]["schedules"] == ["30分ごと"] and g["impl"]["stopped"] == 1
+    assert g["biz"]["schedules"] == ["30分ごと"] and g["release"]["stopped"] == 1
     assert g["meeting"]["schedules"] == ["平日 18:00"]
     # プラットフォームの見回りの間隔
     assert c.put("/platform/schedule", headers=H, json={"every_min": 15}).json()["label"] == "15分ごと"

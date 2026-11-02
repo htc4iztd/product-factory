@@ -13,8 +13,9 @@ from __future__ import annotations
 import datetime as dt
 import hashlib
 import json
+import re
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from sqlalchemy import func, select
 
 from . import cron, fwlib, llm, llmconf, repo
@@ -244,7 +245,7 @@ def _todo(product: Product, pm: str) -> list[tuple]:
 
 
 def _think(product: Product, pm: str, job_id: str, conn, rs: dict, changed: dict, todo: list, box: list):
-    from . import agentrun, asks, cycles
+    from . import agentrun, asks, cycles, facts
     from . import issues as iss
 
     prep = agentrun.prepare(product.tenant_id, product, pm)
@@ -301,6 +302,7 @@ def _think(product: Product, pm: str, job_id: str, conn, rs: dict, changed: dict
                 f"\n{asks.open_asks_md(product.id, pm)}\n\n"
             + (f"## 掲示板の未読（自分宛て）\n{inbox_md(box)}\n\n" if box else "")
             + cycles.pm_md(product.id, pm)
+            + f"## 事実と権限\n{facts.RULE}\n\n" + facts.system_facts(product.id).md + "\n"
             + f"## 変わった担当の状況\n{json.dumps(changed, ensure_ascii=False)}\n\n"
             f"## 変わっていない担当\n{json.dumps(others, ensure_ascii=False)}\n\n"
             "## PM 宛ての Issue\n"
@@ -318,15 +320,15 @@ def _think(product: Product, pm: str, job_id: str, conn, rs: dict, changed: dict
     out.posts = out.posts if prep.can("board_post") else []
     wake: list[str] = []
     for n in out.notes[:10]:
-        if n.text.strip():
-            add_note(product.id, pm, n.agent, n.kind, n.text)
+        if n.text.strip():  # 根拠のない状態の主張には印を付けて残す（PM 同士の連絡の材料になるので）
+            add_note(product.id, pm, n.agent, n.kind, facts.scrub(product.id, n.text, mark=True)[0])
     for u in out.issue_updates[:10]:
         try:
             iss.update(
                 product,
                 pm,
                 u.number,
-                notes=u.notes,
+                notes=facts.scrub(product.id, u.notes, u.evidence, mark=True)[0],
                 status=u.status,
                 done_ratio=u.done_ratio,
                 assignee=u.assign_to or None,
@@ -355,7 +357,9 @@ def _think(product: Product, pm: str, job_id: str, conn, rs: dict, changed: dict
     mark_read(product.id, pm)  # 未読は、この場で読んだ
     posted = []
     for p in out.posts[:5]:
-        if p.to in (*KEYS, "all") and p.to != pm and p.text.strip():
+        if not (p.to in (*KEYS, "all") and p.to != pm and p.text.strip()):
+            continue
+        if not facts.check(product.id, p.text, p.evidence)[1]:  # 根拠のない状態の主張を含む投稿は載せない
             posted.append(post(product, pm, p.to, p.intent, p.text, p.thread or None, job_id=job_id))
     wake += wakes_from(product.id, pm, posted)
     asked = sum(1 for a in out.to_pdm[:3] if asks.send(product, pm, a))
@@ -372,6 +376,7 @@ class SyncPostOut(BaseModel):
     to: str  # 相手の PM
     intent: str  # confirm | answer | notice
     text: str
+    evidence: list[str] = Field(default_factory=list)  # 根拠の ID（job:… / issue:#n / note:n / report:key）
 
 
 class PmSyncOut(BaseModel):
@@ -406,17 +411,18 @@ def sync_material(product: Product, since_note: int) -> tuple[dict[str, str], in
     for pm in PMS:
         mine = [n for n in notes if n.pm == pm][-12:]
         reps = [
-            f"- {name_of(k)}：{(agents[k].report or {}).get('summary', '')[:200]}"
+            f"- [report:{k}] {name_of(k)}：{(agents[k].report or {}).get('summary', '')[:200]}"
             for k in DOMAIN[pm]
             if k in agents and (agents[k].report or {}).get("summary")
         ]
         iss = [
-            f"- #{i.number}［{i.status}］{i.subject}（{name_of(i.author)}→{name_of(i.assignee)}）"
+            f"- [issue:#{i.number}]［{i.status}］{i.subject}（{name_of(i.author)}→{name_of(i.assignee)}）"
             for i in cross
             if pm in (_domain_of(i.author), _domain_of(i.assignee))
         ]
         out[pm] = (
-            ("### 前回からの記録\n" + "\n".join(f"- [{n.kind}] {n.text[:300]}" for n in mine) + "\n" if mine else "")
+            ("### 前回からの記録\n" + "\n".join(f"- [note:{n.id}]（{n.kind}）{n.text[:300]}" for n in mine) + "\n"
+             if mine else "")
             + ("### 領域をまたぐ開いた Issue\n" + "\n".join(iss) + "\n" if iss else "")
             + ("### 担当の報告\n" + "\n".join(reps) + "\n" if reps else "")
         )
@@ -431,8 +437,13 @@ def sync(product: Product, job_id: str, conn) -> tuple[list[str], str]:
     with session() as s:
         me = _agent(s, product.id, PM_SYNC)
         memory = dict(me.memory or {})
+    from . import facts
+
     material, last_note = sync_material(product, int(memory.get("note") or 0))
-    h = hashlib.sha256(json.dumps(material, ensure_ascii=False, sort_keys=True).encode()).hexdigest()[:16]
+    fx_ = facts.system_facts(product.id)
+    h = hashlib.sha256(
+        json.dumps({**material, "_facts": fx_.md}, ensure_ascii=False, sort_keys=True).encode()
+    ).hexdigest()[:16]
     changed = h != memory.get("hash") and any(material.values())
     with session() as s:
         me = _agent(s, product.id, PM_SYNC)
@@ -442,6 +453,40 @@ def sync(product: Product, job_id: str, conn) -> tuple[list[str], str]:
     if not changed:
         return [], "前回から変化なし（AI は使っていない）"
     stamp = dt.datetime.now(JST)
+    out = _sync_out(product, conn, material, fx_.md, stamp)
+    # 状態が変わったという主張は、根拠の ID を照合してから載せる（LLM は使わない）。照合できない投稿は捨てて記録する
+    cited = re.findall(r"\[((?:issue:#\d+)|(?:note:\d+)|(?:report:[a-z0-9_]+))\]", "".join(material.values()))
+    allowed = fx_.ids | set(cited)
+    posted: list[dict] = []
+    dropped: list[str] = []
+    thread = None
+    for p in out.posts[:6]:
+        if p.sender not in PMS or p.to not in PMS or p.sender == p.to or not p.text.strip():
+            continue
+        _, bad = facts.check(product.id, p.text, p.evidence, allowed)
+        if bad:
+            dropped.append(f"{name_of(p.sender)}→{name_of(p.to)}：{p.text[:200]}")
+            add_note(product.id, p.sender, "", "memo",
+                     "根拠のない状態の主張を含むので、PM 同士の連絡に載せませんでした："
+                     + " ".join(x.strip() for x in bad)[:400] + f"（根拠：{', '.join(p.evidence) or 'なし'}）")
+            continue
+        intent = p.intent if p.intent in ("confirm", "answer", "notice") else "notice"
+        made = post(product, p.sender, p.to, intent, p.text, thread, title=f"PM 同士の連絡 {stamp:%m/%d %H:%M}",
+                    job_id=job_id)
+        thread = thread or made["thread"]
+        posted.append(made)
+    wake = []
+    for p in posted:
+        wake += wakes_from(product.id, p["sender"], [p])
+    who = "、".join(name_of(w) for w in dict.fromkeys(wake))
+    return wake, (f"連絡 {len(posted)} 件" + (f"・{who}が答える" if wake else "")
+                  + (f"・根拠のない主張で {len(dropped)} 件を載せなかった" if dropped else ""))
+
+
+def _sync_out(product: Product, conn, material: dict[str, str], facts_md: str, stamp) -> PmSyncOut:
+    """PM 同士の連絡の下書き（LLM）。"""
+    from . import facts
+
     if conn.provider == "stub":
         llm._record("stub", 0, 0)
         order = list(PMS)
@@ -459,32 +504,22 @@ def sync(product: Product, job_id: str, conn) -> tuple[list[str], str]:
         )
     else:
         prompt = (
-            f"プロダクト「{product.name}」（{product.idea}）の事業PM（①〜⑤）・設計PM（⑥〜⑪）・実装PM（⑫〜⑭）の、"
+            f"プロダクト「{product.name}」（{product.idea}）の事業PM（①〜⑤）・設計PM（⑥〜⑪）・実装PM（⑫〜⑬）の、"
             "10分ごとの連絡です。各 PM の材料を読み、他の PM に伝える必要があることだけを posts に書きます。\n"
             "- 伝えるのは、領域をまたぐ依存・前提の食い違い・相手の判断が要ること・相手の作業に影響する変化だけ。"
             "自分の領域の中だけで済むことや、ただの状況報告は書かない。何もなければ posts は空。\n"
             "- sender と to は pm_biz・pm_design・pm_impl（自分宛ては不可）。intent は confirm（相手に答えてほしい）・"
             "notice（読んでもらうだけ）。confirm を受けた PM はすぐ動いて答える。\n"
             f"- いまは {stamp:%Y/%m/%d %H:%M}（日本時間）。期限や時刻（「本日15時までに」など）は書かない。"
-            f"1件は3文まで。\n\n"
+            f"1件は3文まで。\n"
+            f"- {facts.RULE}\n"
+            "- evidence には、その投稿の根拠になった材料の ID（行の頭の [ ] の中）を入れる。"
+            "状態の変化を書かない連絡なら空でよい。\n\n"
+            + facts_md + "\n"
             + "\n".join(f"## {name_of(pm)}\n{material[pm] or '（変化なし）'}" for pm in PMS)
         )
         out = llm._json(conn, conn.chat_model, prompt, PmSyncOut)
-    posted: list[dict] = []
-    thread = None
-    for p in out.posts[:6]:
-        if p.sender not in PMS or p.to not in PMS or p.sender == p.to or not p.text.strip():
-            continue
-        intent = p.intent if p.intent in ("confirm", "answer", "notice") else "notice"
-        made = post(product, p.sender, p.to, intent, p.text, thread, title=f"PM 同士の連絡 {stamp:%m/%d %H:%M}",
-                    job_id=job_id)
-        thread = thread or made["thread"]
-        posted.append(made)
-    wake = []
-    for p in posted:
-        wake += wakes_from(product.id, p["sender"], [p])
-    who = "、".join(name_of(w) for w in dict.fromkeys(wake))
-    return wake, f"連絡 {len(posted)} 件" + (f"・{who}が答える" if wake else "")
+    return out
 
 
 # ---------------- PdM との対話 ----------------
@@ -551,7 +586,7 @@ def talk(
     attachment_ids: list[int] | None = None,
 ) -> dict:
     """PdM が PM に話す。PM はすぐ答え、必要なら担当への Issue を起票する（担当はすぐ動く）。"""
-    from . import attachments
+    from . import attachments, facts
     from . import issues as iss
     from .team import ensure
 
@@ -617,7 +652,7 @@ def talk(
             + "\n\n## 出力\n"
             "- reply：日本語で短く直接答える。前置きや称賛は書かない。根拠の弱い意図には率直に指摘する。"
             "報告だけで終えず、最後は自分が次にやることか、PdM への質問・相談・合意依頼・終了承認依頼で終える。"
-            "期限や時刻は書かない。\n"
+            f"期限や時刻は書かない。{facts.RULE}\n"
             "- issues：PdM の意思を担当に伝える必要があるときだけ起票する。宛先は自分の領域の担当（"
             + "、".join(DOMAIN[pm])
             + "）か他の PM（pm_biz・pm_design・pm_impl）。subject は何をしてほしいか、"
