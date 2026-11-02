@@ -185,6 +185,7 @@ class ActionOut(BaseModel):
 class AssistantReply(BaseModel):
     reply: str
     actions: list[ActionOut] = Field(default_factory=list)
+    evidence: list[str] = Field(default_factory=list)  # 状態の変化を書くときの根拠の ID
 
 
 def _show(v) -> str:
@@ -685,6 +686,10 @@ def send(
             dropped.append(f"{a.type}：{getattr(e, 'message', e)}")
         except Exception as e:  # noqa: BLE001  1つの案の不備で答え全体を落とさない
             dropped.append(f"{a.type}：{getattr(e, 'message', e)}")
+    if product is not None:  # 根拠のない「状態が変わった」という文には印を付ける（PdM に作り話を伝えない）
+        from . import facts
+
+        out.reply = facts.scrub(product.id, out.reply, out.evidence, mark=True)[0]
     # 出せなかった変更は、何も変えていないことを先頭ではっきり出す（本文が「更新しました」と書いていても）
     reply = (
         f"⚠ 次の変更は出せませんでした（何も変えていません）：{'／'.join(dropped)}\n\n" if dropped else ""

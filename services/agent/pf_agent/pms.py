@@ -13,7 +13,6 @@ from __future__ import annotations
 import datetime as dt
 import hashlib
 import json
-import re
 
 from pydantic import BaseModel, Field
 from sqlalchemy import func, select
@@ -437,7 +436,7 @@ def sync(product: Product, job_id: str, conn) -> tuple[list[str], str]:
     with session() as s:
         me = _agent(s, product.id, PM_SYNC)
         memory = dict(me.memory or {})
-    from . import facts
+    from . import facts, refs
 
     material, last_note = sync_material(product, int(memory.get("note") or 0))
     fx_ = facts.system_facts(product.id)
@@ -455,8 +454,7 @@ def sync(product: Product, job_id: str, conn) -> tuple[list[str], str]:
     stamp = dt.datetime.now(JST)
     out = _sync_out(product, conn, material, fx_.md, stamp)
     # 状態が変わったという主張は、根拠の ID を照合してから載せる（LLM は使わない）。照合できない投稿は捨てて記録する
-    cited = re.findall(r"\[((?:issue:#\d+)|(?:note:\d+)|(?:report:[a-z0-9_]+))\]", "".join(material.values()))
-    allowed = fx_.ids | set(cited)
+    allowed = fx_.ids | refs.cited("".join(material.values()))  # 材料と事実の欄に出した ID だけを根拠として認める
     posted: list[dict] = []
     dropped: list[str] = []
     thread = None

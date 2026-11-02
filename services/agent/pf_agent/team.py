@@ -441,7 +441,7 @@ def inbox(product_id: str, key: str) -> list[BoardPost]:
 
 def inbox_md(posts: list[BoardPost]) -> str:
     return "\n".join(
-        f"- [{p.id}] スレッド {p.thread}・{name_of(p.sender)}から（{INTENT_LABEL.get(p.intent, p.intent)}）"
+        f"- [post:{p.id}] スレッド {p.thread}・{name_of(p.sender)}から（{INTENT_LABEL.get(p.intent, p.intent)}）"
         f"：{p.text[:1200]}"
         for p in posts
     )
@@ -710,7 +710,7 @@ def _issue_brief(i: AgentIssue, journals: list[IssueJournal]) -> str:
         if x.notes
     )
     return (
-        f"- #{i.number}［{i.tracker}・{i.status}・{i.priority}・{i.done_ratio}%］{i.subject}"
+        f"- [issue:#{i.number}]［{i.tracker}・{i.status}・{i.priority}・{i.done_ratio}%］{i.subject}"
         f"（起票：{name_of(i.author) if i.author in KEYS else 'PdM'}）\n  {i.description[:1500]}"
         + (f"\n{j}" if j else "")
     )
@@ -860,9 +860,24 @@ def _apply(product: Product, key: str, out: BaseModel, job_id: str, model: str) 
     """出力を反映する。返り値は、この実行で Issue を受けた（すぐ動かす）エージェント。"""
     from . import issues as iss
 
+    # 工程の下書きに書き込む（どの項目を変えたかは Issue の記録と監査ログに残る）
+    changed, own = [], []
+    fw = fwlib.of(product.id, key)
+    for c in getattr(out, "changes", [])[:12]:
+        f = fw.get(c.field)
+        if f is None:
+            continue
+        try:
+            repo.set_field(product.id, key, f.key, c.value, name_of(key), "agent")
+            changed.append(f.label)
+            own.append(f"field:{key}.{f.key}")
+        except (ValueError, TypeError, KeyError):
+            continue
+    # 自分がこの実行で書き込んだ項目・更新した Issue は、根拠として自動で足す（本当に書いた報告は通る）
+    own += [f"issue:#{u.number}" for u in getattr(out, "issue_updates", [])[:10]]
     rep = out.report.model_dump()
     # 根拠のない「状態が変わった」という文は、報告から外す（PM の材料に作り話が入らないように）
-    ev = rep.pop("evidence", []) or []
+    ev = [*(rep.pop("evidence", []) or []), *own]
     rep["summary"], gone = facts.scrub(product.id, rep["summary"], ev)
     for k in ("blockers", "next"):
         kept = []
@@ -887,22 +902,11 @@ def _apply(product: Product, key: str, out: BaseModel, job_id: str, model: str) 
         ).scalars():
             p.read = True
         s.commit()
-    # 工程の下書きに書き込む（どの項目を変えたかは Issue の記録と監査ログに残る）
-    changed = []
-    fw = fwlib.of(product.id, key)
-    for c in getattr(out, "changes", [])[:12]:
-        f = fw.get(c.field)
-        if f is None:
-            continue
-        try:
-            repo.set_field(product.id, key, f.key, c.value, name_of(key), "agent")
-            changed.append(f.label)
-        except (ValueError, TypeError, KeyError):
-            continue
     wake: list[str] = []
     for u in getattr(out, "issue_updates", [])[:10]:
         try:
-            body, _ = facts.scrub(product.id, u.notes, u.evidence, mark=True)  # 根拠のない主張には印を付けて残す
+            # 根拠のない主張には印を付けて残す
+            body, _ = facts.scrub(product.id, u.notes, [*u.evidence, *own], mark=True)
             notes = body + (f"\n（工程の下書きに書き込んだ項目：{'、'.join(changed)}）" if changed else "")
             iss.update(
                 product,
@@ -938,7 +942,7 @@ def _apply(product: Product, key: str, out: BaseModel, job_id: str, model: str) 
     for p in getattr(out, "posts", [])[:6]:
         if p.to == key or p.to not in (*KEYS, "all") or not p.text.strip():
             continue
-        if facts.check(product.id, p.text, p.evidence)[1]:  # 根拠のない状態の主張を含む投稿は載せない
+        if facts.check(product.id, p.text, [*p.evidence, *own])[1]:  # 根拠のない状態の主張を含む投稿は載せない
             continue
         posted.append(post(product, key, p.to, p.intent, p.text, p.thread or None, author=model, job_id=job_id))
     return wake + wakes_from(product.id, key, posted)

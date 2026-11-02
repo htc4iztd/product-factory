@@ -333,3 +333,86 @@ def test_reports_and_notes_drop_unverified_claims(env):
     assert "［根拠なし・未確認］本番に全展開しました。" in notes and "手順書を見直しました。" in notes
     b = c.get(f"/products/{p.id}/board", headers=H).json()["threads"]
     assert not any("本番リリースが完了しました" in x["text"] for t in b for x in t["posts"])
+
+
+def test_claims_by_category(env, monkeypatch):
+    """主張の系統ごとに、通る根拠を決めて照合する（確定・承認・マージ・テスト・成果物・レビュー・リリース）。"""
+    from pf_agent import code, facts, fwlib, issues, jobs, llm, refs, repo
+    from pf_agent.db import AssistantMessage, Product, session
+
+    c, p = env
+    ok = lambda text, ev: not facts.check(p.id, text, ev)[1]  # noqa: E731
+    # 系統の判定
+    assert facts.claim_kind("⑨を確定しました。") == "confirm"
+    assert facts.claim_kind("PR をマージしました。") == "merge"
+    assert facts.claim_kind("結合テストが通った。") == "test"
+    assert facts.claim_kind("⑦の業務フローを書きました。") == "doc"
+    assert facts.claim_kind("PdM が承認しました。") == "approval"
+    assert facts.claim_kind("⑨を確定してよいですか。") is None and facts.claim_kind("まだマージしていない。") is None
+    # 確定：確定済みの工程でしか通らない
+    assert not ok("⑨を確定しました。", ["stage:s09"])
+    for f in fwlib.of(p.id, "s09").fields:
+        if f.required:
+            repo.set_field(p.id, "s09", f.key, llm._stub_value(f, "家計簿"), "t", "test")
+    repo.commit(p.id, "s09", "t", "")
+    assert ok("⑨を確定しました。", ["stage:s09"]) and not ok("⑨を確定しました。", [])
+    # 承認：PdM が承認した記録で通る。PM の発言（判断のない msg）では通らない
+    with session() as s:
+        act = {"id": "a", "status": "approved", "decided_by": "owner@example.com", "title": "x"}
+        m = AssistantMessage(tenant_id="tenant-a", user=None, product_id=p.id, role="agent", agent="pm_biz",
+                             text="x", context={}, actions=[act])
+        m2 = AssistantMessage(tenant_id="tenant-a", user=None, product_id=p.id, role="agent", agent="pm_biz",
+                              text="承認する", context={}, actions=[])
+        s.add_all([m, m2])
+        s.commit()
+        mid, mid2 = m.id, m2.id
+    assert ok("PdM が承認しました。", [f"msg:{mid}"]) and not ok("PdM が承認しました。", [f"msg:{mid2}"])
+    assert f"msg:{mid}" in facts.system_facts(p.id).ids
+    # マージ：マージ済みのプルリクエストでしか通らない（GitHub に聞く）
+    with session() as s:
+        s.get(Product, p.id).repo = "acme/app"
+        s.commit()
+    monkeypatch.setattr(code, "call",
+                        lambda m, path, tok, body=None: {"merged": path.endswith("/7"), "state": "closed"})
+    assert ok("PR をマージしました。", ["pr:#7"]) and not ok("PR をマージしました。", ["pr:#8"])
+    assert refs.resolve(p.id, "pr:#7")["merged"] is True
+    # テスト：成功したジョブか⑬の結果で通る。失敗したジョブでは通らない
+    j = jobs.create("autodev", p.tenant_id, p.id, "u", {}, total=1)
+    jobs.finish(j, "failed", "x")
+    assert not ok("結合テストが通った。", [f"job:{j}"])
+    j2 = jobs.create("autodev", p.tenant_id, p.id, "u", {}, total=1)
+    jobs.finish(j2, "done")
+    assert ok("結合テストが通った。", [f"job:{j2}"])
+    # 成果物：中身のある項目で通る。空の項目では通らない
+    flows = next(f for f in fwlib.of(p.id, "s07").fields if f.kind == "flows")
+    assert not ok("⑦の業務フローを書きました。", [f"field:s07.{flows.key}"])
+    repo.set_field(p.id, "s07", flows.key, llm._stub_value(flows, "家計簿"), "t", "test")
+    assert ok("⑦の業務フローを書きました。", [f"field:s07.{flows.key}"])
+    # 掲示板の投稿・Issue も ID で引ける。ほかのプロダクトの ID は解決しない
+    i = issues.create(p, "pm_impl", "s12", "x", wake=False)
+    assert refs.resolve(p.id, f"issue:#{i['number']}")["status"] == "new"
+    assert refs.resolve("other", f"issue:#{i['number']}") is None and refs.resolve(p.id, "nope:1") is None
+    # 材料に付けた ID を拾う
+    assert refs.cited("- [post:12] x [stage:s09] [field:s07.flows] [review:c1r2]") == {
+        "post:12", "stage:s09", "field:s07.flows", "review:c1r2"}
+
+
+def test_own_writes_count_as_evidence(env):
+    """担当がこの実行で書き込んだ項目は、根拠として自動で足す（本当に書いた報告は残る）。"""
+    from pf_agent import fwlib, llm, team
+    from pf_agent.db import TeamAgent, session
+
+    c, p = env
+    team.ensure(p)
+    flows = next(f for f in fwlib.of(p.id, "s07").fields if f.kind == "flows")
+    v = llm._stub_value(flows, "家計簿")
+    out = team.TurnOut(
+        report=team.ReportOut(health="green", progress=50, summary="⑦の業務フローを書きました。⑨を確定しました。",
+                              blockers=[], next=[]),
+        issue_updates=[], new_issues=[], posts=[],
+        changes=[team.ChangeOut(field=flows.key, value=v if isinstance(v, str) else str(v), reason="x")],
+    )
+    team._apply(p, "s07", out, "job", "stub")
+    with session() as s:
+        rep = s.query(TeamAgent).filter_by(product_id=p.id, key="s07").one().report
+    assert rep["summary"] == "⑦の業務フローを書きました。" and any("確定" in x for x in rep["unverified"])
