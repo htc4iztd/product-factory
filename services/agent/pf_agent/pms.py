@@ -296,7 +296,7 @@ def _think(product: Product, pm: str, job_id: str, conn, rs: dict, changed: dict
             "- posts：他の PM・担当に確認が要ることだけ掲示板に（confirm・answer・notice）。"
             "未読の確認（confirm）には、そのスレッドに answer で答える。回答への返事は書かない。"
             "確認と回答は相手がすぐ動いて読むので、期限や時刻（「本日15時までに」など）は書かない。\n"
-            f"- to_pdm：{asks.RULE} なければ空（ふだんのことは会議で報告する）。\n\n"
+            f"- to_pdm：{asks.RULE} なければ空（ふだんのことはプロダクトレビューで報告する）。\n\n"
             + f"## PdM がまだ答えていない、自分からの問いかけ（同じことは聞かない）"
                 f"\n{asks.open_asks_md(product.id, pm)}\n\n"
             + (f"## 掲示板の未読（自分宛て）\n{inbox_md(box)}\n\n" if box else "")

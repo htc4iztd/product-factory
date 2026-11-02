@@ -28,8 +28,6 @@ export async function createIssue(pid: string, body: { assignee: string; subject
 export async function updateIssue(pid: string, n: number, body: { notes?: string; status?: string; priority?: string; assignee?: string }) {
   return call(pid, `/issues/${n}`, "PUT", body);
 }
-export async function startMeeting(pid: string) { return call(pid, "/meetings-daily", "POST"); }
-export async function closeMeeting(pid: string, mid: number) { return call(pid, `/meetings-daily/${mid}/close`, "POST"); }
 export async function setReaders(pid: string, doc: number, readers: string[]) {
   return call(pid, `/imports/${doc}/readers`, "PUT", { readers });
 }
@@ -46,10 +44,10 @@ export async function drawAvatars(keys: string[], redo: boolean): Promise<R> {
   }
 }
 
-// プラットフォーム（ファクトリー全体の稼働）：PdM が直接話す。対処は PdM が承認したものだけ実行する
+// プラットフォーム（プロダクトごと。そのプロダクトの稼働を見張る）：PdM が直接話す。対処は PdM が承認したものだけ実行する
 async function platformCall(pid: string, path: string, method: string, body?: unknown): Promise<R & { done?: string }> {
   try {
-    const r = await agent<Record<string, unknown>>(`/platform${path}`, { method, body });
+    const r = await agent<Record<string, unknown>>(`/products/${pid}/platform${path}`, { method, body });
     revalidatePath(`/p/${pid}`, "layout");
     return { done: r?.done as string };
   } catch (e) {

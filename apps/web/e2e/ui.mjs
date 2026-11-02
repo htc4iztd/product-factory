@@ -81,6 +81,14 @@ await ed.getByRole("tab", { name: "コード" }).click();
 await ed.getByLabel("CSS").fill("h1{color:#7c3aed}");
 await ed.getByRole("button", { name: "キャンバスに反映" }).click();
 await canvas.getByText("お申し込み", { exact: true }).waitFor();
+// 既存の HTML を取り込む（貼り付け）：body と style を取り込み、スクリプトは外す
+await ed.getByRole("button", { name: "HTML を取り込む" }).click();
+await ed.getByLabel("貼り付ける HTML").fill('<html><head><title>料金</title><style>.price{color:#059669}</style><script>alert(1)</script></head><body><main class="pf-main"><h1 class="price">料金プラン</h1><button onclick="alert(2)">選ぶ</button></main></body></html>');
+await ed.getByRole("button", { name: "貼り付けた HTML を取り込む" }).click();
+await ed.getByRole("button", { name: /料金/ }).first().waitFor();
+await canvas.getByText("料金プラン").waitFor();
+await ed.getByText(/スクリプトなど動くもの（1 件）は外しました/).waitFor();
+if (await canvas.locator("[onclick]").count()) throw new Error("onclick が残っている");
 // 手で画面を足して保存
 await ed.getByRole("button", { name: "画面を足す" }).click();
 await ed.getByLabel("画面名").fill("一覧");

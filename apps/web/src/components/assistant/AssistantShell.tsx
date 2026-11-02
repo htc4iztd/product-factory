@@ -16,6 +16,12 @@ const PM_OF: Record<string, string> = Object.fromEntries([
   ...["s06", "s07", "s08", "s09", "s10", "s11"].map((s) => [s, "設計PM"]),
   ...["s12", "s13", "s14"].map((s) => [s, "実装PM"]),
 ]);
+const PM_KEY: Record<string, string> = { 事業PM: "pm_biz", 設計PM: "pm_design", 実装PM: "pm_impl" };
+// 返事の宛先：PM・プラットフォームはそのまま、工程の担当・リリースエージェントには窓口の PM が答える
+function replyTo(agent: string, name: string): { key: string; name: string } {
+  const pm = PM_OF[agent];
+  return pm ? { key: PM_KEY[pm], name: pm } : { key: agent, name };
+}
 const PLATFORM_PAGES = ["platform", "schedule", "cast", "team", "agents", "frameworks"];
 const time = (t: string) => new Date(t).toLocaleString("ja-JP", { timeZone: "Asia/Tokyo", month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit" });
 
@@ -144,13 +150,15 @@ function Feed({ msgs, onChanged }: { msgs: AssistantMsg[]; onChanged: (m: Assist
               )}
               <SentAttachments items={m.attachments as never} dark={me} />
               {m.actions.map((a) => <ActionCard key={a.id} m={m} a={a} onChanged={onChanged} />)}
-              {(m.context.ask === "question" || m.context.ask === "consult") && (
-                <button className="btn-secondary btn-sm mt-2" onClick={() => {
-                  // 元の発言を引用して返事をする（何への返事かを、PM にも記録にも残す）
-                  const mention = { kind: "agent" as const, ref: m.agent, label: m.agent_name };
+              {!me && (
+                <button className={`mt-2 ${m.context.ask === "question" || m.context.ask === "consult" ? "btn-secondary btn-sm" : "btn-ghost btn-sm h-6 px-1.5 text-[11px]"}`} onClick={() => {
+                  // 元の発言を引用して返事をする（何への返事かを、PM にも記録にも残す）。
+                  // 宛先：PM・プラットフォームはそのまま。工程の担当・リリースエージェントの書き込みには、窓口の PM が答える
+                  const to = replyTo(m.agent, m.agent_name);
+                  const mention = { kind: "agent" as const, ref: to.key, label: to.name };
                   const quote = { id: m.id, agent: m.agent, agent_name: m.agent_name, text: m.text, ask: m.context.ask };
                   window.dispatchEvent(new CustomEvent("pf:compose", { detail: { mention, quote } }));
-                }}><CornerDownLeft size={12} />{m.agent_name}に返事をする</button>
+                }} aria-label={`${m.agent_name}に返事をする`}><CornerDownLeft size={12} />{m.agent_name}に返事をする{replyTo(m.agent, m.agent_name).key !== m.agent ? `（${replyTo(m.agent, m.agent_name).name}が受けます）` : ""}</button>
               )}
             </div>
           </li>

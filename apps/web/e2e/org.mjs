@@ -1,5 +1,5 @@
 // エージェントの組織：PdM は PM とだけ話す → PM が担当に Issue → 担当が実行して工程に書き込み、結果を返す
-// → PM の作業場所・掲示板（エージェント同士・読むだけ）・振り返りの会議・レールと ⌘K・添付・顔
+// → PM の作業場所・掲示板（エージェント同士・読むだけ）・レールと ⌘K・添付・顔
 // 使い方: BASE=http://localhost:3000 SHOTS=./shots node e2e/org.mjs
 import { chromium } from "playwright";
 import fs from "node:fs";
@@ -104,21 +104,10 @@ await page.getByLabel("チャットに話す").type("⑨の進み具合は？");
 await page.getByText("答える人：設計PM").waitFor();
 await page.getByLabel("チャットに話す").press("Enter");
 await page.getByText(/（スタブ）設計PMです。設計PMについて/).last().waitFor();
-// 振り返りの会議：PM のレポートと突き合わせ → 会議の中で PM と話す
-await page.goto(`${BASE}/p/${pid}`);
-await btn("いま会議を始める").click();
-await page.getByRole("link", { name: "会議に入る" }).click({ timeout: 30000 });
-await page.getByRole("region", { name: "設計PMのレポート" }).getByText(/実行状況|スタブ/).first().waitFor({ timeout: 60000 });
-await page.getByText(/食い違いは見つかりませんでした/).first().waitFor();
-await chatSay("⑨は来週までに");
-await page.getByText(/（スタブ）設計PMです。⑨アプリケーション設計について/).last().waitFor();
-await page.reload();
-await page.getByRole("region", { name: "会議での対話" }).getByText("⑨は来週までに").waitFor();
-await shot("o7-meeting", true);
-await btn("会議を終える").click();
-// 組織：会議の予定・定期実行・顔を描く
+// 振り返りの会議は廃止（レールにも道具にも出ない）
+if (await page.getByRole("navigation", { name: "エージェント" }).getByRole("link", { name: "振り返りの会議" }).count()) throw new Error("振り返りの会議が残っている");
+// 組織：定期実行・顔を描く
 await page.goto(`${BASE}/p/${pid}/team`);
-await page.getByText("振り返りの会議の予定").waitFor();
 await btn(/顔を描/).click();
 await page.getByText(/顔を描いています/).waitFor();
 await shot("o8-team", true);

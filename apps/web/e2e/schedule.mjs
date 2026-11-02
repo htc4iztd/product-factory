@@ -37,7 +37,7 @@ const grid = page.getByRole("region", { name: "時間割" });
 const row = (k) => grid.locator(`[data-key="${k}"]`);
 await row("s01").getByText("10分ごと").waitFor();
 await row("pm_biz").getByText("毎時 0分").waitFor();
-await row("meeting").getByText("平日 18:00").waitFor();
+if (await row("meeting").count()) throw new Error("振り返りの会議の予定が残っている");
 await row("pm_sync").getByText("10分ごと（5分から）").waitFor(); // PM 同士の連絡も定期実行
 // 事業の担当をまとめて選び、「◯時間ごと」→ 曜日を選ぶ に切り替えて読み方を確かめ、30分ごとにする
 await page.getByLabel("事業の担当（①〜⑤）をまとめて選ぶ").check();
@@ -65,7 +65,7 @@ await grid.getByText("15分ごと").waitFor();
 // すべてのプロダクトの予定
 const all = page.getByRole("region", { name: "すべてのプロダクトの予定" });
 await all.getByRole("link", { name: "予定の家計簿" }).waitFor();
-await all.getByText("止めている 1 / 3").waitFor();
+await all.getByText("止めている 1 / 1").waitFor(); // ⑭はリリースエージェント（サイクルの外）として別の欄
 await shot("s1-schedule", true);
 
 // 組織の画面の設定も、cron を書かずに選ぶ

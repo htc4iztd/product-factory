@@ -72,26 +72,3 @@ export function OrgSettings({ pid, agents, versions }: { pid: string; agents: Te
 }
 
 // 会議の予定と、定期実行が動いているか
-export function MeetingSchedule({ pid, meeting, beats }: { pid: string; meeting: TeamInfo["meeting"]; beats?: TeamInfo["beats"] }) {
-  const [cronExpr, setCron] = useState(meeting.cron);
-  const [msg, setMsg] = useState<string | null>(null);
-  const [pending, start] = useTransition();
-  const tick = beats?.tick;
-  return (
-    <section className="card space-y-2 p-4 text-[12.5px]">
-      <div className="flex flex-wrap items-end gap-2">
-        <div className="mr-auto">
-          <h2 className="text-[14px] font-semibold">振り返りの会議の予定</h2>
-          <p className="text-[11px] text-zinc-500">PdM と3人の PM が1日1回振り返ります。時刻になると PM がレポートと突き合わせを準備します。次：{meeting.enabled ? when(meeting.next_run_at) : "止めています"}</p>
-        </div>
-        <div className="block"><span className="label">予定（日本時間）</span>
-          <ScheduleInput value={meeting.cron} onChange={setCron} label="会議" /></div>
-        <button className="btn-primary btn-sm mb-0.5" disabled={pending} onClick={() => start(async () => { const r = await editTeamAgent(pid, "meeting", { cron: cronExpr }); setMsg(r.error ?? "保存しました"); })}>保存</button>
-      </div>
-      <p className={`text-[11px] ${tick ? "text-zinc-500" : "text-rose-600"}`}>
-        定期実行（毎分の呼び出し）：{tick ? `最後 ${when(tick.at)}・${tick.detail}` : "まだ一度も呼ばれていません（Cloud Scheduler の設定を確かめてください）"}
-      </p>
-      {msg && <p className="text-[11px] text-zinc-500">{msg}</p>}
-    </section>
-  );
-}

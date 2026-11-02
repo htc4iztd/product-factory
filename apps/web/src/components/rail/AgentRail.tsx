@@ -3,8 +3,8 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useEffect, useState } from "react";
 import {
-  Activity, Bot, Boxes, ChevronLeft, Code2, Command, Diamond, FileText, ImageIcon,
-  CalendarCheck, CalendarClock, ClipboardCheck, LayoutTemplate, Rocket, UserCog, LayoutDashboard, ListChecks, Megaphone, Network, Presentation, ScrollText, Settings2,
+  Activity, Bot, Boxes, ChevronLeft, Code2, Command, FileText, ImageIcon,
+  CalendarClock, ClipboardCheck, LayoutTemplate, Rocket, UserCog, LayoutDashboard, ListChecks, Megaphone, Network, Presentation, ScrollText, Settings2,
 } from "lucide-react";
 import type { Phase, PlatformSummary, Product, StageSummary, TeamMember } from "@/lib/agent";
 import { GROUPS } from "@/lib/groups";
@@ -66,7 +66,7 @@ export function AgentRail({ pid, product, agents: initial, platform: initialPlat
   const open = () => window.dispatchEvent(new Event("pf:command"));
   const tools: [string, string, typeof Bot][] = [
     [`/p/${pid}`, "ダッシュボード", LayoutDashboard], [`/p/${pid}/review`, "プロダクトレビュー", ClipboardCheck], [`/p/${pid}/release`, "リリース", Rocket], [`/p/${pid}/issues`, "Issue", ListChecks],
-    [`/p/${pid}/meetings-daily`, "振り返りの会議", CalendarCheck], [`/p/${pid}/board`, "掲示板", Megaphone],
+[`/p/${pid}/board`, "掲示板", Megaphone],
     [`/p/${pid}/team`, "エージェントの組織", Network], [`/p/${pid}/cast`, "ペルソナ・スキル", UserCog], [`/p/${pid}/schedule`, "スケジュール", CalendarClock], [`/p/${pid}/frameworks`, "フレームワーク", LayoutTemplate], [`/p/${pid}/canvas`, "プロダクト・キャンバス", ImageIcon],
     [`/p/${pid}/reports`, "報告資料", Presentation],
     [`/p/${pid}/agents`, "定期の仕事", Bot], [`/p/${pid}/preproducts`, "プリプロダクト", Boxes],
@@ -119,7 +119,7 @@ export function AgentRail({ pid, product, agents: initial, platform: initialPlat
       </div>
       {working > 0 && <div className="mx-2.5 mb-1 px-1.5 text-[10.5px] font-medium text-brand-700">{working} 人が作業中</div>}
       <nav className="flex-1 space-y-4 overflow-y-auto px-2.5 py-2" aria-label="エージェント">
-        <Link href={`/p/${pid}/platform`} title="プラットフォーム：ファクトリー全体の稼働を見張り、PdM と直接話します"
+        <Link href={`/p/${pid}/platform`} title="プラットフォーム：このプロダクトの稼働を見張り、PdM と直接話します"
           className={`flex items-center gap-2 rounded-lg px-1.5 py-1.5 transition ${on(`/p/${pid}/platform`) ? "bg-white shadow-card ring-1 ring-zinc-200" : "hover:bg-white/70"}`}>
           <Avatar k="platform" v={versions.platform} size={30} state={platform?.high ? "stuck" : "idle"} />
           <span className="min-w-0 flex-1">
@@ -151,21 +151,11 @@ export function AgentRail({ pid, product, agents: initial, platform: initialPlat
         ))}
         <div>
           <div className="section-title mb-1 px-1.5">道具</div>
-          <div className="grid grid-cols-2 gap-0.5">
+          <div className="space-y-0.5">
             {tools.map(([href, label, Icon]) => (
               <Link key={href} href={href} title={label}
-                className={`flex h-8 min-w-0 items-center gap-1.5 rounded-md px-1.5 text-[12px] transition ${on(href) ? "bg-white font-medium text-zinc-900 shadow-card ring-1 ring-zinc-200" : "text-zinc-600 hover:bg-white hover:text-zinc-900"}`}>
+                className={`flex h-8 min-w-0 items-center gap-2 rounded-md px-2 text-[12.5px] transition ${on(href) ? "bg-white font-medium text-zinc-900 shadow-card ring-1 ring-zinc-200" : "text-zinc-600 hover:bg-white hover:text-zinc-900"}`}>
                 <Icon size={14} className="shrink-0 text-zinc-500" /><span className="truncate">{label}</span>
-              </Link>
-            ))}
-          </div>
-          <div className="section-title mb-1 mt-3 px-1.5">振り返り</div>
-          <div className="space-y-0.5">
-            {phases.filter((p) => p.gate).map((p) => (
-              <Link key={p.id} href={`/p/${pid}/g/${p.id}`} title={`振り返り ${p.gate} ${p.gate_question}`}
-                className={`flex h-8 items-center gap-1.5 rounded-md px-1.5 text-[12px] transition ${on(`/p/${pid}/g/${p.id}`) ? "bg-white font-medium shadow-card ring-1 ring-zinc-200" : "text-zinc-600 hover:bg-white"}`}>
-                <Diamond size={12} className={`shrink-0 ${p.review ? "text-emerald-500" : "text-zinc-400"}`} />
-                <span className="truncate">{p.gate} {p.gate_question}</span>
               </Link>
             ))}
           </div>

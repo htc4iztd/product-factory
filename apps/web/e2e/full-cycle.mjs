@@ -1,4 +1,4 @@
-// 画面からひと通り確かめる：対話で下書き → 採用 → 更新、承認フロー、下流の要再確認、ステージの開閉、振り返り。
+// 画面からひと通り確かめる：対話で下書き → 採用 → 更新、承認フロー、下流の要再確認、ステージの開閉。
 // 使い方: BASE=http://localhost:3000 SHOTS=./shots node e2e/full-cycle.mjs
 import { chromium } from "playwright";
 import fs from "node:fs";
@@ -210,10 +210,8 @@ await page.goto(`${BASE}/p/${pid}/s/s06`);
 // 工程の画面には「案」「参照」の欄はない（案はダッシュボードで承認、話すのは右のチャット）
 if (await btn("案タブ").count() || await btn("参照タブ").count()) throw new Error("工程の画面に案・参照の欄が残っている");
 
-await page.goto(`${BASE}/p/${pid}/g/P1`);
-await btn("進む", true).click();
-await page.getByText("直近の記録").waitFor();
-await shot("12-gate", true);
+// 振り返り（工程のゲート）はサイクルとプロダクトレビューに置き換えて廃止（レールにも出ない）
+if (await page.getByRole("navigation", { name: "エージェント" }).getByText(/G1 /).count()) throw new Error("振り返り（ゲート）が残っている");
 
 await page.goto(`${BASE}/p/${pid}`);
 await page.getByRole("complementary", { name: "チャット" }).waitFor();   // トップはダッシュボード（表紙はプロダクト・キャンバスに）

@@ -159,9 +159,11 @@ def test_platform_alert_reaches_chat_with_approval(client):
     with session() as s:
         s.merge(SystemBeat(name="tick", at=dt.datetime.now(dt.UTC) - dt.timedelta(minutes=30), detail=""))
         s.commit()
-    c.get("/platform", headers=H)
-    f = [x for x in c.get("/assistant/messages", headers=OTHER_USER).json() if x["agent"] == "platform"]
-    # テナントの全員に出る（対処があるので、ネクストアクションへの合意依頼）
+    c.get(f"/products/{pid}/platform", headers=H)
+    feed = c.get(f"/assistant/messages?product={pid}", headers=OTHER_USER).json()
+    f = [x for x in feed if x["agent"] == "platform"]
+    # テナント全体の問題は、各プロダクトのチャットに出る（プラットフォームはプロダクトごと）。テナントの全員が見られる
+    # （対処があるので、ネクストアクションへの合意依頼）
     assert f and f[0]["text"].startswith("【ネクストアクションへの合意依頼】定期実行（tick）が止まっています")
     a = f[0]["actions"][0]
     m = c.post(f"/assistant/messages/{f[0]['id']}/actions/{a['id']}", headers=H, json={"approve": True}).json()

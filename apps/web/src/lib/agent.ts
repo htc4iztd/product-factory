@@ -146,7 +146,7 @@ export type TeamMember = {
   runs: number; open_issues: number; unread: number; state?: "working" | "waiting" | "stuck" | "idle" | "off"; avatar_v?: string;
 };
 export type TeamInfo = {
-  agents: TeamMember[]; meeting: { cron: string; cron_label: string; enabled: boolean; next_run_at: string | null };
+  agents: TeamMember[];
   beats?: Record<string, { at: string; detail: string }>;
   platform?: PlatformSummary;
 };
@@ -166,7 +166,7 @@ export type PlatformStatus = {
   scheduler: { healthy: boolean; beats: Record<string, { at: string; detail: string }> };
   jobs: { kind: string; name: string; done: number; failed: number; running: number; other: number }[];
   running: { id: string; kind: string; name: string; product_name: string; status: string; created_at: string }[];
-  products: { id: string; name: string; agents: Record<string, number>; open_issues: number; next_run_at: string | null; meeting: TeamInfo["meeting"] }[];
+  products: { id: string; name: string; agents: Record<string, number>; open_issues: number; next_run_at: string | null }[];
 };
 export type PlatformWorkspace = { status: PlatformStatus; findings: PlatformFindingT[]; messages: PlatformMessageT[]; summary: PlatformSummary };
 export type BoardPostT = {
@@ -204,7 +204,7 @@ export type Dashboard = Overview & TeamInfo & {
   findings_open: number; running: boolean; pending_notes: number;
   variants: { number: number; key: string; title: string; status: string; stages: string[] }[];
   edges: { source: string; target: string; count: number; issues: number; last: { intent: string; text: string; at: string; thread: number } }[];
-  from_pm: PmMessageT[]; meeting_today: DailyMeetingT | null; avatar_versions: Record<string, string>;
+  from_pm: PmMessageT[]; avatar_versions: Record<string, string>;
 };
 // 自律エージェント（AG-n）と、その提案（受け箱）
 export type AgentSchedule = {

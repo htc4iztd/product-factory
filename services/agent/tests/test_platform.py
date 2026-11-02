@@ -92,7 +92,7 @@ def test_detects_and_acts_with_pdm_approval(client):
         a = s.query(TeamAgent).filter_by(product_id=pid, key="s02").one()
         a.next_run_at = now() - dt.timedelta(hours=1)
         s.commit()
-    ws = c.get("/platform", headers=H).json()
+    ws = c.get(f"/products/{pid}/platform", headers=H).json()
     llm_f = by_title(ws, "利用上限")[0]
     assert llm_f["severity"] == "high" and llm_f["count"] == 2 and llm_f["action"]["type"] == "run_team"
     tick_f = by_title(ws, "定期実行（tick）が止まっています")[0]
@@ -100,8 +100,9 @@ def test_detects_and_acts_with_pdm_approval(client):
     assert missed["action"] == {"type": "reschedule", "label": "予定を立て直す", "product_id": pid, "keys": ["s02"]}
     alerts = [m for m in ws["messages"] if m["role"] == "platform" and m["text"].startswith(ASKS)]
     assert len(alerts) == 4  # 重いものは PdM に知らせる（最初の「一度も来ていません」を含む。同じ問題は二度知らせない）
-    c.get("/platform", headers=H)
-    assert len([m for m in c.get("/platform", headers=H).json()["messages"] if m["text"].startswith(ASKS)]) == 4
+    c.get(f"/products/{pid}/platform", headers=H)
+    msgs = c.get(f"/products/{pid}/platform", headers=H).json()["messages"]
+    assert len([m for m in msgs if m["text"].startswith(ASKS)]) == 4
     assert c.get(f"/products/{pid}/team", headers=H).json()["platform"]["high"] == 3
 
     # 閲覧のみの人・別のテナントは対処できない
@@ -175,3 +176,32 @@ def test_platform_avatar(client):
     r = client.get("/avatars/platform", headers=H)
     # 描いていないときも人物のイラスト（ヘッドセットの運用エンジニア）
     assert r.status_code == 200 and "<ellipse" in r.text and "#c7d7ea" in r.text
+
+
+def test_platform_is_per_product(client):
+    """プラットフォームはプロダクトごと：問題・対話・稼働状況は、そのプロダクトの分とテナント全体の分だけ。"""
+    from pf_agent.db import PlatformFinding, session
+
+    c = client
+    a = c.post("/products", headers=H, json={"name": "A", "idea": "x"}).json()["id"]
+    b = c.post("/products", headers=H, json={"name": "B", "idea": "y"}).json()["id"]
+    with session() as s:
+        for pid, title in ((a, "A の問題"), (b, "B の問題"), (None, "テナント全体の問題")):
+            s.add(PlatformFinding(tenant_id="tenant-a", product_id=pid, fingerprint=title, kind="job",
+                                  severity="medium", title=title, status="open", first_at=now(), last_at=now()))
+        s.commit()
+        fid_b = s.query(PlatformFinding).filter_by(title="B の問題").one().id
+    fresh_tick()
+    # レールの印もプロダクトの分（見回りの前に読む。見回ると、手で入れた問題は「もう見つからない」で解決になる）
+    assert c.get(f"/products/{b}/team", headers=H).json()["platform"]["open"] == 2
+    assert c.get(f"/products/{a}/team", headers=H).json()["platform"]["open"] == 2
+    ws = c.get(f"/products/{a}/platform", headers=H).json()
+    titles = {f["title"] for f in ws["findings"]}
+    assert "A の問題" in titles and "テナント全体の問題" in titles and "B の問題" not in titles
+    assert [p["id"] for p in ws["status"]["products"]] == [a]
+    # ほかのプロダクトの問題には手を出せない
+    assert c.put(f"/products/{a}/platform/findings/{fid_b}", headers=H, json={"status": "ack"}).status_code == 404
+    # 対話もプロダクトごと
+    c.post(f"/products/{a}/platform/talk", headers=H, json={"text": "A は大丈夫？"})
+    assert any(m["text"] == "A は大丈夫？" for m in c.get(f"/products/{a}/platform", headers=H).json()["messages"])
+    assert not any(m["text"] == "A は大丈夫？" for m in c.get(f"/products/{b}/platform", headers=H).json()["messages"])

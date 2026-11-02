@@ -2,7 +2,7 @@ import Link from "next/link";
 import { agent, type TeamInfo } from "@/lib/agent";
 import { PageHeader } from "@/components/PageHeader";
 import { AutoRefresh } from "@/components/autodev/AutoRefresh";
-import { MeetingSchedule, OrgSettings } from "@/components/org/OrgSettings";
+import { OrgSettings } from "@/components/org/OrgSettings";
 import { RunTeamButton } from "@/components/org/bits";
 
 export default async function TeamPage({ params }: { params: Promise<{ id: string }> }) {
@@ -21,7 +21,6 @@ export default async function TeamPage({ params }: { params: Promise<{ id: strin
         actions={<><Link href={`/p/${id}/cast`} className="btn-secondary btn-sm">ペルソナ・スキル・ツール</Link><RunTeamButton pid={id} running={false} /></>}
       />
       <div className="space-y-6 px-8 py-6">
-        <MeetingSchedule pid={id} meeting={team.meeting} beats={team.beats} />
         <OrgSettings pid={id} agents={team.agents} versions={versions} />
       </div>
     </>

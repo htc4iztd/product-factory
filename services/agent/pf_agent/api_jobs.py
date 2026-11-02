@@ -13,7 +13,6 @@ from . import (
     imports,
     issues,
     jobs,
-    meetings,
     platform_agent,
     pms,
     releases,
@@ -204,7 +203,8 @@ class IssueBody(BaseModel):
 
 @router.get(P + "/team")
 def team_overview(product_id: str, c: Caller = Depends(caller)):
-    return {**team.overview(_p(c, product_id)), "beats": team.beats(), "platform": platform_agent.summary(c.tenant)}
+    p = _p(c, product_id)
+    return {**team.overview(p), "beats": team.beats(), "platform": platform_agent.summary(c.tenant, p.id)}
 
 
 @router.put(P + "/team/{key}")
@@ -413,24 +413,11 @@ def github_sync_issue(product_id: str, number: int, c: Caller = Depends(caller))
     return ghsync.sync_issue(_p(c, product_id, True), c.user, number)
 
 
-@router.get(P + "/meetings-daily")
-def list_daily_meetings(product_id: str, c: Caller = Depends(caller)):
-    return meetings.list_meetings(_p(c, product_id))
-
-
-@router.post(P + "/meetings-daily")
-def start_daily_meeting(product_id: str, c: Caller = Depends(caller)):
-    return meetings.start(_p(c, product_id, True), c.user)
-
-
-@router.get(P + "/meetings-daily/{mid}")
-def get_daily_meeting(product_id: str, mid: int, c: Caller = Depends(caller)):
-    return meetings.get(_p(c, product_id), mid)
-
-
-@router.post(P + "/meetings-daily/{mid}/close")
-def close_daily_meeting(product_id: str, mid: int, c: Caller = Depends(caller)):
-    return meetings.close(_p(c, product_id, True), mid)
+# 振り返りの会議は、サイクルとプロダクトレビューに置き換えて廃止した（410 を返す）
+@router.api_route(P + "/meetings-daily", methods=["GET", "POST"])
+@router.api_route(P + "/meetings-daily/{rest:path}", methods=["GET", "POST"])
+def daily_meetings_closed(product_id: str, rest: str = ""):
+    raise HTTPException(410, "振り返りの会議は廃止しました（サイクルの終わりのプロダクトレビューで振り返ります）")
 
 
 class AutodevBody(BaseModel):
@@ -551,6 +538,35 @@ class FindingStatusBody(BaseModel):
 def platform_finding_status(finding_id: int, body: FindingStatusBody, c: Caller = Depends(caller)):
     _write(c)
     return platform_agent.set_status(c.tenant, finding_id, body.status)
+
+
+# プラットフォームエージェントはプロダクトごと：そのプロダクトの問題と、テナント全体の問題だけを見る
+@router.get(P + "/platform")
+def product_platform(product_id: str, c: Caller = Depends(caller)):
+    return platform_agent.workspace(c.tenant, _p(c, product_id).id)
+
+
+@router.get(P + "/platform/summary")
+def product_platform_summary(product_id: str, c: Caller = Depends(caller)):
+    return platform_agent.summary(c.tenant, _p(c, product_id).id)
+
+
+@router.post(P + "/platform/talk")
+def product_platform_talk(product_id: str, body: PlatformTalkBody, c: Caller = Depends(caller)):
+    p = _p(c, product_id, True)
+    return platform_agent.talk(c.tenant, c.user, body.text, p.id)
+
+
+@router.post(P + "/platform/findings/{finding_id}/act")
+def product_platform_act(product_id: str, finding_id: int, c: Caller = Depends(caller)):
+    p = _p(c, product_id, True)
+    return platform_agent.act(c.tenant, c.user, finding_id, p.id)
+
+
+@router.put(P + "/platform/findings/{finding_id}")
+def product_platform_finding(product_id: str, finding_id: int, body: FindingStatusBody, c: Caller = Depends(caller)):
+    p = _p(c, product_id, True)
+    return platform_agent.set_status(c.tenant, finding_id, body.status, p.id)
 
 
 # ---------------- ペルソナ・スキル・ツール（テナントで共通の配役） ----------------

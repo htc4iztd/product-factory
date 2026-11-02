@@ -416,3 +416,18 @@ def test_own_writes_count_as_evidence(env):
     with session() as s:
         rep = s.query(TeamAgent).filter_by(product_id=p.id, key="s07").one().report
     assert rep["summary"] == "⑦の業務フローを書きました。" and any("確定" in x for x in rep["unverified"])
+
+
+def test_reply_to_any_agent(env):
+    """チャットのどのエージェントの書き込みにも返事ができる。工程の担当・リリースエージェントには窓口の PM が答える。"""
+    from pf_agent import assistant
+
+    c, p = env
+    m = assistant.notify(p.tenant_id, p.id, "s14", "【リリース前レビュー】リリースを定義しました。", {"kind": "review"})
+    body = {"path": f"/p/{p.id}", "text": "環境は Google Cloud でよい", "mentions": [], "attachments": [],
+            "reply_to": m["id"]}
+    r = c.post("/assistant/messages", headers=H, json=body).json()
+    assert r["message"]["context"]["reply_to"]["agent"] == "s14" and r["reply"]["agent"] == "pm_impl"
+    m2 = assistant.notify(p.tenant_id, p.id, "platform", "【相談】定期実行が止まっています。", {"kind": "platform"})
+    r = c.post("/assistant/messages", headers=H, json={**body, "reply_to": m2["id"]}).json()
+    assert r["reply"]["agent"] == "platform"

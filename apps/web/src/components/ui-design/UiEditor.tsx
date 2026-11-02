@@ -1,6 +1,7 @@
 "use client";
 import { useCallback, useEffect, useMemo, useRef, useState, useTransition } from "react";
-import { ArrowDown, ArrowUp, Code2, Copy, CornerLeftUp, Laptop, MousePointerClick, Plus, Redo2, Save, Smartphone, Tablet, Trash2, Undo2 } from "lucide-react";
+import { ArrowDown, ArrowUp, Code2, Copy, CornerLeftUp, FileUp, Laptop, MousePointerClick, Plus, Redo2, Save, Smartphone, Tablet, Trash2, Undo2 } from "lucide-react";
+import { MAX_HTML, importHtml } from "@/lib/htmlImport";
 import { setField } from "@/app/(app)/p/[id]/s/[stage]/actions";
 import { UI_BLOCKS, srcDoc } from "@/lib/uikit";
 
@@ -139,6 +140,39 @@ export function UiEditor({ pid, value, screens, readOnly }: { pid: string; value
     const p: UiPage = { id: `p${Date.now().toString(36)}`, name: sc?.name || `画面${pages.length + 1}`, screen: sc?.id ?? "", html: '<main class="pf-main"><h1>新しい画面</h1><p>部品を足すか、右のチャットで「この画面を作って」と頼みます。</p></main>', css: "", project: null };
     setPages([...pages, p]); setCur(p.id); load(p.html, p.css); setDirty(true); hist.current = { past: [], future: [] };
   };
+  // 既存の HTML を取り込む：新しい画面として足すか、いまの画面を置き換える
+  const [importing, setImporting] = useState(false);
+  const takeIn = (items: { raw: string; name: string }[], replace: boolean) => {
+    const notes: string[] = [];
+    let next = [...pages];
+    let last: UiPage | null = null;
+    items.forEach((it, k) => {
+      const r = importHtml(it.raw, it.name);
+      notes.push(...r.notes.map((n) => `${r.name}：${n}`));
+      if (replace && k === 0 && page) {
+        hist.current.past.push(page.html); hist.current.future = [];
+        last = { ...page, html: r.html, css: r.css, project: null };
+        next = next.map((p) => (p.id === page.id ? last! : p));
+      } else {
+        last = { id: `p${Date.now().toString(36)}${k}`, name: r.name, screen: "", html: r.html, css: r.css, project: null };
+        next.push(last);
+      }
+    });
+    if (!last) return;
+    const l: UiPage = last;
+    setPages(next); setCur(l.id); load(l.html, l.css); setDirty(true); setImporting(false);
+    setMsg(`${items.length} 件を取り込みました（保存すると⑥に入ります）` + (notes.length ? `。${notes.join("／")}` : ""));
+  };
+  const onFiles = async (files: FileList | null, replace: boolean) => {
+    if (!files?.length) return;
+    const items = [];
+    for (const f of [...files]) {
+      if (f.size > MAX_HTML) { setMsg(`${f.name} は大きすぎます（2MB まで）`); return; }
+      items.push({ raw: await f.text(), name: f.name.replace(/\.html?$/i, "") });
+    }
+    takeIn(items, replace);
+  };
+
   const remove = (id: string) => {
     const next = pages.filter((p) => p.id !== id);
     setPages(next); setDirty(true);
@@ -212,8 +246,12 @@ export function UiEditor({ pid, value, screens, readOnly }: { pid: string; value
     <div className="grid h-full grid-cols-[200px_minmax(0,1fr)_300px] overflow-hidden rounded-xl border border-zinc-200 bg-white" aria-label="UI エディタ">
       <aside className="flex min-h-0 flex-col border-r border-zinc-200 bg-zinc-50/60" aria-label="画面の一覧">
         <div className="flex items-center gap-1 border-b border-zinc-200 px-3 py-2 text-[12.5px] font-semibold">画面（{pages.length}）
-          {!readOnly && <button className="btn-ghost btn-sm ml-auto h-7 px-1.5" onClick={add} aria-label="画面を足す"><Plus size={13} /></button>}
+          {!readOnly && <span className="ml-auto flex">
+            <button className="btn-ghost btn-sm h-7 px-1.5" onClick={() => setImporting((x) => !x)} aria-label="HTML を取り込む" title="既存の HTML を取り込む"><FileUp size={13} /></button>
+            <button className="btn-ghost btn-sm h-7 px-1.5" onClick={add} aria-label="画面を足す"><Plus size={13} /></button>
+          </span>}
         </div>
+        {importing && !readOnly && <ImportPanel hasPage={!!page} onFiles={onFiles} onPaste={(raw, replace) => takeIn([{ raw, name: "貼り付けた画面" }], replace)} onClose={() => setImporting(false)} />}
         <ul className="flex-1 overflow-y-auto py-1">
           {pages.length === 0 && <li className="px-3 py-2 text-[11.5px] text-zinc-400">画面がありません。＋で足すか、右のチャットで「申込画面を作って」と頼みます。</li>}
           {pages.map((p) => (
@@ -240,7 +278,7 @@ export function UiEditor({ pid, value, screens, readOnly }: { pid: string; value
         {!readOnly && (
           <div className="flex items-center gap-2 border-t border-zinc-200 p-3">
             <button className="btn-primary btn-sm" disabled={pending || !dirty} onClick={save}><Save size={12} />{pending ? "保存中…" : "保存"}</button>
-            <span className="text-[11px] text-zinc-500" role="status">{dirty ? "保存していない変更があります" : msg}</span>
+            <span className="text-[11px] text-zinc-500" role="status">{[dirty ? "保存していない変更があります" : "", msg ?? ""].filter(Boolean).join("。")}</span>
           </div>
         )}
       </aside>
@@ -356,6 +394,30 @@ function CodeTab({ page, onApply }: { page: UiPage; onApply: (html: string, css:
       <label className="block"><span className="label">CSS（この画面だけ。部品集の上に重ねる）</span>
         <textarea className="input font-mono text-[11px]" rows={8} value={css} onChange={(e) => setCss(e.target.value)} aria-label="CSS" spellCheck={false} /></label>
       <button className="btn-primary btn-sm" disabled={!changed} onClick={() => onApply(html, css)}>キャンバスに反映</button>
+    </div>
+  );
+}
+
+// HTML の取り込み：ファイル（複数可）か貼り付け。新しい画面として足すか、いまの画面を置き換える
+function ImportPanel({ hasPage, onFiles, onPaste, onClose }: {
+  hasPage: boolean; onFiles: (f: FileList | null, replace: boolean) => void; onPaste: (raw: string, replace: boolean) => void; onClose: () => void;
+}) {
+  const [replace, setReplace] = useState(false);
+  const [raw, setRaw] = useState("");
+  return (
+    <div className="space-y-2 border-b border-zinc-200 bg-white p-3 text-[11.5px]" aria-label="HTML の取り込み">
+      <div className="flex items-center font-semibold">HTML を取り込む<button className="ml-auto text-zinc-400 hover:text-zinc-700" onClick={onClose} aria-label="取り込みを閉じる">×</button></div>
+      <p className="text-zinc-500">body の中身と style を取り込みます。スクリプト・外部の CSS は外します。</p>
+      {hasPage && (
+        <div className="flex flex-col gap-0.5">
+          <label className="flex items-center gap-1"><input type="radio" checked={!replace} onChange={() => setReplace(false)} />新しい画面として足す</label>
+          <label className="flex items-center gap-1"><input type="radio" checked={replace} onChange={() => setReplace(true)} />いまの画面を置き換える</label>
+        </div>
+      )}
+      <input type="file" accept=".html,.htm,text/html" multiple={!replace} aria-label="取り込む HTML ファイル" className="block w-full text-[11px]"
+        onChange={(e) => { onFiles(e.target.files, replace); e.target.value = ""; }} />
+      <textarea className="input font-mono text-[10.5px]" rows={4} value={raw} onChange={(e) => setRaw(e.target.value)} aria-label="貼り付ける HTML" placeholder="または HTML を貼り付け" />
+      <button className="btn-secondary btn-sm w-full justify-center" disabled={!raw.trim()} onClick={() => { onPaste(raw, replace); setRaw(""); }}>貼り付けた HTML を取り込む</button>
     </div>
   );
 }

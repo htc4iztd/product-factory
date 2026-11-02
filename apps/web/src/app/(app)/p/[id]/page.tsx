@@ -7,7 +7,6 @@ import { PageHeader } from "@/components/PageHeader";
 import { AutoRefresh } from "@/components/autodev/AutoRefresh";
 import { TeamGraph } from "@/components/org/TeamGraph";
 import { RunTeamButton } from "@/components/org/bits";
-import { MeetingCard } from "@/components/org/MeetingCard";
 
 const when = (t: string | null | undefined) => (t ? new Date(t).toLocaleString("ja-JP", { timeZone: "Asia/Tokyo", month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit" }) : "—");
 
@@ -96,7 +95,6 @@ export default async function ProductPage({ params }: { params: Promise<{ id: st
         <TeamGraph d={d} pid={id} />
         <div className="grid gap-6 xl:grid-cols-2">
           <div className="space-y-6">
-            <MeetingCard pid={id} meeting={d.meeting_today} schedule={d.meeting} pending={d.pending_notes} />
             {(waiting.length > 0 || recheck.length > 0) && (
               <section>
                 <h2 className="section-title mb-2">対応が必要</h2>

@@ -19,7 +19,7 @@ import hashlib
 import re
 
 from pydantic import BaseModel, Field
-from sqlalchemy import func, select
+from sqlalchemy import func, or_, select
 
 from . import cron, jobs, llm, llmconf
 from .db import (
@@ -427,7 +427,6 @@ def detect(tenant: str, now: dt.datetime | None = None) -> dict:
     found = _detect_scheduler(tenant, now) + _detect_jobs(tenant, now)
     for p in products:
         found += _detect_product(p, now)
-    names = {p.id: p.name for p in products}
     alerts: list[PlatformFinding] = []
     seen: set[str] = set()
     with session() as s:
@@ -457,8 +456,10 @@ def detect(tenant: str, now: dt.datetime | None = None) -> dict:
                 f.status, f.resolved_at = "resolved", now
                 resolved += 1
         s.flush()
+        active = [pid for pid, in s.execute(
+            select(Product.id).where(Product.tenant_id == tenant, Product.status != "stopped")).all()]
         for f in alerts:
-            where = f"（{names[f.product_id]}）" if f.product_id in names else ""
+            where = ""
             # PdM への話しかけは4つの型だけ：対処があれば合意依頼、なければ相談
             if f.action:
                 ask, ask_label = "agree_next", "ネクストアクションへの合意依頼"
@@ -467,34 +468,22 @@ def detect(tenant: str, now: dt.datetime | None = None) -> dict:
                 ask, ask_label = "consult", "相談"
                 msg = (f"【{ask_label}】{f.title}{where}\n{f.suggestion}\n→ どう対処するか、"
                        f"チャットで @プラットフォーム に返事をしてください。")
-            s.add(
-                PlatformMessage(
-                    tenant_id=tenant,
-                    role="platform",
-                    author=NAME,
-                    findings=[f.id],
-                    text=msg,
-                )
-            )
-            s.add(
-                AssistantMessage(
-                    tenant_id=tenant,
-                    user=None,
-                    product_id=f.product_id,
-                    role="agent",
-                    agent="platform",
-                    text=msg,
+            # プラットフォームはプロダクトごと：プロダクトの問題はそのプロダクトに、テナント全体の問題
+            # （定期実行の停止など）はすべてのプロダクトに知らせる
+            for pid in [f.product_id] if f.product_id else active:
+                acts = [
+                    {"id": f"f{f.id}", "type": "platform_act", "status": "pending", "by": "platform",
+                     "title": f"対処を実行する：{f.action['label']}", "before": f.title,
+                     "after": f.action["label"], "args": {"finding": f.id}, "reason": f.suggestion}
+                ] if f.action else []
+                s.add(PlatformMessage(tenant_id=tenant, product_id=pid, role="platform", author=NAME,
+                                      findings=[f.id], text=msg))
+                s.add(AssistantMessage(
+                    tenant_id=tenant, user=None, product_id=pid, role="agent", agent="platform", text=msg,
                     context={"kind": "platform", "label": "プラットフォーム", "finding": f.id, "ask": ask,
                              "ask_label": ask_label},
-                    actions=[
-                        {"id": f"f{f.id}", "type": "platform_act", "status": "pending", "by": "platform",
-                         "title": f"対処を実行する：{f.action['label']}", "before": f.title,
-                         "after": f.action["label"], "args": {"finding": f.id}, "reason": f.suggestion}
-                    ]
-                    if f.action
-                    else [],
-                )
-            )
+                    actions=acts,
+                ))
         s.commit()
     return {"found": len(seen), "alerts": len(alerts), "resolved": resolved}
 
@@ -560,19 +549,27 @@ def _names(tenant: str) -> dict[str, str]:
         return dict(s.execute(select(Product.id, Product.name).where(Product.tenant_id == tenant)).all())
 
 
-def findings(tenant: str, include_resolved: int = 20) -> list[dict]:
+def _scope(product_id: str | None):
+    """プロダクトのプラットフォームが見る問題：そのプロダクトの問題と、テナント全体の問題（product_id なし）。"""
+    if product_id is None:
+        return True
+    return or_(PlatformFinding.product_id == product_id, PlatformFinding.product_id.is_(None))
+
+
+def findings(tenant: str, include_resolved: int = 20, product_id: str | None = None) -> list[dict]:
     names = _names(tenant)
     order = {"high": 0, "medium": 1, "low": 2}
     with session() as s:
         live = list(
             s.execute(
-                select(PlatformFinding).where(PlatformFinding.tenant_id == tenant, PlatformFinding.status != "resolved")
+                select(PlatformFinding).where(PlatformFinding.tenant_id == tenant, PlatformFinding.status != "resolved",
+                                              _scope(product_id))
             ).scalars()
         )
         done = list(
             s.execute(
                 select(PlatformFinding)
-                .where(PlatformFinding.tenant_id == tenant, PlatformFinding.status == "resolved")
+                .where(PlatformFinding.tenant_id == tenant, PlatformFinding.status == "resolved", _scope(product_id))
                 .order_by(PlatformFinding.resolved_at.desc())
                 .limit(include_resolved)
             ).scalars()
@@ -581,12 +578,13 @@ def findings(tenant: str, include_resolved: int = 20) -> list[dict]:
         return [finding_dict(f, names) for f in live + done]
 
 
-def summary(tenant: str) -> dict:
-    """レールの印（数秒ごとに読む）。AI も検知も動かさない。"""
+def summary(tenant: str, product_id: str | None = None) -> dict:
+    """レールの印（数秒ごとに読む）。AI も検知も動かさない。
+    product_id を渡すと、そのプロダクトのプラットフォームの分。"""
     with session() as s:
         rows = s.execute(
             select(PlatformFinding.severity, func.count())
-            .where(PlatformFinding.tenant_id == tenant, PlatformFinding.status == "open")
+            .where(PlatformFinding.tenant_id == tenant, PlatformFinding.status == "open", _scope(product_id))
             .group_by(PlatformFinding.severity)
         ).all()
         b = s.get(SystemBeat, "tick")
@@ -594,8 +592,8 @@ def summary(tenant: str) -> dict:
     return {"open": sum(by.values()), "high": by.get("high", 0), "tick_at": _iso(b.at) if b else None}
 
 
-def status(tenant: str, now: dt.datetime | None = None) -> dict:
-    """いまの稼働状況：定期実行・ジョブ（24時間）・プロダクトごとのエージェント。"""
+def status(tenant: str, now: dt.datetime | None = None, product_id: str | None = None) -> dict:
+    """いまの稼働状況：定期実行・ジョブ（24時間）・エージェント。product_id を渡すと、そのプロダクトの分だけ。"""
     from .team import KEYS, OPEN, overview
 
     now = now or _now()
@@ -604,18 +602,21 @@ def status(tenant: str, now: dt.datetime | None = None) -> dict:
         beats = {b.name: {"at": _iso(b.at), "detail": b.detail} for b in s.execute(select(SystemBeat)).scalars()}
         job_rows = s.execute(
             select(JobRun.kind, JobRun.status, func.count())
-            .where(JobRun.tenant_id == tenant, JobRun.created_at >= since)
+            .where(JobRun.tenant_id == tenant, JobRun.created_at >= since,
+                   *([JobRun.product_id == product_id] if product_id else []))
             .group_by(JobRun.kind, JobRun.status)
         ).all()
         running = s.execute(
             select(JobRun.id, JobRun.kind, JobRun.product_id, JobRun.status, JobRun.created_at)
-            .where(JobRun.tenant_id == tenant, JobRun.status.in_(("queued", "running")))
+            .where(JobRun.tenant_id == tenant, JobRun.status.in_(("queued", "running")),
+                   *([JobRun.product_id == product_id] if product_id else []))
             .order_by(JobRun.created_at)
         ).all()
         products = list(
             s.execute(
                 select(Product)
-                .where(Product.tenant_id == tenant, Product.status != "stopped")
+                .where(Product.tenant_id == tenant, Product.status != "stopped",
+                       *([Product.id == product_id] if product_id else []))
                 .order_by(Product.created_at)
             ).scalars()
         )
@@ -659,7 +660,6 @@ def status(tenant: str, now: dt.datetime | None = None) -> dict:
                 "agents": st_count,
                 "open_issues": open_issues.get(p.id, 0),
                 "next_run_at": min(nxt) if nxt else None,
-                "meeting": ov["meeting"],
             }
         )
     tick_at = beats.get("tick", {}).get("at")
@@ -683,12 +683,13 @@ def status(tenant: str, now: dt.datetime | None = None) -> dict:
     }
 
 
-def messages(tenant: str, limit: int = 60) -> list[dict]:
+def messages(tenant: str, limit: int = 60, product_id: str | None = None) -> list[dict]:
     with session() as s:
         rows = list(
             s.execute(
                 select(PlatformMessage)
-                .where(PlatformMessage.tenant_id == tenant)
+                .where(PlatformMessage.tenant_id == tenant,
+                       PlatformMessage.product_id == product_id if product_id else PlatformMessage.product_id.is_(None))
                 .order_by(PlatformMessage.id.desc())
                 .limit(limit)
             ).scalars()
@@ -696,13 +697,13 @@ def messages(tenant: str, limit: int = 60) -> list[dict]:
         return [message_dict(m) for m in reversed(rows)]
 
 
-def workspace(tenant: str) -> dict:
+def workspace(tenant: str, product_id: str | None = None) -> dict:
     detect(tenant)
     return {
-        "status": status(tenant),
-        "findings": findings(tenant),
-        "messages": messages(tenant),
-        "summary": summary(tenant),
+        "status": status(tenant, product_id=product_id),
+        "findings": findings(tenant, product_id=product_id),
+        "messages": messages(tenant, product_id=product_id),
+        "summary": summary(tenant, product_id),
     }
 
 
@@ -720,24 +721,28 @@ class PlatformReply(BaseModel):
 
 
 def _say(
-    tenant: str, role: str, author: str, text: str, found: list[int] | None = None, proposals: list[dict] | None = None
+    tenant: str, role: str, author: str, text: str, found: list[int] | None = None, proposals: list[dict] | None = None,
+    product_id: str | None = None,
 ) -> dict:
     with session() as s:
         m = PlatformMessage(
-            tenant_id=tenant, role=role, author=author, text=text, findings=found or [], proposals=proposals or []
+            tenant_id=tenant, product_id=product_id, role=role, author=author, text=text, findings=found or [],
+            proposals=proposals or [],
         )
         s.add(m)
         s.commit()
         return message_dict(m)
 
 
-def talk(tenant: str, user: str, text: str) -> dict:
+def talk(tenant: str, user: str, text: str, product_id: str | None = None) -> dict:
+    """PdM と話す。product_id を渡すと、そのプロダクトのプラットフォームとして、
+    そのプロダクトの状況だけを材料にする。"""
     text = text.strip()
     if not text:
         raise PlatformError(422, "本文が空です")
     detect(tenant)
-    mine = _say(tenant, "pdm", user, text)
-    fs = [f for f in findings(tenant, include_resolved=5)]
+    mine = _say(tenant, "pdm", user, text, product_id=product_id)
+    fs = [f for f in findings(tenant, include_resolved=5, product_id=product_id)]
     live = [f for f in fs if f["status"] != "resolved"]
     conn = llmconf.resolve(tenant)
     from . import agentrun
@@ -760,7 +765,7 @@ def talk(tenant: str, user: str, text: str) -> dict:
             findings=[f["id"] for f in live[:3]],
         )
     else:
-        st = status(tenant)
+        st = status(tenant, product_id=product_id)
         prompt = (
             prep.header()
             + "\n\nあなたはプロダクト開発ファクトリーのプラットフォームエージェントです。PdM（人）と直接話します。"
@@ -788,7 +793,8 @@ def talk(tenant: str, user: str, text: str) -> dict:
                 for f in fs[:30]
             )
             + "\n\n## これまでの対話\n"
-            + "\n".join(f"{'PdM' if m['role'] == 'pdm' else NAME}：{m['text'][:600]}" for m in messages(tenant, 12))
+            + "\n".join(f"{'PdM' if m['role'] == 'pdm' else NAME}：{m['text'][:600]}"
+                        for m in messages(tenant, 12, product_id))
         )
         out = agentrun.think(conn, prep, prompt, PlatformReply)
     if not prep.can("propose_fix"):
@@ -801,6 +807,7 @@ def talk(tenant: str, user: str, text: str) -> dict:
         out.reply,
         [i for i in out.findings if i in ids],
         [p.model_dump() for p in out.proposals[:6]],
+        product_id,
     )
     return {"mine": mine, "reply": reply}
 
@@ -815,13 +822,13 @@ def _product(tenant: str, pid: str | None) -> Product:
         return p
 
 
-def act(tenant: str, user: str, finding_id: int) -> dict:
+def act(tenant: str, user: str, finding_id: int, product_id: str | None = None) -> dict:
     from . import agents as sched
     from . import team
 
     with session() as s:
         f = s.get(PlatformFinding, finding_id)
-        if f is None or f.tenant_id != tenant:
+        if f is None or f.tenant_id != tenant or (product_id and f.product_id not in (None, product_id)):
             raise PlatformError(404, "その問題はありません")
         if f.status == "resolved":
             raise PlatformError(409, "もう解決しています")
@@ -865,16 +872,17 @@ def act(tenant: str, user: str, finding_id: int) -> dict:
         f = s.get(PlatformFinding, finding_id)
         f.status = "ack"
         s.commit()
-    msg = _say(tenant, "platform", NAME, f"PdM の承認で実行しました：{done}（{title}）", [finding_id])
+    msg = _say(tenant, "platform", NAME, f"PdM の承認で実行しました：{done}（{title}）", [finding_id],
+               product_id=product_id)
     return {"done": done, "message": msg}
 
 
-def set_status(tenant: str, finding_id: int, st: str) -> dict:
+def set_status(tenant: str, finding_id: int, st: str, product_id: str | None = None) -> dict:
     if st not in ("open", "ack", "resolved"):
         raise PlatformError(422, "状態は open・ack・resolved のどれかです")
     with session() as s:
         f = s.get(PlatformFinding, finding_id)
-        if f is None or f.tenant_id != tenant:
+        if f is None or f.tenant_id != tenant or (product_id and f.product_id not in (None, product_id)):
             raise PlatformError(404, "その問題はありません")
         f.status = st
         f.resolved_at = _now() if st == "resolved" else None

@@ -1,7 +1,8 @@
 """エージェントの組織と掲示板。
 
 指揮系統
-- PdM（人）：話せるのは PM だけ。意思は PM との対話（いつでも）と、1日1回の振り返りの会議（meetings.py）で伝える
+- PdM（人）：話せるのは PM だけ。意思は PM との対話（いつでも）と、サイクルの終わりのプロダクトレビューで伝える
+  （振り返りの会議は廃止）
 - PM（3人）：事業 PM（①〜⑤）・設計 PM（⑥〜⑪）・実装 PM（⑫〜⑬）。自分の領域のプロジェクト管理をする。
   ⑭リリースの担当（リリースエージェント）はサイクルの外で独立して動く。
   1時間ごとに領域の担当へ状況確認を出し、集めたことを PM のタスク管理の場所（PmNote）に置き、会議で PdM に伝える
@@ -41,7 +42,7 @@ PM_OF = {**{sid: pm for pm, sids in DOMAIN.items() for sid in sids}, RELEASE_AGE
 KEYS = (*PMS, *(s.id for s in STAGES))
 MEETING = "meeting"  # 会議の予定も TeamAgent の行で持つ（エージェントではない）
 PM_SYNC = "pm_sync"  # PM 同士の連絡（10分ごと）の予定。これも TeamAgent の行で持つ
-SCHEDULED = (MEETING, PM_SYNC)  # エージェントではない予定
+SCHEDULED = (PM_SYNC,)  # エージェントではない予定（振り返りの会議はサイクルとプロダクトレビューに置き換えて廃止）
 INTENTS = ("confirm", "answer", "notice")
 INTENT_LABEL = {"confirm": "確認", "answer": "回答", "notice": "共有"}
 HEALTH = ("green", "yellow", "red")
@@ -110,7 +111,8 @@ def default_mission(key: str) -> str:
         return (
             f"{stages}のプロジェクト管理をする。PdM と対話して意思を確かめ、担当への Issue に落とす。"
             "1時間ごとに担当の状況を確かめて記録し、遅れ・止まっていること・工程間の食い違いを見つけて手を打つ。"
-            "毎日の振り返りの会議で PdM に報告し、他の PM の報告と自分の領域の成果物を突き合わせる。"
+            "サイクルの終わりのプロダクトレビューで、自分の領域の成果物をレビューし、"
+            "他の PM の報告と自分の領域の成果物を突き合わせる。"
         )
     st = STAGE_BY_ID[key]
     fw = fwlib.of(None, key)
@@ -145,6 +147,8 @@ def ensure(product: Product) -> None:
         rows = list(s.execute(select(TeamAgent).where(TeamAgent.product_id == product.id)).scalars())
         have = {a.key for a in rows}
         for a in rows:  # 前の既定（担当と同じ分）のままなら、ずらした既定にする
+            if a.key == MEETING and (a.enabled or a.next_run_at is not None):  # 振り返りの会議は廃止：予定を止める
+                a.enabled, a.next_run_at = False, None
             if a.key == PM_SYNC and a.cron == _OLD_PM_SYNC:
                 a.cron, a.next_run_at = DEFAULT_CRON[PM_SYNC], cron.next_after(DEFAULT_CRON[PM_SYNC], _now())
         for k in (*KEYS, *SCHEDULED):
@@ -232,7 +236,6 @@ def overview(product: Product) -> dict:
             )
         ).all():
             working |= {t["id"].split("#")[0] for t in tasks_ or [] if t.get("status") == "running"}
-        meeting = agents.get(MEETING)
         out = []
         for k in KEYS:
             a = agents[k]
@@ -240,15 +243,7 @@ def overview(product: Product) -> dict:
             health = (a.report or {}).get("health")
             d["state"] = "working" if k in working else "stuck" if health == "red" else "idle"
             out.append(d)
-        return {
-            "agents": out,
-            "meeting": {
-                "cron": meeting.cron,
-                "cron_label": cron.describe(meeting.cron),
-                "enabled": meeting.enabled,
-                "next_run_at": _iso(meeting.next_run_at),
-            },
-        }
+        return {"agents": out}
 
 
 def edit_agent(product: Product, key: str, mission: str | None, cron_expr: str | None, enabled: bool | None) -> dict:
@@ -635,11 +630,7 @@ def tick(now: dt.datetime | None = None) -> list[str]:
                 continue
             s.expunge(product)
         try:
-            if MEETING in keys:
-                from . import meetings
-
-                started.append(meetings.start(product, product.created_by, scheduled=True)["job_id"])
-            rest = [k for k in keys if k != MEETING]
+            rest = [k for k in keys if k != MEETING]  # 振り返りの会議は廃止（予定が残っていても動かさない）
             if rest:
                 started.append(start(product, product.created_by, rest, reason="予定"))
         except Exception:  # noqa: BLE001  起動できなければ時刻を戻し、次の呼び出しでやり直す
@@ -1086,7 +1077,6 @@ def mark_read_from(product_id: str, key: str) -> None:  # 古い形の対話と�
 def dashboard(product: Product) -> dict:
     """ダッシュボード：各エージェントの報告・各案（PP-n）・最近のやり取り（掲示板と Issue）・
     PM から PdM へ・今日の会議。"""
-    from . import meetings
     from .avatars import versions as avatar_versions
     from .db import AgentFinding, Variant
 
@@ -1163,6 +1153,5 @@ def dashboard(product: Product) -> dict:
         "findings_open": findings,
         "running": running is not None,
         "pending_notes": notes,
-        "meeting_today": meetings.today(product),
         "avatar_versions": avatar_versions(product.tenant_id),
     }

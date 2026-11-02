@@ -36,7 +36,6 @@ PAGES = {
     "board": ("board", "掲示板"),
     "review": ("review", "プロダクトレビュー"),
     "issues": ("issues", "Issue"),
-    "meetings-daily": ("meetings", "振り返りの会議"),
     "team": ("team", "エージェントの組織"),
     "cast": ("cast", "ペルソナ・スキル・ツール"),
     "schedule": ("schedule", "スケジュール"),
@@ -78,8 +77,6 @@ def parse_path(path: str) -> dict:
         return {**ctx, "kind": "issue", "number": int(parts[1]), "label": f"Issue #{parts[1]}"}
     if parts[:1] == ["pm"] and len(parts) > 1 and parts[1] in PMS:
         return {**ctx, "kind": "pm", "pm": parts[1], "label": f"{name_of(parts[1])}の作業場所"}
-    if parts[:1] == ["meetings-daily"] and len(parts) > 1 and parts[1].isdigit():
-        return {**ctx, "kind": "meeting", "meeting_id": int(parts[1]), "label": "振り返りの会議"}
     kind, label = PAGES.get(parts[0] if parts else "", ("page", rest or "ページ"))
     return {**ctx, "kind": kind, "label": label}
 
@@ -329,7 +326,7 @@ def prepare_action(tenant: str, product: Product | None, responder: str, a: Acti
     if a.type == "platform_act":
         from . import platform_agent as pa
 
-        f = next((x for x in pa.findings(tenant, 0) if x["id"] == a.number), None)
+        f = next((x for x in pa.findings(tenant, 0, product.id if product else None) if x["id"] == a.number), None)
         if f is None or not f.get("action"):
             raise ValueError("実行できる対処がありません")
         return {
@@ -468,7 +465,7 @@ def _stub(product: Product | None, ctx: dict, responder: str, text: str) -> Assi
         from . import platform_agent as pa
 
         pa.detect(product.tenant_id)
-        live = [f for f in pa.findings(product.tenant_id, 0) if f["status"] != "resolved"]
+        live = [f for f in pa.findings(product.tenant_id, 0, product.id) if f["status"] != "resolved"]
         head += (
             f"未解決の問題は {len(live)} 件です。" + "".join(f"\n- {f['title']}" for f in live[:3])
             if live
@@ -634,8 +631,12 @@ def send(
     if not text:
         raise AssistantError(422, "本文が空です")
     quote = quote_of(tenant, reply_to) if reply_to else None
-    if quote and quote["agent"] in RESPONDERS and not any(m.get("ref") == quote["agent"] for m in mentions):
-        mentions = [{"kind": "agent", "ref": quote["agent"], "label": quote["agent_name"]}, *mentions]
+    if quote:
+        # 返事の宛先：PM・プラットフォームはそのまま。工程の担当・リリースエージェントの書き込みには、窓口の PM が答える
+        # （PdM が話せるのは PM だけ）。引用で何への返事かは伝わる
+        who = quote["agent"] if quote["agent"] in RESPONDERS else PM_OF.get(quote["agent"])
+        if who and not any(m.get("ref") == who for m in mentions):
+            mentions = [{"kind": "agent", "ref": who, "label": name_of(who)}, *mentions]
     ctx = parse_path(path)
     product = None
     if ctx.get("product_id"):
@@ -780,7 +781,7 @@ def _execute(tenant: str, product: Product | None, user: str, a: dict) -> str:
     if a["type"] == "platform_act":
         from . import platform_agent as pa
 
-        return pa.act(tenant, user, x["finding"])["done"]
+        return pa.act(tenant, user, x["finding"], product.id if product else None)["done"]
     if a["type"] == "stage_complete":
         return _complete(product, user, x["stages"])
     if a["type"] == "pm_ask":

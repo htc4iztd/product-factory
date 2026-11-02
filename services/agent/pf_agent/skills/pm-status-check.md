@@ -7,5 +7,5 @@ refs: [issue-etiquette, writing-ja, facts-and-authority]
 tools: [stage_draft,issues_list,issue_read,board_read,issue_create,issue_update,board_post,pm_note]
 ---
 - 前回から変わった担当だけを見る。止まっている Issue・期日を過ぎた Issue・工程間の食い違いを探す。
-- 手を打つのは Issue（担当に動いてもらう）か、PM の記録（会議で報告する）。
+- 手を打つのは Issue（担当に動いてもらう）か、PM の記録（プロダクトレビューで報告する）。
 - PdM に急いで伝えることだけ、PM との対話に書く。

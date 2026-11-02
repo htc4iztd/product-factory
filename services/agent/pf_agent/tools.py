@@ -261,7 +261,7 @@ def _crud(ctx: Ctx, a: _NoArgs) -> str:
 def _factory_status(ctx: Ctx, a: _NoArgs) -> str:
     from . import platform_agent as pa
 
-    st = pa.status(ctx.tenant)
+    st = pa.status(ctx.tenant, product_id=ctx.product.id if ctx.product else None)
     return json.dumps(
         {k: st[k] for k in ("scheduler", "jobs", "running", "products")}, ensure_ascii=False, default=str
     )[:12000]
@@ -270,7 +270,7 @@ def _factory_status(ctx: Ctx, a: _NoArgs) -> str:
 def _findings(ctx: Ctx, a: _NoArgs) -> str:
     from . import platform_agent as pa
 
-    fs = pa.findings(ctx.tenant, include_resolved=10)
+    fs = pa.findings(ctx.tenant, include_resolved=10, product_id=ctx.product.id if ctx.product else None)
     return (
         "\n".join(
             f"- {f['id']}［{f['severity']}・{f['status']}］{f['title']}｜{f['detail'][:300]}｜{f['suggestion'][:200]}"

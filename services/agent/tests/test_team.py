@@ -55,7 +55,7 @@ def test_pdm_talks_to_pm_and_issue_flows(client):
     keys = [a["key"] for a in t["agents"]]
     assert keys[:4] == ["pm_biz", "pm_design", "pm_impl", "s01"] and len(keys) == 17
     assert t["agents"][0]["name"] == "事業PM" and t["agents"][0]["domain"] == ["s01", "s02", "s03", "s04", "s05"]
-    assert t["meeting"]["cron_label"] == "平日 18:00"
+    assert "meeting" not in t  # 振り返りの会議は廃止
     # PdM は PM とだけ話せる
     assert c.post(f"/products/{pid}/pm/s01/talk", headers=H, json={"text": "x"}).status_code == 404
     assert c.post(f"/products/{pid}/pm/pm_biz/talk", headers=VIEWER, json={"text": "x"}).status_code == 403
@@ -127,29 +127,17 @@ def test_issue_rules(client):
     wait_idle(c, pid)
 
 
-def test_meeting_reports_and_reviews(client):
+def test_daily_meeting_is_closed(client):
+    """振り返りの会議は廃止した（サイクルの終わりのプロダクトレビューで振り返る）。予定も動かない。"""
+    from pf_agent import team
+    from pf_agent.db import TeamAgent, session
+
     c = client
     pid = new_product(c)
-    c.post(f"/products/{pid}/pm/pm_biz/talk", headers=H, json={"text": "①の下書きを作って", "stage_id": "s01"})
-    wait_idle(c, pid)
-    m = c.post(f"/products/{pid}/meetings-daily", headers=H).json()
-    j = wait_job(c, m["job_id"])
-    assert j["status"] == "done", j
-    assert [t["id"] for t in j["tasks"]] == ["report:pm_biz", "report:pm_design", "report:pm_impl",
-                                             "review:pm_biz", "review:pm_design", "review:pm_impl"]
-    m = c.get(f"/products/{pid}/meetings-daily/{m['id']}", headers=H).json()
-    assert m["status"] == "open" and set(m["reports"]) == {"pm_biz", "pm_design", "pm_impl"}
-    assert len(m["reviews"]) == 6 and all(r["pm"] != r["about"] for r in m["reviews"])
-    # 集めたことは会議で伝えた扱いになる
-    w = c.get(f"/products/{pid}/pm/pm_biz", headers=H).json()
-    assert w["pending"] == 0 and all(n["meeting_id"] == m["id"] for n in w["notes"])
-    # 会議の中で PM と話す
-    c.post(f"/products/{pid}/pm/pm_design/talk", headers=H, json={"text": "設計は来週までに", "meeting_id": m["id"]})
-    m = c.get(f"/products/{pid}/meetings-daily/{m['id']}", headers=H).json()
-    assert [x["role"] for x in m["messages"]] == ["pdm", "pm"]
-    assert c.post(f"/products/{pid}/meetings-daily/{m['id']}/close", headers=H).json()["status"] == "closed"
-    wait_idle(c, pid)
-
+    assert c.post(f"/products/{pid}/meetings-daily", headers=H).status_code == 410
+    assert c.get(f"/products/{pid}/meetings-daily/1", headers=H).status_code == 410
+    with session() as s:
+        assert not s.query(TeamAgent).filter_by(product_id=pid, key=team.MEETING).count()
 
 def test_schedule_always_runs(client):
     from pf_agent import team
@@ -200,7 +188,7 @@ def test_schedule_always_runs(client):
     other = new_product(c, "未表示")
     team.ensure_all()
     with session() as s:
-        assert s.query(TeamAgent).filter_by(product_id=other).count() == 19
+        assert s.query(TeamAgent).filter_by(product_id=other).count() == 18
 
 
 def test_avatars(client):
@@ -221,10 +209,10 @@ def test_schedule_view_bulk_preview_and_overview(client):
     pid = new_product(c)
     v = c.get(f"/products/{pid}/schedule", headers=H).json()
     by = {a["key"]: a for a in v["agents"]}
-    assert len(v["agents"]) == 19 and v["hours"] == 24
+    assert len(v["agents"]) == 18 and v["hours"] == 24
     assert by["pm_sync"]["label"] == "10分ごと（5分から）" and by["pm_sync"]["name"] == "PM 同士の連絡"
     assert by["pm_biz"]["label"] == "毎時 0分" and by["s01"]["label"] == "10分ごと"
-    assert by["meeting"]["label"] == "平日 18:00" and by["meeting"]["group"] == "meeting"
+    assert "meeting" not in by
     assert sum(by["s01"]["hours"]) == 144 and sum(by["pm_biz"]["hours"]) == 24 and len(by["s01"]["next"]) == 3
     assert v["platform"]["every_min"] == 5
     # 読み方と次の3回を、保存の前に確かめる
@@ -247,7 +235,7 @@ def test_schedule_view_bulk_preview_and_overview(client):
     o = c.get("/schedule-overview", headers=H).json()
     g = {x["key"]: x for x in o["products"][0]["groups"]}
     assert g["biz"]["schedules"] == ["30分ごと"] and g["release"]["stopped"] == 1
-    assert g["meeting"]["schedules"] == ["平日 18:00"]
+    assert "meeting" not in g
     # プラットフォームの見回りの間隔
     assert c.put("/platform/schedule", headers=H, json={"every_min": 15}).json()["label"] == "15分ごと"
     assert c.put("/platform/schedule", headers=H, json={"every_min": 7}).status_code == 422

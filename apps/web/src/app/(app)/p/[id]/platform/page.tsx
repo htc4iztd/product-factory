@@ -13,11 +13,11 @@ const ago = (t: string | null, now: string) => {
 };
 const BEAT: Record<string, string> = { tick: "定期実行（tick・毎分）", platform: "プラットフォームの見回り（5分ごと）" };
 
-// プラットフォーム：ファクトリー全体（このテナントのすべてのプロダクト）が動いているかを見張り、PdM と直接話す
+// プラットフォーム（プロダクトごと）：このプロダクトが動いているかを見張り、PdM と直接話す。テナント全体の問題（定期実行の停止など）も出す
 export default async function PlatformPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
   const [w, versions] = await Promise.all([
-    agent<PlatformWorkspace>("/platform"),
+    agent<PlatformWorkspace>(`/products/${id}/platform`),
     agent<Record<string, string>>("/avatars").catch(() => ({} as Record<string, string>)),
   ]);
   const st = w.status;
@@ -27,7 +27,7 @@ export default async function PlatformPage({ params }: { params: Promise<{ id: s
       <PageHeader
         crumbs={<><Link href={`/p/${id}`} className="hover:text-zinc-700">ダッシュボード</Link><span>/</span><span>プラットフォーム</span></>}
         title={<span className="flex items-center gap-3"><Avatar k="platform" v={versions.platform} size={44} state={w.summary.high ? "stuck" : "idle"} />プラットフォーム</span>}
-        sub="ファクトリー全体（すべてのプロダクト）の稼働を見張ります。各エージェントの実行状況・稼働上の問題・処理系の要修正点を見つけ、PdM と直接話します"
+        sub="このプロダクトの稼働を見張ります（定期実行の停止のようなテナント全体の問題も出します）。各エージェントの実行状況・稼働上の問題・処理系の要修正点を見つけ、PdM と直接話します"
       />
       <div className="space-y-6 px-8 py-6">
         <section className="grid gap-3 md:grid-cols-4" aria-label="稼働状況">

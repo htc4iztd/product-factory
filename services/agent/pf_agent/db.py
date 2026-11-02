@@ -843,6 +843,8 @@ class PlatformMessage(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     tenant_id: Mapped[str] = mapped_column(String(64), index=True)
     role: Mapped[str] = mapped_column(String(8))                            # pdm | platform
+    # プラットフォームエージェントはプロダクトごと。対話もプロダクトごと（None はファクトリー全体の対話）
+    product_id: Mapped[str | None] = mapped_column(String(32), nullable=True, index=True)
     author: Mapped[str] = mapped_column(String(200))
     text: Mapped[str] = mapped_column(Text)
     findings: Mapped[list | None] = mapped_column(JSON, nullable=True)      # 触れた問題の id
@@ -1016,6 +1018,7 @@ _ADDED_COLUMNS = {
     "import_docs": {"readers": "JSON"},
     "docs": {"readers": "JSON"},
     "agent_issues": {"github": "JSON"},
+    "platform_messages": {"product_id": "VARCHAR(32)"},
     "llm_settings": {"platform_granted": "BOOLEAN DEFAULT {false}"},
     "job_runs": {"tasks": "JSON"},
     "product_images": {"base_id": "VARCHAR(32)"},

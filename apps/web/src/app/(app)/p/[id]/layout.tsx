@@ -16,10 +16,9 @@ export default async function ProductLayout({ children, params }: { children: Re
   const navOpen = (await cookies()).get("pf_nav")?.value !== "closed";
   const places = [
     { label: "ダッシュボード", href: `/p/${id}`, hint: "工程とエージェントの状況・PM との対話", keys: "dashboard トップ 全体 状況" },
-    { label: "プラットフォーム", href: `/p/${id}/platform`, hint: "ファクトリー全体の稼働・問題と対処", keys: "platform 稼働 障害 エラー 失敗 定期実行" },
+    { label: "プラットフォーム", href: `/p/${id}/platform`, hint: "このプロダクトの稼働・問題と対処", keys: "platform 稼働 障害 エラー 失敗 定期実行" },
     { label: "掲示板", href: `/p/${id}/board`, hint: "エージェント同士のやり取り", keys: "board 履歴 やり取り" },
     { label: "Issue", href: `/p/${id}/issues`, hint: "エージェントの間で動く必要があること", keys: "issue チケット 課題" },
-    { label: "振り返りの会議", href: `/p/${id}/meetings-daily`, hint: "PdM と PM の毎日の会議", keys: "meeting 会議 振り返り レポート" },
     { label: "事業PMの作業場所", href: `/p/${id}/pm/pm_biz`, hint: "①〜⑤", keys: "事業PM pm" },
     { label: "設計PMの作業場所", href: `/p/${id}/pm/pm_design`, hint: "⑥〜⑪", keys: "設計PM pm" },
     { label: "実装PMの作業場所", href: `/p/${id}/pm/pm_impl`, hint: "⑫〜⑬", keys: "実装PM pm" },

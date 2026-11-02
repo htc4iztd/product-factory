@@ -24,7 +24,6 @@ GROUPS = (
     ("design", "要求・設計の担当（⑥〜⑪）", DOMAIN["pm_design"]),
     ("impl", "構築の担当（⑫〜⑬）", DOMAIN["pm_impl"]),
     ("release", "リリースエージェント（⑭・サイクルの外）", ("s14",)),
-    ("meeting", "振り返りの会議", (MEETING,)),
 )
 GROUP_OF = {k: g for g, _, keys in GROUPS for k in keys}
 WHAT = {
