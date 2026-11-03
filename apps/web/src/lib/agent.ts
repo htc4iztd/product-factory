@@ -128,7 +128,7 @@ export type CycleState = {
 };
 export type Deliverable = {
   id: string; no: string; name: string; phase: string; status: string; pct: number; version: number; missing: string[]; markdown: string;
-  goal: ({ cycle: number; strategy: string; label?: string; purpose?: string } & Partial<CycleGoal>) | null; ui?: { id: string; name: string; screen: string; html: string; css: string }[];
+  goal: ({ cycle: number; strategy: string; label?: string; purpose?: string } & Partial<CycleGoal>) | null; proto?: string;
 };
 export type ReviewData = CycleState & { deliverables: Deliverable[] };
 export type CanvasImage = { id: string; kind: string; note: string; prompt: string; model: string; base_id: string | null; created_by: string; created_at: string };

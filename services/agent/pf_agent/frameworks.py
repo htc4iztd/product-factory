@@ -183,7 +183,7 @@ FRAMEWORKS: dict[str, Framework] = {
                            Column("parent", "上位の画面"), Column("content", "主な情報・操作"),
                            Column("stories", "ストーリーID")),
                   id_prefix="SC"),
-            Field("ui", "UI デザイン", UI, "画面ごとの UI（エディタで作る。画面一覧の SC-xx とつなぐ）",
+            Field("ui", "UI デザイン", UI, "UI のプロトタイプ（画面の移り方まで操作できる1つの HTML。⑥の UI で作る）",
                   required=False),
             Field("usability", "ユーザビリティ基準", TB,
                   "体験の品質の目標と測り方（例：初回の締めを3分以内に終えられる）",
@@ -780,11 +780,14 @@ def to_markdown(stage: Stage, fw: Framework, draft: dict) -> str:
         elif f.kind in (MX, PS, DG):
             lines += block_markdown(f, v)
         elif f.kind == UI:
+            # UI はプロトタイプ（1つの HTML）。プロトタイプに寄せる前の画面ごとの UI は、プロトタイプがないときだけ出す
+            proto_html = ((v or {}).get("proto") or {}).get("html") or ""
             pages = (v or {}).get("pages") or []
-            lines += [f"- {p['name']}{'（' + p['screen'] + '）' if p.get('screen') else ''}：{ui_text(p['html'], 300)}"
-                      for p in pages] or ["（未記入）"]
-            if ((v or {}).get("proto") or {}).get("html"):
-                lines.append(f"- プロトタイプ（画面遷移を操作できる1つの HTML）：{ui_text(v['proto']['html'], 300)}")
+            if proto_html:
+                lines.append(f"- プロトタイプ（画面の移り方まで操作できる1つの HTML）：{ui_text(proto_html, 600)}")
+            else:
+                lines += [f"- {p['name']}{'（' + p['screen'] + '）' if p.get('screen') else ''}："
+                          f"{ui_text(p['html'], 300)}" for p in pages] or ["（未記入）"]
         elif f.kind in dz.KINDS:
             lines += dz.markdown(f.kind, v, draft) or ["（未記入）"]
         else:

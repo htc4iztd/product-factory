@@ -51,34 +51,5 @@ p{margin:0;color:var(--pf-sub)}a{color:var(--pf-accent);text-decoration:none}
 .pf-footer{padding:20px 24px;color:var(--pf-mute);font-size:12px;text-align:center}
 `;
 
-// 部品（エディタの「部品を足す」）。AI にもこの形を見本として渡す
-export const UI_BLOCKS: { id: string; label: string; group: string; content: string }[] = [
-  { id: "nav", group: "骨組み", label: "ヘッダー", content: '<header class="pf-nav"><span class="pf-brand"><span class="pf-avatar" style="width:28px;height:28px">S</span>サービス名</span><nav class="pf-links"><a>ホーム</a><a>機能</a><a>料金</a></nav><button class="pf-btn sm">はじめる</button></header>' },
-  { id: "main", group: "骨組み", label: "本文の枠", content: '<main class="pf-main"><h1>見出し</h1><p>説明の文章が入ります。</p></main>' },
-  { id: "shell", group: "骨組み", label: "サイドバー付きの画面", content: '<div class="pf-shell"><aside class="pf-sidebar"><span class="active">ダッシュボード</span><span>記録</span><span>レポート</span><span>設定</span></aside><main class="pf-main"><h1>ダッシュボード</h1><p>今月の状況です。</p></main></div>' },
-  { id: "tabbar", group: "骨組み", label: "タブバー（スマホ）", content: '<nav class="pf-tabbar"><span class="active">ホーム</span><span>記録</span><span>レポート</span><span>設定</span></nav>' },
-  { id: "footer", group: "骨組み", label: "フッター", content: '<footer class="pf-footer">© サービス名</footer>' },
-  { id: "hero", group: "見せる", label: "ヒーロー", content: '<section class="pf-hero"><span class="pf-badge">新しい</span><h1>ひとことで価値を伝える見出し</h1><p>誰の、どんな困りごとを、どう解決するかを一文で。</p><div style="display:flex;gap:10px"><button class="pf-btn">無料ではじめる</button><button class="pf-btn secondary">くわしく見る</button></div></section>' },
-  { id: "stats", group: "見せる", label: "数値カード（3つ）", content: '<div class="pf-grid"><div class="pf-card pf-stat"><span class="cap">今月の支出</span><span class="num">¥84,200</span><span class="pf-badge ok">先月より −6%</span></div><div class="pf-card pf-stat"><span class="cap">予算の残り</span><span class="num">¥15,800</span><div class="pf-progress"><i style="width:84%"></i></div></div><div class="pf-card pf-stat"><span class="cap">記録した日</span><span class="num">22日</span><span class="pf-muted">連続 5日</span></div></div>' },
-  { id: "cards", group: "見せる", label: "カード（並べる）", content: '<div class="pf-grid"><div class="pf-card"><h3>特長 1</h3><p>短い説明</p></div><div class="pf-card"><h3>特長 2</h3><p>短い説明</p></div><div class="pf-card"><h3>特長 3</h3><p>短い説明</p></div></div>' },
-  { id: "card", group: "見せる", label: "カード", content: '<div class="pf-card"><div class="pf-between"><h2>カードの見出し</h2><span class="pf-badge">ラベル</span></div><p>カードの中身</p></div>' },
-  { id: "list", group: "一覧", label: "リスト", content: '<ul class="pf-list"><li><span class="pf-avatar">A</span><div style="flex:1"><strong>項目の名前</strong><p class="pf-muted">補足</p></div><span class="pf-badge ok">完了</span></li><li><span class="pf-avatar">B</span><div style="flex:1"><strong>項目の名前</strong><p class="pf-muted">補足</p></div><span class="pf-badge warn">確認中</span></li></ul>' },
-  { id: "table", group: "一覧", label: "表", content: '<table class="pf-table"><thead><tr><th>日付</th><th>項目</th><th>金額</th><th>状態</th></tr></thead><tbody><tr><td>11/2</td><td>食費</td><td>¥1,280</td><td><span class="pf-badge ok">済</span></td></tr><tr><td>11/1</td><td>日用品</td><td>¥640</td><td><span class="pf-badge warn">未確認</span></td></tr></tbody></table>' },
-  { id: "empty", group: "一覧", label: "空のとき", content: '<div class="pf-empty"><h3>まだありません</h3><p>最初の1件を追加しましょう</p><div style="margin-top:12px"><button class="pf-btn sm">追加する</button></div></div>' },
-  { id: "form", group: "入力", label: "フォーム", content: '<form class="pf-card" style="gap:14px"><h2>アカウントを作る</h2><div class="pf-field"><label class="pf-label">メールアドレス</label><input class="pf-input" type="email" placeholder="you@example.com"/></div><div class="pf-field"><label class="pf-label">パスワード</label><input class="pf-input" type="password"/><span class="pf-help">8文字以上</span></div><button class="pf-btn block">登録する</button></form>' },
-  { id: "field", group: "入力", label: "入力欄", content: '<div class="pf-field"><label class="pf-label">項目名</label><input class="pf-input" placeholder="入力してください"/></div>' },
-  { id: "select", group: "入力", label: "選択欄", content: '<div class="pf-field"><label class="pf-label">カテゴリ</label><select class="pf-select"><option>食費</option><option>日用品</option></select></div>' },
-  { id: "chips", group: "入力", label: "チップ", content: '<div style="display:flex;gap:8px;flex-wrap:wrap"><span class="pf-chip">すべて</span><span class="pf-chip">今月</span><span class="pf-chip">先月</span></div>' },
-  { id: "btn", group: "入力", label: "ボタン", content: '<button class="pf-btn">ボタン</button>' },
-  { id: "btns", group: "入力", label: "ボタン（2つ）", content: '<div style="display:flex;gap:10px"><button class="pf-btn">決定</button><button class="pf-btn secondary">キャンセル</button></div>' },
-  { id: "h", group: "文字", label: "見出し", content: "<h2>見出し</h2>" },
-  { id: "p", group: "文字", label: "文章", content: "<p>文章が入ります。</p>" },
-  { id: "badge", group: "文字", label: "バッジ", content: '<span class="pf-badge">ラベル</span>' },
-  { id: "divider", group: "文字", label: "区切り線", content: '<hr class="pf-divider"/>' },
-];
-
-// AI に渡す部品の説明（アシスタントの ui_page の指示と同じ内容）
-export const UI_KIT_HINT = "pf-nav（.pf-brand・.pf-links）・pf-main（.narrow）・pf-shell＋pf-sidebar・pf-hero・pf-card・pf-grid・pf-row・pf-stack・pf-between・pf-list・pf-table・pf-stat（.num・.cap）・pf-badge（.ok・.warn・.bad）・pf-chip・pf-progress（中に i）・pf-avatar・pf-empty・pf-field＋pf-label＋pf-input／pf-select＋pf-help・pf-btn（.secondary・.ghost・.danger・.sm・.block）・pf-tabbar・pf-footer・pf-muted";
-
 export const srcDoc = (html: string, css: string, extra = "") =>
   `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><style>${UI_KIT_CSS}</style><style id="pf-page-css">${css}</style>${extra}</head><body>${html}</body></html>`;

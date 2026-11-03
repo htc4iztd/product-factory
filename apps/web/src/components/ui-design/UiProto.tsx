@@ -221,12 +221,13 @@ function MakePanel({ hasPages, pending, onAssemble, onImport, onGenerate }: {
         <textarea className="input text-[12px]" rows={2} value={note} onChange={(e) => setNote(e.target.value)} aria-label="AI への注文" placeholder="注文（任意）：例）スマホアプリ。初めての人のシナリオと、2回目の人のシナリオ" />
         <button className="btn-primary btn-sm" disabled={pending} onClick={() => onGenerate(note)}><Sparkles size={12} />AI で作る</button>
       </section>
-      <section className="space-y-1.5" aria-label="画面からまとめる">
-        <div className="flex items-center gap-1 font-semibold"><Layers size={13} />画面からまとめる</div>
-        <p className="text-[11.5px] text-zinc-500">「画面の部品」タブで作った画面を、1つの HTML にまとめます（AI を使わず、すぐできます）。ボタン・リンクの data-go で画面が移り、ユーザーフローがシナリオになります。</p>
-        <button className="btn-secondary btn-sm" disabled={pending || !hasPages} onClick={onAssemble}><Layers size={12} />画面からまとめる</button>
-        {!hasPages && <p className="text-[11px] text-zinc-400">まだ画面がありません。</p>}
-      </section>
+      {hasPages && (
+        <section className="space-y-1.5" aria-label="画面からまとめる">
+          <div className="flex items-center gap-1 font-semibold"><Layers size={13} />これまでの画面からまとめる</div>
+          <p className="text-[11.5px] text-zinc-500">プロトタイプに寄せる前に作った画面ごとの UI を、1つの HTML にまとめます（AI を使わず、すぐできます）。ボタン・リンクの data-go で画面が移り、ユーザーフローがシナリオになります。</p>
+          <button className="btn-secondary btn-sm" disabled={pending} onClick={onAssemble}><Layers size={12} />画面からまとめる</button>
+        </section>
+      )}
       <section className="space-y-1.5" aria-label="HTML を取り込む">
         <div className="flex items-center gap-1 font-semibold"><FileUp size={13} />HTML を取り込む</div>
         <p className="text-[11.5px] text-zinc-500">手元のモックアップ（1つの HTML。script もそのまま動きます）を取り込みます。外への通信と外部の script は、表示するときに止めます。</p>

@@ -784,7 +784,6 @@ def deliverables(product: Product) -> list[dict]:
                 "pct": pr.get(st.id, 0), "version": r.approved_version, "missing": fx.check(fw, d),
                 "markdown": fx.to_markdown(st, fw, d), "goal": goal_of(product.id, st.id)}
         if st.id == "s06":
-            item["ui"] = [{k: p.get(k, "") for k in ("id", "name", "screen", "html", "css")}
-                          for p in (d.get("ui") or {}).get("pages") or []]
+            item["proto"] = ((d.get("ui") or {}).get("proto") or {}).get("html") or ""  # UI のプロトタイプ
         out.append(item)
     return out

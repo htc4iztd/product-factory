@@ -1,7 +1,7 @@
 import type { FieldSpec, FrameworkDefT, Row, StageDetail } from "@/lib/agent";
 import { FrameworkParts } from "@/components/framework/FrameworkParts";
 import Link from "next/link";
-import { srcDoc } from "@/lib/uikit";
+import { ProtoPreview } from "@/components/ui-design/ProtoPreview";
 import { FieldEditor } from "./FieldEditor";
 import { KpiGraph } from "./KpiGraph";
 import { FlowEditor } from "./FlowEditor";
@@ -404,28 +404,17 @@ function ProductSpec({ c }: { c: Ctx }) {
   );
 }
 
-// UI デザイン：画面ごとの下見と、UI エディタへの入口
+// UI デザイン：プロトタイプ（画面の移り方まで操作できる1つの HTML）の下見と入口
 function UiPanel({ c }: { c: Ctx }) {
-  const pages = ((c.st.draft.ui as unknown as { pages?: { id: string; name: string; screen: string; html: string; css: string }[] })?.pages) ?? [];
+  const html = ((c.st.draft.ui as unknown as { proto?: { html?: string } })?.proto?.html) ?? "";
   return (
     <Panel>
       <div className="mb-3 flex items-center gap-2">
-        <span className="text-[13px] font-medium">UI デザイン</span>
-        <span className="text-[11px] text-zinc-400">画面ごとの UI。エディタで組むか、右のチャットで AI に頼む</span>
-        <Link href={`/p/${c.pid}/s/s06/ui`} className="btn-primary btn-sm ml-auto">UI エディタを開く</Link>
+        <span className="text-[13px] font-medium">UI のプロトタイプ</span>
+        <span className="text-[11px] text-zinc-400">画面の移り方まで操作できる1つの HTML。AI で作り、触ってコメントで直させる</span>
+        <Link href={`/p/${c.pid}/s/s06/ui`} className="btn-primary btn-sm ml-auto">プロトタイプを開く</Link>
       </div>
-      {pages.length === 0 ? <p className="text-[13px] text-zinc-400">まだ画面がありません。</p> : (
-        <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
-          {pages.map((p) => (
-            <Link key={p.id} href={`/p/${c.pid}/s/s06/ui`} className="group overflow-hidden rounded-lg border border-zinc-200 hover:border-brand-300">
-              <div className="relative h-44 overflow-hidden bg-zinc-50">
-                <iframe title={p.name} srcDoc={srcDoc(p.html, p.css)} sandbox="" className="pointer-events-none absolute left-0 top-0 h-[352px] w-[200%] origin-top-left scale-50 border-0" />
-              </div>
-              <div className="flex items-center gap-2 border-t border-zinc-100 px-3 py-1.5 text-[12px]"><span className="font-medium">{p.name}</span>{p.screen && <span className="font-mono text-[10.5px] text-zinc-400">{p.screen}</span>}</div>
-            </Link>
-          ))}
-        </div>
-      )}
+      {html ? <ProtoPreview pid={c.pid} html={html} /> : <p className="text-[13px] text-zinc-400">まだありません。「プロトタイプを開く」から AI で作れます。</p>}
     </Panel>
   );
 }

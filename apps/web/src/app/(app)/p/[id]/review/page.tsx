@@ -8,7 +8,7 @@ import { CyclePlanEditor, NextCycleForm, StartReviewButton } from "@/components/
 import { ReviewRounds } from "@/components/review/ReviewRounds";
 import { AutoRefresh } from "@/components/autodev/AutoRefresh";
 import { auth } from "@/lib/auth";
-import { srcDoc } from "@/lib/uikit";
+import { ProtoPreview } from "@/components/ui-design/ProtoPreview";
 
 const when = (t: string | null) => (t ? new Date(t).toLocaleString("ja-JP", { timeZone: "Asia/Tokyo", month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit" }) : "—");
 const PM_NAME: Record<string, string> = { pm_biz: "事業PM", pm_design: "設計PM", pm_impl: "実装PM" };
@@ -90,18 +90,7 @@ export default async function ReviewPage({ params }: { params: Promise<{ id: str
                     <span><span className="font-semibold">サイクル {d.goal.cycle} の目標：</span>{d.goal.goal}{d.goal.done_when ? `（完了の条件：${d.goal.done_when}）` : ""}</span></p>
                 )}
                 {d.missing.length > 0 && <p className="text-[12px] text-rose-600">必須が空：{d.missing.join("、")}</p>}
-                {d.ui && d.ui.length > 0 && (
-                  <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-                    {d.ui.map((p) => (
-                      <figure key={p.id} className="overflow-hidden rounded-lg border border-zinc-200">
-                        <div className="relative h-56 overflow-hidden bg-white">
-                          <iframe title={`画面：${p.name}`} sandbox="" className="pointer-events-none absolute left-0 top-0 h-[560px] w-[250%] origin-top-left scale-[0.4] border-0" srcDoc={srcDoc(p.html, p.css)} />
-                        </div>
-                        <figcaption className="border-t border-zinc-100 px-2 py-1 text-[11.5px]">{p.name}{p.screen && <span className="ml-1 font-mono text-[10px] text-zinc-400">{p.screen}</span>}</figcaption>
-                      </figure>
-                    ))}
-                  </div>
-                )}
+                {d.proto && <ProtoPreview pid={id} html={d.proto} />}
                 <div className="prose-md max-h-[70vh] overflow-y-auto"><Md>{d.markdown}</Md></div>
               </div>
             </section>

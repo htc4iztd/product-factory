@@ -110,8 +110,7 @@ def value_rules(fw: Framework) -> str:
         + ("- kind が positioning の項目の value は {items: [{name, x, y, note, self}]} の JSON"
            "（x・y は 0〜100。config.axes の low→high。自社は self: true）。"
            "\n" if any(f.kind == "positioning" for f in fw.fields) else "")
-        + ("- kind が ui の項目の value は {pages: [{id, name, screen: 画面ID, html, css}]} の JSON"
-           "（html は body の中身）。\n"
+        + ("- kind が ui の項目（UI のプロトタイプ）は提案に含めない（プロトタイプは別の仕組みで作る）。\n"
            if any(f.kind == "ui" for f in fw.fields) else "")
         + ("- kind が diagram の項目の value は {nodes: [{id, label, kind}], edges: [{source, target, label}]}"
            " の JSON。\n"
@@ -157,10 +156,7 @@ def _stub_value(f, idea: str):
     if f.kind in designs.KINDS:
         return json.dumps(designs.stub(f.kind), ensure_ascii=False)
     if f.kind == "ui":
-        page = ('<header class="pf-nav"><strong>' + base + '</strong></header><main class="pf-main">'
-                '<h1>ホーム（仮）</h1><p>この画面でできること（仮）</p><button class="pf-btn">はじめる</button></main>')
-        home = {"id": "home", "name": "ホーム（仮）", "screen": "SC-01", "html": page, "css": ""}
-        return json.dumps({"pages": [home]}, ensure_ascii=False)
+        return json.dumps({"pages": []}, ensure_ascii=False)
     if f.kind == "matrix":
         labels = (f.config or {}).get("quadrants") or ["左上", "右上", "左下", "右下"]
         return json.dumps({q: [f"{lab}の要素（仮）"] for q, lab in zip(("q1", "q2", "q3", "q4"), labels, strict=False)},
@@ -197,12 +193,12 @@ def _stub_value(f, idea: str):
 
 def _stub(fw: Framework, idea: str, draft: dict, message: str) -> Turn:
     draft = draft or empty_draft(fw)
-    named = [f for f in fw.fields if f.label in message]
+    named = [f for f in fw.fields if f.label in message and f.kind != "ui"]
     if named:
         props = [Proposal(field=f.key, value=_stub_value(f, idea) if f.kind != "text" else f"{message}（反映）",
                           reason="発言を反映") for f in named]
         return Turn(reply=f"{len(props)}項目の書き換えを提案します。", proposals=props)
-    empty = [f for f in fw.fields if not is_filled(f, draft.get(f.key))]
+    empty = [f for f in fw.fields if not is_filled(f, draft.get(f.key)) and f.kind != "ui"]
     if empty:
         props = [Proposal(field=f.key, value=_stub_value(f, idea), reason="空欄の仮置き") for f in empty]
         return Turn(reply=f"{len(props)}項目の下書きを提案します。採用するものを選んでください。", proposals=props)

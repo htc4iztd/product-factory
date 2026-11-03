@@ -171,58 +171,31 @@ def test_platform_alert_reaches_chat_with_approval(client):
     wait_idle(c, pid)
 
 
-def test_ui_editor_by_chat(client):
-    """⑥の UI エディタで話すと、画面の HTML を承認依頼で出し、承認すると UI デザインに入る（手での編集と同じ項目）。"""
+def test_ui_is_prototype_only(client):
+    """⑥の UI はプロトタイプだけ：UI のページで話すと、どの URL でもプロトタイプの話になり、画面ごとの UI の
+    承認依頼は出ない。工程のエージェント・自動開発は UI を書かない（人の編集・チャットの承認だけ）。"""
+    from pf_agent import repo
+
     c = client
     pid = c.post("/products", headers=H, json={"name": "画面", "idea": "家計簿"}).json()["id"]
-    c.get(f"/products/{pid}/team", headers=H)
-    rep = say(c, f"/p/{pid}/s/s06/ui", "申込画面を作って").json()["reply"]
-    assert rep["agent"] == "pm_design" and rep["context"]["kind"] == "ui"
-    a = rep["actions"][0]
-    assert a["type"] == "ui_page" and a["before"] == "（新しい画面）" and "申込" in a["after"]
-    assert "pf-btn" in a["preview"]["html"]
-    c.post(f"/assistant/messages/{rep['id']}/actions/{a['id']}", headers=H, json={"approve": True})
+    wait_idle(c, pid)
+    for path in (f"/p/{pid}/s/s06/ui", f"/p/{pid}/s/s06/ui?page=home", f"/p/{pid}/s/s06/ui?mode=proto"):
+        rep = say(c, path, "申込画面を作って").json()["reply"]
+        assert rep["context"]["kind"] == "ui" and rep["context"]["proto"] is True
+        assert all(a["type"] != "ui_page" for a in rep["actions"])
+    before = repo.draft(pid, "s06").get("ui")
+    repo.set_field(pid, "s06", "ui", {"pages": [{"id": "x", "name": "x", "html": "<p>x</p>"}]}, "s06", "agent")
+    repo.set_fields(pid, "s06", {"ui": {"pages": [{"id": "y", "name": "y", "html": "<p>y</p>"}]}}, "s06", "pre-product")
+    assert repo.draft(pid, "s06").get("ui") == before
+    repo.set_field(pid, "s06", "ui", {"pages": [], "proto": {"html": "<html><body><h1>見本</h1></body></html>"}},
+                   "owner@example.com", "edit")
     st = c.get(f"/products/{pid}/stages/s06", headers=H).json()
-    pages = st["draft"]["ui"]["pages"]
-    assert len(pages) == 1 and pages[0]["name"] == "申込" and "pf-btn" in pages[0]["html"]
-    assert "## UI デザイン" in st["markdown"] and "- 申込：" in st["markdown"]
-    # 手で編集（エディタの保存と同じ）：エディタの状態も持つ。もう一度 AI に頼むと同じ画面を書き換える
-    pages[0]["project"] = {"pages": [{"frames": []}]}
-    c.put(f"/products/{pid}/stages/s06/draft", headers=H, json={"field": "ui", "value": {"pages": pages}})
-    rep = say(c, f"/p/{pid}/s/s06/ui", "申込画面を直して").json()["reply"]
-    assert rep["actions"][0]["after"]
+    assert "プロトタイプ（画面の移り方まで操作できる1つの HTML）：見本" in st["markdown"]
     big = {"pages": [{"id": "x", "name": "x", "html": "a" * 300_001}]}
     assert c.put(f"/products/{pid}/stages/s06/draft", headers=H, json={"field": "ui", "value": big}).status_code in (
         400,
         422,
     )
-
-
-def test_ui_comment_to_ai(client):
-    """プロトタイプのコメント：保存して残り、開いている画面へのコメントを AI に送ると、その画面を
-    書き換える承認依頼が出る。承認すると反映され、送ったコメントは「反映済み」になる。"""
-    from pf_agent import repo
-
-    c = client
-    pid = c.post("/products", headers=H, json={"name": "画面", "idea": "家計簿"}).json()["id"]
-    ui = {"pages": [
-        {"id": "home", "name": "ホーム", "screen": "SC-01",
-         "html": '<main><button data-go="list">一覧へ</button></main>', "css": "",
-         "comments": [{"id": "c1", "target": "main > button", "label": "一覧へ", "x": 40, "y": 20,
-                       "text": "ボタンを大きく", "status": "sent", "by": "owner@example.com"}]},
-        {"id": "list", "name": "一覧", "screen": "SC-02", "html": "<main><h1>一覧</h1></main>", "css": ""},
-    ]}
-    repo.set_field(pid, "s06", "ui", ui, "owner@example.com", "human")
-    saved = repo.draft(pid, "s06")["ui"]["pages"]
-    assert saved[0]["comments"][0]["text"] == "ボタンを大きく" and saved[1]["comments"] == []
-    r = say(c, f"/p/{pid}/s/s06/ui?page=home", "「一覧へ」のボタン：ボタンを大きく").json()["reply"]
-    a = r["actions"][0]
-    assert a["type"] == "ui_page" and a["args"]["page_id"] == "home" and "ボタンを大きく" in a["args"]["html"]
-    m = c.post(f"/assistant/messages/{r['id']}/actions/{a['id']}", headers=H, json={"approve": True}).json()
-    assert m["actions"][0]["status"] == "approved"
-    pages = repo.draft(pid, "s06")["ui"]["pages"]
-    assert len(pages) == 2 and "ボタンを大きく" in pages[0]["html"] and 'data-go="list"' in pages[0]["html"]
-    assert pages[0]["comments"][0]["status"] == "applied"
 
 
 def test_ui_proto(client):
@@ -263,10 +236,6 @@ def test_ui_proto(client):
     c.post(f"/assistant/messages/{rep['id']}/actions/{a['id']}", headers=H, json={"approve": True})
     pr = proto.get(pid)
     assert "（スタブ）修正" in pr["html"] and pr["comments"][0]["status"] == "applied"
-    # 画面ごとの UI を承認で書き換えても、プロトタイプは残る
-    rep = say(c, f"/p/{pid}/s/s06/ui?page=home", "見出しを直して").json()["reply"]
-    c.post(f"/assistant/messages/{rep['id']}/actions/{rep['actions'][0]['id']}", headers=H, json={"approve": True})
-    assert proto.get(pid)["html"] == pr["html"]
     # 画面の部品のエディタの保存（pages だけ）でも、プロトタイプは残る
     c.put(f"/products/{pid}/stages/s06/draft", headers=H, json={"field": "ui", "value": {"pages": []}})
     assert proto.get(pid)["html"] == pr["html"] and repo.draft(pid, "s06")["ui"]["pages"] == []

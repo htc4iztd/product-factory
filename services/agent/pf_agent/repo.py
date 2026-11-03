@@ -143,11 +143,18 @@ def _touch(r: StageRun) -> str | None:
     return old if old != r.status else None
 
 
+# ⑥の UI（プロトタイプ）は、人の編集とチャットの承認・プロトタイプの保存だけで書き換える。
+# 工程のエージェント・自動開発・取り込みが画面ごとの UI を書くことはない（プロトタイプは別のジョブで作る）
+UI_SOURCES = ("edit", "chat", "human")
+
+
 def set_field(product_id: str, stage_id: str, key: str, value, actor: str, source: str) -> dict:
     fw = fwlib.of(product_id, stage_id)
     f = fw.get(key)
     if f is None:
         raise KeyError(key)
+    if f.kind == fx.UI and source not in UI_SOURCES:
+        return draft(product_id, stage_id)
     value = fx.coerce(f, value)
     with session() as s:
         r = _run(s, product_id, stage_id)
@@ -166,6 +173,7 @@ def set_field(product_id: str, stage_id: str, key: str, value, actor: str, sourc
 def set_fields(product_id: str, stage_id: str, values: dict, actor: str, source: str) -> list[str]:
     """複数の項目をまとめて書き換える（文書からの反映）。変わった項目の key を返す。"""
     fw = fwlib.of(product_id, stage_id)
+    values = {k: v for k, v in values.items() if fw.get(k) is None or fw.get(k).kind != fx.UI or source in UI_SOURCES}
     with session() as s:
         r = _run(s, product_id, stage_id)
         d = _current(s, r)

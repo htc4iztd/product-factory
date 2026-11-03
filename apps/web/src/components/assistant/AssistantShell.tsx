@@ -35,7 +35,7 @@ export function where(path: string, choices: MentionT[], mentions: MentionT[]): 
   const m = p.match(/^\/p\/[0-9a-f]+(?:\/([^/]+)(?:\/([^/]+))?)?/);
   if (!m) return { label: "ファクトリー全体", who: "プラットフォーム" };
   const [, seg, sub] = m;
-  if (seg === "s" && sub) return { label: `${choices.find((c) => c.ref === sub)?.label ?? sub}${p.endsWith("/ui") ? "の UI エディタ" : ""}`, who: PM_OF[sub] ?? "PM" };
+  if (seg === "s" && sub) return { label: `${choices.find((c) => c.ref === sub)?.label ?? sub}${p.endsWith("/ui") ? "の UI プロトタイプ" : ""}`, who: PM_OF[sub] ?? "PM" };
   if (seg === "pm" && sub) return { label: `${choices.find((c) => c.ref === sub)?.label ?? sub}の作業場所`, who: choices.find((c) => c.ref === sub)?.label ?? "PM" };
   if (seg && PLATFORM_PAGES.includes(seg)) return { label: choices.find((c) => c.ref.endsWith(`/${seg}`))?.label ?? seg, who: "プラットフォーム" };
   const page = choices.find((c) => c.kind === "page" && c.ref === p.split("?")[0]);
@@ -293,10 +293,8 @@ function Composer({ path, pid, incoming, onSent }: { path: string; pid: string |
     if (!t.trim() || pending) return;
     const used = mentions.filter((m) => t.includes(`@${m.label}`) || material || (quote && m.ref === quote.agent));
     start(async () => {
-      // UI のプロトタイプ・エディタでは、開いている画面（?page=）も伝える
-      // プロトタイプ（mode=proto）なら、そのことも伝える
-      const qs = new URLSearchParams(window.location.search);
-      const ui = /\/s\/s06\/ui$/.test(path) ? (qs.get("mode") === "proto" ? "mode=proto" : qs.get("page") ? `page=${encodeURIComponent(qs.get("page")!)}` : "") : "";
+      // ⑥の UI（プロトタイプ）を開いているときは、そのことも伝える
+      const ui = /\/s\/s06\/ui$/.test(path) ? "mode=proto" : "";
       const r = await sendAssistant(ui ? `${path}?${ui}` : path, t, used, files.items.map((a) => a.id), material, quote?.id ?? null);
       if (r.error) { setError(r.error); return; }
       setText(""); setMentions([]); setQuote(null); setError(null); files.clear();

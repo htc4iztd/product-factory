@@ -26,7 +26,7 @@ from .team import DOMAIN, KEYS, PM_OF, PMS, TeamError, _iso, name_of
 
 RESPONDERS = (*PMS, "platform")
 ACTION_TYPES = (
-    "set_field", "issue_create", "issue_update", "schedule", "agent_enabled", "platform_act", "ui_page",
+    "set_field", "issue_create", "issue_update", "schedule", "agent_enabled", "platform_act",
     "stage_complete", "ui_proto",
 )
 STATUS_JA = {"not_started": "未着手", "in_progress": "作業中", "awaiting_approval": "承認待ち", "revising": "修正中",
@@ -69,13 +69,8 @@ def parse_path(path: str) -> dict:
     ctx = {"path": path, "product_id": pid}
     if parts[:1] == ["s"] and len(parts) > 2 and parts[1] in STAGE_BY_ID and parts[2] == "ui":
         st = STAGE_BY_ID[parts[1]]
-        q = dict(x.split("=", 1) for x in (path.split("?", 1)[1] if "?" in path else "").split("&") if "=" in x)
-        page = re.sub(r"[^A-Za-z0-9_-]", "", q.get("page", ""))[:40]
-        if q.get("mode") == "proto":  # プロトタイプ（1つの HTML）を開いている
-            return {**ctx, "kind": "ui", "stage_id": st.id, "label": f"{st.no}{st.name}の UI プロトタイプ",
-                    "proto": True}
-        return {**ctx, "kind": "ui", "stage_id": st.id, "label": f"{st.no}{st.name}の UI エディタ",
-                **({"page_id": page} if page else {})}
+        # ⑥の UI はプロトタイプ（画面の移り方まで操作できる1つの HTML）だけ
+        return {**ctx, "kind": "ui", "stage_id": st.id, "label": f"{st.no}{st.name}の UI プロトタイプ", "proto": True}
     if parts[:1] == ["s"] and len(parts) > 1 and parts[1] in STAGE_BY_ID:
         st = STAGE_BY_ID[parts[1]]
         return {**ctx, "kind": "stage", "stage_id": st.id, "label": f"{st.no}{st.name}"}
@@ -167,7 +162,7 @@ class EditOut(BaseModel):
 
 class ActionOut(BaseModel):
     type: str = Field(
-        description="set_field | issue_create | issue_update | schedule | agent_enabled | platform_act | ui_page"
+        description="set_field | issue_create | issue_update | schedule | agent_enabled | platform_act"
         " | stage_complete | ui_proto"
     )
     stages: list[str] = Field(default_factory=list, description="stage_complete：確定する工程（s01〜s14）")
@@ -183,10 +178,7 @@ class ActionOut(BaseModel):
     keys: list[str] = Field(default_factory=list, description="schedule・agent_enabled：エージェントの key")
     cron: str = Field(default="", description="schedule：cron（分 時 日 月 曜日）")
     enabled: str = Field(default="", description="agent_enabled：on か off")
-    page_id: str = Field(default="", description="ui_page：書き換える画面の id（新しい画面なら空）")
-    screen: str = Field(default="", description="ui_page：画面一覧の ID（SC-01 など）")
-    html: str = Field(default="", description="ui_page：画面の HTML（body の中身）")
-    css: str = Field(default="", description="ui_page：画面の CSS")
+    html: str = Field(default="", description="ui_proto：プロトタイプの HTML 全体（作り直すときだけ。ふつうは edits）")
     edits: list[EditOut] = Field(default_factory=list, description="ui_proto：プロトタイプの HTML の一部の書き換え")
     reason: str = ""
 
@@ -310,28 +302,6 @@ def prepare_action(tenant: str, product: Product | None, responder: str, a: Acti
             "before": "\n".join(name_of(k) for k in keys),
             "after": "定期実行で動かす" if on else "定期実行を止める",
             "args": {"keys": keys, "enabled": on},
-        }
-    if a.type == "ui_page":
-        if product is None:
-            raise ValueError("プロダクトを開いてから指示してください")
-        if not a.html.strip():
-            raise ValueError("画面の HTML が空です")
-        pages = (repo.draft(product.id, "s06").get("ui") or {}).get("pages") or []
-        old = next((p for p in pages if a.page_id and p["id"] == a.page_id), None)
-        name = (a.subject or (old or {}).get("name") or a.screen or "新しい画面")[:120]
-        return {
-            **base,
-            "title": f"UI デザイン「{name}」を{'書き換える' if old else '作る'}",
-            "before": fx.ui_text(old["html"]) if old else "（新しい画面）",
-            "after": fx.ui_text(a.html),
-            "preview": {"html": a.html[:300_000], "css": a.css[:200_000]},
-            "args": {
-                "page_id": (old or {}).get("id") or "",
-                "name": name,
-                "screen": a.screen or (old or {}).get("screen", ""),
-                "html": a.html[:300_000],
-                "css": a.css[:200_000],
-            },
         }
     if a.type == "ui_proto":
         return _prepare_proto(product, base, a)
@@ -459,15 +429,6 @@ def _material(product: Product | None, ctx: dict, mentions: list[dict]) -> str:
                 f"- {c['label']}（{c['target']}{'・' + c['context'] if c.get('context') else ''}）：{c['text']}"
                 for c in cms))
         return "\n\n".join(parts)[:170000]
-    if k == "ui":  # UI の画面の一覧と、いま開いている画面の HTML（直すときは page_id で書き換える）
-        pages = (repo.draft(product.id, "s06").get("ui") or {}).get("pages") or []
-        parts.append("## UI の画面（id・名前・画面一覧の ID）\n" + "\n".join(
-            f"- {p['id']}：{p['name']}（{p.get('screen') or '-'}）" for p in pages))
-        cur = next((p for p in pages if p["id"] == ctx.get("page_id")), None)
-        if cur:
-            parts.append(f"## いま開いている画面：{cur['id']}「{cur['name']}」"
-                         "（直すなら ui_page の page_id にこの id）\n"
-                         f"```html\n{cur['html'][:20000]}\n```\n```css\n{cur['css'][:5000]}\n```")
     if k in ("schedule", "team"):
         from . import schedule
 
@@ -488,7 +449,6 @@ def _stub(product: Product | None, ctx: dict, responder: str, text: str) -> Assi
     llm._record("stub", 0, 0)
     where = ctx.get("label", "")
     acts: list[ActionOut] = []
-    cur_page = None
     if ctx["kind"] == "ui" and product is not None and ctx.get("proto"):
         from . import proto
 
@@ -498,24 +458,6 @@ def _stub(product: Product | None, ctx: dict, responder: str, text: str) -> Assi
             new = f'<p class="pf-stub">（スタブ）修正：{note}</p></body>'
             acts.append(ActionOut(type="ui_proto", edits=[EditOut(old="</body>", new=new)],
                                   reason="コメントの指示でプロトタイプを直しました"))
-    elif ctx["kind"] == "ui" and product is not None and ctx.get("page_id"):
-        pages = (repo.draft(product.id, "s06").get("ui") or {}).get("pages") or []
-        cur_page = next((p for p in pages if p["id"] == ctx["page_id"]), None)
-    if cur_page is not None:
-        # 開いている画面へのコメント・指示：その画面を書き換える承認依頼（スタブ：指示を画面の末尾に書き足す）
-        html = cur_page["html"] + f'<p class="pf-muted">（スタブ）修正：{text[:80]}</p>'
-        acts.append(ActionOut(type="ui_page", page_id=cur_page["id"], subject=cur_page["name"], html=html,
-                              css=cur_page.get("css", ""), screen=cur_page.get("screen", ""),
-                              reason="コメントの指示で画面を直しました"))
-    elif ctx["kind"] == "ui" and product is not None and not ctx.get("proto"):
-        # UI エディタで話すと、言葉から画面を組んで承認依頼にする（スタブ：決まった部品で組む）
-        title = re.sub(r"(画面|ページ)?を?(作って|作る|直して|変えて|にして).*$", "", text.strip())[:40] or "新しい画面"
-        html = (
-            f'<header class="pf-nav"><strong>{product.name}</strong></header><main class="pf-main">'
-            f'<h1>{title}</h1><p>{text[:120]}</p><input class="pf-input" placeholder="入力"/>'
-            '<button class="pf-btn">決定</button></main>'
-        )
-        acts.append(ActionOut(type="ui_page", subject=title, html=html, reason="PdM の指示から画面を組みました"))
     if ctx["kind"] == "stage":
         sid = ctx["stage_id"]
         m = re.match(r"^「?(.+?)」?を「?(.+?)」?に(して|する|変えて)", text.strip())
@@ -594,16 +536,6 @@ def _prompt(
         "schedule（keys・cron）、agent_enabled（keys・enabled は on/off）、platform_act（number は問題の id）、"
         "stage_complete（工程を確定して「更新済み（完了）」にする：stages に工程の id。"
         "工程の状態は項目ではないので set_field では変えない。必須が空の工程は確定できない）、"
-        "ui_page（⑥UIデザインの画面：page_id は書き換える画面の id か空、subject は画面名、screen は SC-xx、"
-        "html は body の中身、css は画面だけの追加分。そのまま見せられるモックアップにする：部品集のクラス "
-        "pf-nav（.pf-brand・.pf-links）・pf-main（.narrow）・pf-shell＋pf-sidebar・pf-hero・pf-card・pf-grid・pf-row・"
-        "pf-stack・pf-between・pf-list・pf-table・pf-stat（.num・.cap）・pf-badge（.ok・.warn・.bad）・pf-chip・"
-        "pf-progress（中に i）・pf-avatar・pf-empty・pf-field＋pf-label＋pf-input／pf-select＋pf-help・"
-        "pf-btn（.secondary・.ghost・.danger・.sm・.block）・pf-tabbar・pf-footer・pf-muted を使い、"
-        "見出し・余白・揃えを整え、ダミーではなくこのプロダクトらしい具体的な文言と数値を入れる。script・外部の画像や"
-        "フォントは使わない。押すと別の画面に移るボタン・リンク・タブには data-go=\"移り先の画面の id か名前\" を付ける"
-        "（プロトタイプで画面遷移できるように）。開いている画面へのコメント・指示なら、その画面の page_id で書き換え、"
-        "指された部品だけを直して、ほかは変えない）。"
         "ui_proto（⑥UIのプロトタイプ＝画面の移り方まで操作できる1つの HTML。"
         "edits に {old, new} を並べて一部だけ書き換える。"
         "old はいまの HTML にちょうど1回出てくる部分を、前後も含めてそのまま写す。コメントで指された部品と、その指示に"
@@ -847,7 +779,7 @@ def _execute(tenant: str, product: Product | None, user: str, a: dict) -> str:
     if a["type"] == "agent_enabled":
         schedule.bulk(product, x["keys"], None, x["enabled"])
         return "動かします" if x["enabled"] else "止めました"
-    if a["type"] == "ui_page":
+    if a["type"] == "ui_page":  # プロトタイプに寄せる前に出た承認依頼（画面ごとの UI）
         import uuid as _uuid
 
         cur = repo.draft(product.id, "s06").get("ui") or {}
