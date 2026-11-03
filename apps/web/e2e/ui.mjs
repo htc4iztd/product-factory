@@ -33,7 +33,9 @@ const pid = page.url().split("/p/")[1];
 
 await page.goto(`${BASE}/p/${pid}/s/s06`);
 await page.getByRole("link", { name: "UI エディタを開く" }).click();
-await page.waitForURL(/\/s\/s06\/ui$/);
+await page.waitForURL(/\/s\/s06\/ui/);
+await page.getByRole("link", { name: "編集", exact: true }).click();
+await page.waitForURL(/mode=edit/);
 const ed = page.getByLabel("UI エディタ");
 const canvas = page.frameLocator('iframe[title="UI のキャンバス"]');
 await page.getByText("答える人：設計PM").waitFor();

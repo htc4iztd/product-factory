@@ -285,7 +285,9 @@ function Composer({ path, pid, incoming, onSent }: { path: string; pid: string |
     if (!t.trim() || pending) return;
     const used = mentions.filter((m) => t.includes(`@${m.label}`) || material || (quote && m.ref === quote.agent));
     start(async () => {
-      const r = await sendAssistant(path, t, used, files.items.map((a) => a.id), material, quote?.id ?? null);
+      // UI のプロトタイプ・エディタでは、開いている画面（?page=）も伝える
+      const pg = /\/s\/s06\/ui$/.test(path) ? new URLSearchParams(window.location.search).get("page") : null;
+      const r = await sendAssistant(pg ? `${path}?page=${encodeURIComponent(pg)}` : path, t, used, files.items.map((a) => a.id), material, quote?.id ?? null);
       if (r.error) { setError(r.error); return; }
       setText(""); setMentions([]); setQuote(null); setError(null); files.clear();
       if (r.reply) onSent(r.reply);

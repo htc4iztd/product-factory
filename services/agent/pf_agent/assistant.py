@@ -69,7 +69,10 @@ def parse_path(path: str) -> dict:
     ctx = {"path": path, "product_id": pid}
     if parts[:1] == ["s"] and len(parts) > 2 and parts[1] in STAGE_BY_ID and parts[2] == "ui":
         st = STAGE_BY_ID[parts[1]]
-        return {**ctx, "kind": "ui", "stage_id": st.id, "label": f"{st.no}{st.name}の UI エディタ"}
+        q = dict(x.split("=", 1) for x in (path.split("?", 1)[1] if "?" in path else "").split("&") if "=" in x)
+        page = re.sub(r"[^A-Za-z0-9_-]", "", q.get("page", ""))[:40]
+        return {**ctx, "kind": "ui", "stage_id": st.id, "label": f"{st.no}{st.name}の UI エディタ",
+                **({"page_id": page} if page else {})}
     if parts[:1] == ["s"] and len(parts) > 1 and parts[1] in STAGE_BY_ID:
         st = STAGE_BY_ID[parts[1]]
         return {**ctx, "kind": "stage", "stage_id": st.id, "label": f"{st.no}{st.name}"}
@@ -408,6 +411,15 @@ def _material(product: Product | None, ctx: dict, mentions: list[dict]) -> str:
         parts.append(tl.call(t, "stage_fields", {"stage_id": ctx["stage_id"]}))
     if k == "issue":
         parts.append(tl.call(t, "issue_read", {"number": ctx["number"]}))
+    if k == "ui":  # UI の画面の一覧と、いま開いている画面の HTML（直すときは page_id で書き換える）
+        pages = (repo.draft(product.id, "s06").get("ui") or {}).get("pages") or []
+        parts.append("## UI の画面（id・名前・画面一覧の ID）\n" + "\n".join(
+            f"- {p['id']}：{p['name']}（{p.get('screen') or '-'}）" for p in pages))
+        cur = next((p for p in pages if p["id"] == ctx.get("page_id")), None)
+        if cur:
+            parts.append(f"## いま開いている画面：{cur['id']}「{cur['name']}」"
+                         "（直すなら ui_page の page_id にこの id）\n"
+                         f"```html\n{cur['html'][:20000]}\n```\n```css\n{cur['css'][:5000]}\n```")
     if k in ("schedule", "team"):
         from . import schedule
 
@@ -428,7 +440,17 @@ def _stub(product: Product | None, ctx: dict, responder: str, text: str) -> Assi
     llm._record("stub", 0, 0)
     where = ctx.get("label", "")
     acts: list[ActionOut] = []
-    if ctx["kind"] == "ui" and product is not None:
+    cur_page = None
+    if ctx["kind"] == "ui" and product is not None and ctx.get("page_id"):
+        pages = (repo.draft(product.id, "s06").get("ui") or {}).get("pages") or []
+        cur_page = next((p for p in pages if p["id"] == ctx["page_id"]), None)
+    if cur_page is not None:
+        # 開いている画面へのコメント・指示：その画面を書き換える承認依頼（スタブ：指示を画面の末尾に書き足す）
+        html = cur_page["html"] + f'<p class="pf-muted">（スタブ）修正：{text[:80]}</p>'
+        acts.append(ActionOut(type="ui_page", page_id=cur_page["id"], subject=cur_page["name"], html=html,
+                              css=cur_page.get("css", ""), screen=cur_page.get("screen", ""),
+                              reason="コメントの指示で画面を直しました"))
+    elif ctx["kind"] == "ui" and product is not None:
         # UI エディタで話すと、言葉から画面を組んで承認依頼にする（スタブ：決まった部品で組む）
         title = re.sub(r"(画面|ページ)?を?(作って|作る|直して|変えて|にして).*$", "", text.strip())[:40] or "新しい画面"
         html = (
@@ -522,7 +544,9 @@ def _prompt(
         "pf-progress（中に i）・pf-avatar・pf-empty・pf-field＋pf-label＋pf-input／pf-select＋pf-help・"
         "pf-btn（.secondary・.ghost・.danger・.sm・.block）・pf-tabbar・pf-footer・pf-muted を使い、"
         "見出し・余白・揃えを整え、ダミーではなくこのプロダクトらしい具体的な文言と数値を入れる。script・外部の画像や"
-        "フォントは使わない）。"
+        "フォントは使わない。押すと別の画面に移るボタン・リンク・タブには data-go=\"移り先の画面の id か名前\" を付ける"
+        "（プロトタイプで画面遷移できるように）。開いている画面へのコメント・指示なら、その画面の page_id で書き換え、"
+        "指された部品だけを直して、ほかは変えない）。"
         "質問への答えだけなら空にする。\n\n"
         + (f"## ページの中身\n{material}\n\n" if material else "")
         + (f"## 添えられたもの\n{extra}\n\n" if extra else "")
@@ -767,6 +791,9 @@ def _execute(tenant: str, product: Product | None, user: str, a: dict) -> str:
         cur = repo.draft(product.id, "s06").get("ui") or {}
         pages = list(cur.get("pages") or [])
         pid = x["page_id"] or f"p{_uuid.uuid4().hex[:6]}"
+        old = next((p for p in pages if p["id"] == pid), {})
+        # コメントは残す。AI に送ったコメントは「反映済み」にする
+        comments = [{**c, "status": "applied"} if c.get("status") == "sent" else c for c in old.get("comments") or []]
         page = {
             "id": pid,
             "name": x["name"],
@@ -774,6 +801,7 @@ def _execute(tenant: str, product: Product | None, user: str, a: dict) -> str:
             "html": x["html"],
             "css": x["css"],
             "project": None,
+            "comments": comments,
         }
         pages = [page if p["id"] == pid else p for p in pages] if any(p["id"] == pid for p in pages) else [*pages, page]
         repo.set_field(product.id, "s06", "ui", {"pages": pages}, user, "chat")

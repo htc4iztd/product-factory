@@ -500,8 +500,27 @@ def _coerce_block(f: Field, value):
     return {"nodes": nodes, "edges": edges}
 
 
+def _coerce_comments(raw) -> list[dict]:
+    """画面へのコメント（プロトタイプで部品を指して書く修正の指示）：
+    [{id, target（部品の CSS パス）, label（部品の見出し）, x, y（画面上の位置 %）, text, status, by, at, msg_id}]"""
+    out = []
+    for c in (raw or [])[:200]:
+        if not isinstance(c, dict) or not str(c.get("text") or "").strip():
+            continue
+        st = c.get("status") if c.get("status") in ("open", "sent", "applied", "resolved") else "open"
+        out.append({
+            "id": str(c.get("id") or "")[:40], "target": str(c.get("target") or "")[:500],
+            "label": str(c.get("label") or "")[:200], "text": str(c.get("text") or "")[:2000], "status": st,
+            "x": max(0.0, min(100.0, float(c.get("x") or 0))), "y": max(0.0, min(100.0, float(c.get("y") or 0))),
+            "by": str(c.get("by") or "")[:200], "at": str(c.get("at") or "")[:40],
+            "msg_id": int(c["msg_id"]) if str(c.get("msg_id") or "").isdigit() else None,
+        })
+    return out
+
+
 def coerce_ui(value) -> dict:
-    """{pages: [{id, name, screen, html, css, project}]}。project は GrapesJS の状態（そのまま持つ）。"""
+    """{pages: [{id, name, screen, html, css, project, comments}]}。画面の移り方は、要素の data-go（移り先の画面の
+    id・名前・SC-xx）で表す。comments はプロトタイプで部品を指して書いた修正の指示。"""
     if isinstance(value, str):
         value = json.loads(value) if value.strip() else {}
     if not isinstance(value, dict):
@@ -521,7 +540,8 @@ def coerce_ui(value) -> dict:
         if project is not None and len(json.dumps(project)) > 1_500_000:
             project = None
         pages.append({"id": pid, "name": str(p.get("name") or f"画面{i + 1}")[:120],
-                      "screen": str(p.get("screen") or "")[:20], "html": html, "css": css, "project": project})
+                      "screen": str(p.get("screen") or "")[:20], "html": html, "css": css, "project": project,
+                      "comments": _coerce_comments(p.get("comments"))})
     return {"pages": pages}
 
 

@@ -5,7 +5,11 @@ import { MAX_HTML, importHtml } from "@/lib/htmlImport";
 import { setField } from "@/app/(app)/p/[id]/s/[stage]/actions";
 import { UI_BLOCKS, srcDoc } from "@/lib/uikit";
 
-export type UiPage = { id: string; name: string; screen: string; html: string; css: string; project?: Record<string, unknown> | null };
+export type UiComment = {
+  id: string; target: string; label: string; text: string; status: "open" | "sent" | "applied" | "resolved";
+  x: number; y: number; by: string; at: string; msg_id: number | null;
+};
+export type UiPage = { id: string; name: string; screen: string; html: string; css: string; project?: Record<string, unknown> | null; comments?: UiComment[] };
 type Screen = { id: string; name: string };
 
 const DEVICES = { desktop: { label: "PC", width: 1280, icon: Laptop }, tablet: { label: "タブレット", width: 768, icon: Tablet }, mobile: { label: "スマホ", width: 390, icon: Smartphone } } as const;
@@ -13,7 +17,7 @@ type Device = keyof typeof DEVICES;
 // エディタだけが付ける印（保存するときに外す）
 const EDITOR_STYLE = `<style id="pf-editor">[data-pf-hover]{outline:2px dashed #a5b4fc!important;outline-offset:-2px}[data-pf-sel]{outline:2px solid #4f46e5!important;outline-offset:-2px}[contenteditable="true"]{outline:2px solid #f59e0b!important;cursor:text}*{cursor:default}</style>`;
 const TEXT_TAGS = new Set(["H1", "H2", "H3", "H4", "P", "SPAN", "STRONG", "EM", "A", "BUTTON", "LABEL", "LI", "TD", "TH", "SMALL", "B", "OPTION"]);
-const TAG_JA: Record<string, string> = {
+export const TAG_JA: Record<string, string> = {
   HEADER: "ヘッダー", MAIN: "本文", SECTION: "区画", DIV: "箱", NAV: "ナビ", ASIDE: "サイドバー", FOOTER: "フッター", H1: "見出し1", H2: "見出し2", H3: "見出し3",
   P: "文章", SPAN: "文字", STRONG: "太字", A: "リンク", BUTTON: "ボタン", INPUT: "入力欄", SELECT: "選択欄", LABEL: "ラベル", FORM: "フォーム", UL: "リスト", LI: "リストの項目",
   TABLE: "表", TR: "表の行", TD: "表のセル", TH: "表の見出し", IMG: "画像", HR: "区切り線", I: "棒",
@@ -37,16 +41,17 @@ function clean(doc: Document): string {
 // ⑥UXデザインの UI エディタ（自作）：画面をそのまま表示し、クリックで部品を選んで並べ替え・複製・削除・見た目の変更、
 // ダブルクリックで文字を直接書き換える。部品を足す・HTML と CSS を直接書く・元に戻す もできる。
 // 保存すると⑥の「UI デザイン」に入る。右のチャットで AI に頼むと、画面を組んで承認依頼を出す（承認するとここに反映）
-export function UiEditor({ pid, value, screens, readOnly }: { pid: string; value: { pages: UiPage[] }; screens: Screen[]; readOnly: boolean }) {
+export function UiEditor({ pid, value, screens, readOnly, initialPage }: { pid: string; value: { pages: UiPage[] }; screens: Screen[]; readOnly: boolean; initialPage?: string }) {
   const [pages, setPages] = useState<UiPage[]>(value.pages ?? []);
-  const [cur, setCur] = useState(value.pages?.[0]?.id ?? "");
+  const first = value.pages?.find((p) => p.id === initialPage) ?? value.pages?.[0];
+  const [cur, setCur] = useState(first?.id ?? "");
   const [device, setDevice] = useState<Device>("desktop");
   const [tab, setTab] = useState<"blocks" | "select" | "code">("blocks");
   const [dirty, setDirty] = useState(false);
   const [msg, setMsg] = useState<string | null>(null);
   const [pending, start] = useTransition();
   const [, bump] = useState(0);
-  const [doc, setDoc] = useState(() => ({ html: value.pages?.[0]?.html ?? "", css: value.pages?.[0]?.css ?? "", n: 0 })); // iframe に読み込む中身
+  const [doc, setDoc] = useState(() => ({ html: first?.html ?? "", css: first?.css ?? "", n: 0 })); // iframe に読み込む中身
   const frame = useRef<HTMLIFrameElement>(null);
   const box = useRef<HTMLDivElement>(null);
   const sel = useRef<HTMLElement | null>(null);
@@ -54,6 +59,13 @@ export function UiEditor({ pid, value, screens, readOnly }: { pid: string; value
   const [scale, setScale] = useState(1);
   const [areaH, setAreaH] = useState(820);
   const page = pages.find((p) => p.id === cur);
+  // チャットで頼むときにいまの画面が伝わるよう、URL に ?page= を付けておく
+  useEffect(() => {
+    if (!cur) return;
+    const u = new URL(window.location.href);
+    u.searchParams.set("page", cur);
+    window.history.replaceState(window.history.state, "", u.toString());
+  }, [cur]);
   const width = DEVICES[device].width;
 
   // 表示の倍率：キャンバスの幅に収める

@@ -196,3 +196,30 @@ def test_ui_editor_by_chat(client):
         400,
         422,
     )
+
+
+def test_ui_comment_to_ai(client):
+    """プロトタイプのコメント：保存して残り、開いている画面へのコメントを AI に送ると、その画面を
+    書き換える承認依頼が出る。承認すると反映され、送ったコメントは「反映済み」になる。"""
+    from pf_agent import repo
+
+    c = client
+    pid = c.post("/products", headers=H, json={"name": "画面", "idea": "家計簿"}).json()["id"]
+    ui = {"pages": [
+        {"id": "home", "name": "ホーム", "screen": "SC-01",
+         "html": '<main><button data-go="list">一覧へ</button></main>', "css": "",
+         "comments": [{"id": "c1", "target": "main > button", "label": "一覧へ", "x": 40, "y": 20,
+                       "text": "ボタンを大きく", "status": "sent", "by": "owner@example.com"}]},
+        {"id": "list", "name": "一覧", "screen": "SC-02", "html": "<main><h1>一覧</h1></main>", "css": ""},
+    ]}
+    repo.set_field(pid, "s06", "ui", ui, "owner@example.com", "human")
+    saved = repo.draft(pid, "s06")["ui"]["pages"]
+    assert saved[0]["comments"][0]["text"] == "ボタンを大きく" and saved[1]["comments"] == []
+    r = say(c, f"/p/{pid}/s/s06/ui?page=home", "「一覧へ」のボタン：ボタンを大きく").json()["reply"]
+    a = r["actions"][0]
+    assert a["type"] == "ui_page" and a["args"]["page_id"] == "home" and "ボタンを大きく" in a["args"]["html"]
+    m = c.post(f"/assistant/messages/{r['id']}/actions/{a['id']}", headers=H, json={"approve": True}).json()
+    assert m["actions"][0]["status"] == "approved"
+    pages = repo.draft(pid, "s06")["ui"]["pages"]
+    assert len(pages) == 2 and "ボタンを大きく" in pages[0]["html"] and 'data-go="list"' in pages[0]["html"]
+    assert pages[0]["comments"][0]["status"] == "applied"
