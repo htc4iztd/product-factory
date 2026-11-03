@@ -20,7 +20,7 @@ from sqlalchemy import or_, select
 
 from . import frameworks as fx
 from . import fwlib, llm, llmconf, repo
-from .db import AgentIssue, AssistantMessage, Product, session
+from .db import AgentIssue, AssistantMessage, ChatAttachment, Product, session
 from .stages import STAGE_BY_ID, STAGES
 from .team import DOMAIN, KEYS, PM_OF, PMS, TeamError, _iso, name_of
 
@@ -180,6 +180,7 @@ class ActionOut(BaseModel):
     enabled: str = Field(default="", description="agent_enabled：on か off")
     html: str = Field(default="", description="ui_proto：プロトタイプの HTML 全体（作り直すときだけ。ふつうは edits）")
     edits: list[EditOut] = Field(default_factory=list, description="ui_proto：プロトタイプの HTML の一部の書き換え")
+    attachment: int = Field(default=0, description="ui_proto：添付した HTML の id（そのままプロトタイプにする）")
     reason: str = ""
 
 
@@ -331,6 +332,20 @@ def _prepare_proto(product: Product | None, base: dict, a: ActionOut) -> dict:
         raise ValueError("プロダクトを開いてから指示してください")
     cur = proto.get(product.id).get("html", "")
     edits = [e.model_dump() for e in a.edits]
+    if a.attachment:  # 添付した HTML を、そのままプロトタイプにする
+        with session() as s:
+            att = s.get(ChatAttachment, a.attachment)
+            if att is None or att.product_id != product.id or att.kind != "html":
+                raise ValueError("添付した HTML が見つかりません")
+            new, fname = proto.check(att.text or ""), att.filename
+        return {
+            **base,
+            "title": f"添付の HTML「{fname}」を UI のプロトタイプに{'する（置き換える）' if cur else 'する'}",
+            "before": fx.ui_text(cur, 400) or "（まだありません）",
+            "after": fx.ui_text(new, 400),
+            "preview": {"doc": new} if len(new) <= 400_000 else None,
+            "args": {"html": new, "edits": [], "source": "import"},
+        }
     if edits:
         if not cur:
             raise ValueError("まだプロトタイプがありません。先に作ってください")
@@ -453,7 +468,10 @@ def _stub(product: Product | None, ctx: dict, responder: str, text: str) -> Assi
         from . import proto
 
         html = proto.get(product.id).get("html", "")
-        if html.count("</body>") == 1:  # スタブ：指示を本文の末尾に書き足す（edits で一部だけ書き換える）
+        att = next((f for f in ctx.get("files") or [] if f.get("kind") == "html"), None)
+        if att and re.search(r"プロトタイプ|取り込", text):  # スタブ：添付した HTML をそのままプロトタイプに
+            acts.append(ActionOut(type="ui_proto", attachment=att["id"], reason="添付の HTML をプロトタイプにします"))
+        elif html.count("</body>") == 1:  # スタブ：指示を本文の末尾に書き足す（edits で一部だけ書き換える）
             note = re.sub(r"[<>&]", "", text[:80])
             new = f'<p class="pf-stub">（スタブ）修正：{note}</p></body>'
             acts.append(ActionOut(type="ui_proto", edits=[EditOut(old="</body>", new=new)],
@@ -540,7 +558,8 @@ def _prompt(
         "edits に {old, new} を並べて一部だけ書き換える。"
         "old はいまの HTML にちょうど1回出てくる部分を、前後も含めてそのまま写す。コメントで指された部品と、その指示に"
         "必要なところだけを直し、ほかは変えない。"
-        "全体を作り直すときは、プロトタイプの画面の「AI で作る」を使うよう案内する）。"
+        "全体を作り直すときは、プロトタイプの画面の「AI で作る」を使うよう案内する。PdM が添付した HTML を"
+        "プロトタイプにしたい・取り込みたいと言ったら、attachment にその添付 id を入れる（中身は写さない））。"
         "質問への答えだけなら空にする。\n\n"
         + (f"## ページの中身\n{material}\n\n" if material else "")
         + (f"## 添えられたもの\n{extra}\n\n" if extra else "")
@@ -687,7 +706,7 @@ def send(
         ctx["reply_to"] = {k: quote[k] for k in ("id", "agent", "agent_name", "text", "ask")}
     mine = _save(tenant, user, ctx.get("product_id"), "pdm", "", text, ctx, mentions, files)
     if conn.provider == "stub":
-        out = _stub(product, ctx, responder, text)
+        out = _stub(product, {**ctx, "files": files}, responder, text)
     else:
         prep = agentrun.prepare(tenant, product, responder)
         history = feed(tenant, user, 12, product_id=ctx.get("product_id"))

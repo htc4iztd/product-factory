@@ -199,7 +199,7 @@ class ChatAttachment(Base):
     product_id: Mapped[str] = mapped_column(String(32), index=True)
     agent: Mapped[str] = mapped_column(String(10))                     # sNN | director
     filename: Mapped[str] = mapped_column(String(300))
-    kind: Mapped[str] = mapped_column(String(10))                      # doc | image
+    kind: Mapped[str] = mapped_column(String(10))                      # doc | image | html
     mime: Mapped[str] = mapped_column(String(80))
     text: Mapped[str] = mapped_column(Text, default="")                # 資料は文章にしたもの
     data: Mapped[bytes | None] = mapped_column(LargeBinary, nullable=True)   # 画像

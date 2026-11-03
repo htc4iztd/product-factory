@@ -74,6 +74,17 @@ await fr.getByText(/（スタブ）修正/).waitFor();
 await shot("p3-applied");
 await pr.getByRole("button", { name: "コメント中" }).click();
 
+// チャットに HTML を添付して「プロトタイプにして」→ 添付の HTML をそのままプロトタイプにする承認依頼 → 承認で入る
+await page.getByLabel("添付するファイル").setInputFiles({ name: "mock.html", mimeType: "text/html",
+  buffer: Buffer.from('<!doctype html><html><body><h1>添付した見本</h1><button data-go="x">押す</button></body></html>') });
+await page.getByText("mock.html").first().waitFor();
+await page.getByLabel("チャットに話す").fill("この HTML をプロトタイプにして");
+await page.getByRole("button", { name: "チャットを送る" }).click();
+card = page.getByRole("group", { name: /承認依頼：添付の HTML「mock.html」を UI のプロトタイプにする/ }).last();
+await card.getByRole("button", { name: "承認", exact: true }).click();
+await card.getByText(/承認しました/).waitFor();
+await fr.getByText("添付した見本").waitFor();
+
 // script を含む HTML を取り込む：その script が動き、押すと移る。外への通信は止める
 await pr.getByRole("tab", { name: "作る" }).click();
 await pr.getByLabel("貼り付ける HTML").fill(`<!doctype html><html><head><title>取込</title></head><body><div id="v"></div>

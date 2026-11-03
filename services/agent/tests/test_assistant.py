@@ -244,3 +244,29 @@ def test_ui_proto(client):
         proto.apply_edits("<p>a</p><p>a</p>", [{"old": "<p>a</p>", "new": "x"}])
     assert c.put(f"/products/{pid}/ui/proto", headers=H, json={"html": "ただの文字"}).status_code == 422
     assert c.put(f"/products/{pid}/ui/proto", headers=VIEWER, json={"html": "<html></html>"}).status_code == 403
+
+
+def test_html_attachment(client):
+    """HTML も添付できる：ソースのまま持ち、AI にはソースで渡す。⑥の UI で「プロトタイプにして」と頼むと、
+    添付の HTML をそのままプロトタイプにする承認依頼が出て、承認すると入る。Shift_JIS の HTML も読める。"""
+    from pf_agent import attachments, proto
+
+    c = client
+    pid = c.post("/products", headers=H, json={"name": "添付", "idea": "家計簿"}).json()["id"]
+    wait_idle(c, pid)
+    doc = "<!doctype html><html><body><h1>見本の画面</h1><script>let n=1</script></body></html>"
+    up = lambda name, data: c.post(f"/products/{pid}/agents/assistant/attachments", headers=H,  # noqa: E731
+                                   json={"filename": name, "content_b64": base64.b64encode(data).decode()})
+    a = up("mock.html", doc.encode()).json()
+    assert a["kind"] == "html" and a["chars"] == len(doc)
+    sj = up("sjis.htm", "<html><body>締め処理</body></html>".encode("cp932")).json()
+    text, _ = attachments.material([a["id"], sj["id"]])
+    assert "```html" in text and "<script>let n=1</script>" in text and "締め処理" in text
+    rep = say(c, f"/p/{pid}/s/s06/ui", "この HTML をプロトタイプにして", attachments=[a["id"]]).json()["reply"]
+    act = rep["actions"][0]
+    assert act["type"] == "ui_proto" and act["title"].startswith("添付の HTML「mock.html」")
+    assert act["preview"]["doc"] == doc
+    c.post(f"/assistant/messages/{rep['id']}/actions/{act['id']}", headers=H, json={"approve": True})
+    pr = proto.get(pid)
+    assert pr["html"] == doc and pr["source"] == "import"
+    assert up("big.html", b"<html>" + b"a" * 1_600_000).status_code == 413
