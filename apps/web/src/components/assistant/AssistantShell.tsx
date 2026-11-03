@@ -27,7 +27,7 @@ const PLATFORM_PAGES = ["platform", "schedule", "cast", "team", "agents", "frame
 const time = (t: string) => new Date(t).toLocaleString("ja-JP", { timeZone: "Asia/Tokyo", month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit" });
 
 // いまのページと、送ったときに答える相手の見込み（実際の宛先は送ったあとに決まる）
-function where(path: string, choices: MentionT[], mentions: MentionT[]): { label: string; who: string } {
+export function where(path: string, choices: MentionT[], mentions: MentionT[]): { label: string; who: string } {
   const first = mentions[0];
   if (first?.kind === "agent") return { label: first.label, who: first.label };
   if (first?.kind === "stage") return { label: first.label, who: PM_OF[first.ref] ?? "PM" };
@@ -123,7 +123,7 @@ export function AssistantShell({ children, initialOpen }: { children: React.Reac
   );
 }
 
-function Feed({ msgs, onChanged }: { msgs: AssistantMsg[]; onChanged: (m: AssistantMsg) => void }) {
+export function Feed({ msgs, onChanged }: { msgs: AssistantMsg[]; onChanged: (m: AssistantMsg) => void }) {
   const end = useRef<HTMLDivElement>(null);
   useEffect(() => { end.current?.scrollIntoView({ block: "end" }); }, [msgs.length]);
   return (
@@ -171,7 +171,7 @@ function Feed({ msgs, onChanged }: { msgs: AssistantMsg[]; onChanged: (m: Assist
 }
 
 // 引用（返事をする元の発言）
-function QuoteBox({ q, dark, onRemove }: { q: Quote; dark?: boolean; onRemove?: () => void }) {
+export function QuoteBox({ q, dark, onRemove }: { q: Quote; dark?: boolean; onRemove?: () => void }) {
   return (
     <div className={`mb-1 flex gap-1.5 rounded border-l-2 px-2 py-1 text-[11px] ${dark ? "border-zinc-500 bg-zinc-800 text-zinc-300" : "border-amber-400 bg-amber-50/60 text-zinc-600"}`} aria-label="引用">
       <div className="min-w-0 flex-1">
