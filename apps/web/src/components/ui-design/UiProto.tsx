@@ -1,6 +1,6 @@
 "use client";
 import { useCallback, useEffect, useMemo, useRef, useState, useTransition } from "react";
-import { Check, Code2, Download, FileUp, Layers, Maximize2, MessageSquarePlus, Send, Smartphone, Sparkles, Trash2, X } from "lucide-react";
+import { Check, Code2, Download, Expand, FileUp, Layers, Maximize2, MessageSquarePlus, Minimize2, PanelRightClose, PanelRightOpen, ScanSearch, Send, Smartphone, Sparkles, Trash2, X } from "lucide-react";
 import { generateProto, saveProto, type Proto, type ProtoComment } from "@/app/(app)/p/[id]/s/[stage]/ui/actions";
 import { sendAssistant } from "@/lib/assistant-actions";
 import { assembleProto, type ProtoPage, type ProtoScreen } from "@/lib/protoAssemble";
@@ -27,7 +27,12 @@ export function UiProto({ pid, product, proto, pages, screens, flows, readOnly, 
   const [source, setSource] = useState(proto?.source ?? "");
   const [panel, setPanel] = useState<Panel>(proto?.html ? "comments" : "make");
   const [commenting, setCommenting] = useState(false);
-  const [narrow, setNarrow] = useState(false);
+  // 見え方：収める（全体を縮めて収める）・100%（そのままの大きさ。はみ出したら横に送る）・スマホの幅
+  const [zoom, setZoom] = useState<"fit" | "actual" | "phone">("fit");
+  const [full, setFull] = useState(false);   // 画面いっぱいに出す
+  const [side, setSide] = useState(true);    // 右の欄（コメント・作る・コード）
+  const [cw, setCw] = useState(0);           // プロトタイプの中身の幅（枠の中から知らせてくる）
+  const grow = useRef(0);
   const [pick, setPick] = useState<Pick | null>(null);
   const [active, setActive] = useState<string | null>(null);
   const [toast, setToast] = useState<string | null>(null);
@@ -45,8 +50,16 @@ export function UiProto({ pid, product, proto, pages, screens, flows, readOnly, 
     return () => ro.disconnect();
   }, [html]);
   // 広い画面は 1000px で描いて、枠に収まるよう縮める（狭い枠でも、案内＋端末の配置のまま見える）。スマホは 390px
-  const logical = narrow ? 390 : Math.max(1000, fit.w);
-  const scale = Math.min(1, fit.w / logical);
+  // 中身が 1000px より広ければ、その幅で描いて縮める（はみ出して切れないように）
+  const logical = zoom === "phone" ? 390 : zoom === "actual" ? Math.max(fit.w, cw) : Math.max(1000, cw, fit.w);
+  const scale = zoom === "actual" ? 1 : Math.min(1, fit.w / logical);
+  useEffect(() => { setCw(0); grow.current = 0; }, [html]);
+  useEffect(() => {
+    if (!full) return;
+    const k = (e: KeyboardEvent) => { if (e.key === "Escape") setFull(false); };
+    window.addEventListener("keydown", k);
+    return () => window.removeEventListener("keydown", k);
+  }, [full]);
   const scaleRef = useRef(scale);
   scaleRef.current = scale;
 
@@ -70,10 +83,17 @@ export function UiProto({ pid, product, proto, pages, screens, flows, readOnly, 
       const d = e.data as { pf?: number; type?: string; id?: string; target?: string; label?: string; context?: string; rect?: { left: number; bottom: number } };
       if (d?.pf !== 1) return;
       if (d.type === "ready") { tell({ type: "mode", on: commenting }); tell({ type: "pins", pins, active }); }
-      if (d.type === "pin" && d.id) { setActive(d.id); setPanel("comments"); }
+      if (d.type === "pin" && d.id) { setActive(d.id); setPanel("comments"); setSide(true); }
+      // 中身の幅：広がったときだけ受ける（中身が枠の幅に合わせて広がり続けるときに備えて、1つの HTML で2回まで）
+      const sz = e.data as { type?: string; w?: number };
+      if (sz.type === "size" && typeof sz.w === "number" && grow.current < 2) {
+        const w = Math.min(Math.round(sz.w), 2400);
+        setCw((cur) => { if (w > cur + 8) { grow.current += 1; return w; } return cur; });
+      }
       if (d.type === "pick" && d.target !== undefined && !readOnly) {
         const k = scaleRef.current;
-        setPick({ target: d.target, label: d.label ?? "", context: d.context ?? "", left: (d.rect?.left ?? 20) * k, top: ((d.rect?.bottom ?? 20) + 6) * k });
+        const sx = area.current?.scrollLeft ?? 0;
+        setPick({ target: d.target, label: d.label ?? "", context: d.context ?? "", left: (d.rect?.left ?? 20) * k - sx, top: ((d.rect?.bottom ?? 20) + 6) * k });
         setActive(null);
       }
     };
@@ -127,13 +147,17 @@ export function UiProto({ pid, product, proto, pages, screens, flows, readOnly, 
   );
 
   return (
-    <div className="grid h-full grid-cols-[minmax(0,1fr)_300px] overflow-hidden rounded-xl border border-zinc-200 bg-white" aria-label="プロトタイプ">
-      <section className="flex min-h-0 min-w-0 flex-col bg-zinc-100">
+    <div className={`grid h-full overflow-hidden rounded-xl border border-zinc-200 bg-white ${side && !full ? "grid-cols-[minmax(0,1fr)_300px]" : "grid-cols-[minmax(0,1fr)]"}`} aria-label="プロトタイプ">
+      <section className={`flex min-h-0 min-w-0 flex-col bg-zinc-100 ${full ? "fixed inset-0 z-[90]" : ""}`} aria-label={full ? "プロトタイプを大きく見る" : undefined}>
         <div className="flex items-center gap-1 border-b border-zinc-200 bg-white px-3 py-1.5">
           <span className="truncate text-[12px] text-zinc-500">{html ? `${SOURCE_JA[source] ?? ""}・${Math.round(html.length / 1000)}KB` : "まだありません"}</span>
           <span className="ml-auto flex shrink-0 items-center gap-1">
-            <button className={`rounded-md px-2 py-1.5 ${!narrow ? "bg-zinc-900 text-white" : "text-zinc-600 hover:bg-zinc-100"}`} aria-pressed={!narrow} aria-label="広い画面" title="広い画面" onClick={() => setNarrow(false)}><Maximize2 size={13} /></button>
-            <button className={`rounded-md px-2 py-1.5 ${narrow ? "bg-zinc-900 text-white" : "text-zinc-600 hover:bg-zinc-100"}`} aria-pressed={narrow} aria-label="スマホの幅" title="スマホの幅（390px）" onClick={() => setNarrow(true)}><Smartphone size={13} /></button>
+            {([["fit", "収める", "全体が収まるよう縮める", Maximize2], ["actual", "100%", "そのままの大きさ（はみ出したら横に送る）", ScanSearch], ["phone", "スマホ", "スマホの幅（390px）", Smartphone]] as const).map(([k, l, t, I]) => (
+              <button key={k} className={`flex items-center gap-1 rounded-md px-2 py-1 text-[11.5px] ${zoom === k ? "bg-zinc-900 text-white" : "text-zinc-600 hover:bg-zinc-100"}`} aria-pressed={zoom === k} aria-label={t} title={t} onClick={() => setZoom(k)}><I size={12} />{l}</button>
+            ))}
+            <span className="text-[11px] tabular-nums text-zinc-400" title="表示の倍率">{Math.round(scale * 100)}%</span>
+            <button className="btn-ghost btn-sm h-7 px-1.5" onClick={() => setFull((x) => !x)} aria-label={full ? "元の大きさに戻す" : "大きく見る"} title={full ? "元に戻す（Esc）" : "大きく見る"}>{full ? <Minimize2 size={14} /> : <Expand size={14} />}</button>
+            {!full && <button className="btn-ghost btn-sm h-7 px-1.5" onClick={() => setSide((x) => !x)} aria-label={side ? "右の欄を閉じる" : "右の欄を開く"} title={side ? "右の欄を閉じる（プレビューを広く）" : "右の欄を開く"}>{side ? <PanelRightClose size={14} /> : <PanelRightOpen size={14} />}</button>}
             {html && <button className="btn-ghost btn-sm h-7 px-1.5" onClick={download} aria-label="HTML をダウンロード" title="HTML をダウンロード"><Download size={14} /></button>}
             {!readOnly && html && (
               <button className={`ml-1 flex items-center gap-1 whitespace-nowrap rounded-md px-2.5 py-1 text-[12px] font-medium ${commenting ? "bg-amber-500 text-white" : "border border-zinc-200 text-zinc-700 hover:bg-zinc-50"}`}
@@ -142,7 +166,7 @@ export function UiProto({ pid, product, proto, pages, screens, flows, readOnly, 
             )}
           </span>
         </div>
-        <div ref={area} className="relative min-h-0 flex-1" style={{ overflow: "clip" }}>
+        <div ref={area} className="relative min-h-0 flex-1" style={{ overflowX: zoom === "actual" ? "auto" : "clip", overflowY: "clip" }}>
           {html ? (
             <div className="relative mx-auto h-full bg-white" style={{ width: logical * scale, overflow: "clip" }}>
               <iframe ref={frame} key={doc.length + html.slice(-60)} title="プロトタイプの画面" sandbox="allow-scripts" srcDoc={doc}
@@ -159,7 +183,7 @@ export function UiProto({ pid, product, proto, pages, screens, flows, readOnly, 
         </div>
       </section>
 
-      <aside className="flex min-h-0 flex-col border-l border-zinc-200" aria-label="プロトタイプの操作">
+      {side && !full && <aside className="flex min-h-0 flex-col border-l border-zinc-200" aria-label="プロトタイプの操作">
         <div className="flex border-b border-zinc-200 text-[12px]" role="tablist">
           {tab("comments", `コメント（${open}）`, MessageSquarePlus)}
           {!readOnly && tab("make", "作る", Sparkles)}
@@ -197,7 +221,7 @@ export function UiProto({ pid, product, proto, pages, screens, flows, readOnly, 
             onGenerate={(note) => start(async () => { const r = await generateProto(pid, note); setToast(r.error ?? "AI が書いています。できたら右のチャットに設計PM から承認依頼が届きます（1〜3分）"); })} />}
           {panel === "code" && !readOnly && html && <CodePanel key={html.length} html={html} pending={pending} onSave={(v) => persist({ html: v, source: "edit" }, "保存しました")} />}
         </div>
-      </aside>
+      </aside>}
     </div>
   );
 }

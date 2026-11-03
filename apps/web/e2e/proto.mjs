@@ -98,6 +98,31 @@ await fr.getByRole("button", { name: "進む" }).click();
 await fr.getByText("画面1").waitFor();
 await fr.locator("body[data-blocked='1']").waitFor();
 await pr.getByRole("button", { name: "HTML をダウンロード" }).waitFor();
+// 中身が広い HTML でも切れない：中身の幅で描いて全体を縮める → 100%（横に送る）→ 大きく見る（Esc で戻る）→ 右の欄をたたむ
+await pr.getByRole("tab", { name: "作る" }).click();
+await pr.getByLabel("貼り付ける HTML").fill('<!doctype html><html><body style="margin:0"><div style="display:flex;min-width:1600px"><aside style="width:300px">案内</aside><main style="width:1300px;text-align:right">右の端</main></div></body></html>');
+await pr.getByRole("button", { name: "貼り付けた HTML を取り込む" }).click();
+await fr.getByText("右の端").waitFor();
+const frameEl = page.locator('iframe[title="プロトタイプの画面"]');
+await page.waitForFunction(() => parseInt(document.querySelector('iframe[title="プロトタイプの画面"]').style.width) >= 1600);
+const box = await frameEl.boundingBox();
+const areaBox = await frameEl.locator("xpath=../..").boundingBox();
+if (box.width > areaBox.width + 2) throw new Error(`収めていない：${box.width} > ${areaBox.width}`);
+await pr.getByRole("button", { name: "そのままの大きさ（はみ出したら横に送る）" }).click();
+await page.waitForFunction(() => document.querySelector('iframe[title="プロトタイプの画面"]').style.transform === "scale(1)");
+await pr.getByRole("button", { name: "全体が収まるよう縮める" }).click();
+await pr.getByRole("button", { name: "右の欄を閉じる" }).click();
+if (await page.getByLabel("プロトタイプの操作").count()) throw new Error("右の欄が閉じていない");
+await pr.getByRole("button", { name: "右の欄を開く" }).click();
+await pr.getByRole("button", { name: "大きく見る" }).click();
+const big = page.getByLabel("プロトタイプを大きく見る");
+await big.waitFor();
+const bb = await big.boundingBox();
+if (bb.width < 1400) throw new Error("画面いっぱいになっていない");
+await shot("p4-full");
+await page.keyboard.press("Escape");
+await big.waitFor({ state: "detached" });
+
 // ⑥の工程に下見が出る
 await page.goto(`${BASE}/p/${pid}/s/s06`);
 await page.locator('iframe[title="UI のプロトタイプの下見"]').waitFor();

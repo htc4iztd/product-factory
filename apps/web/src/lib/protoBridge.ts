@@ -47,6 +47,9 @@ window.addEventListener('click',function(e){var t=e.target;var pin=t&&t.closest&
  post({type:'pick',target:path(t),label:label(t),context:ctx(t),rect:{left:r.left,top:r.top,bottom:r.bottom,width:r.width},
   vw:window.innerWidth,vh:window.innerHeight});},true);
 window.addEventListener('scroll',later,true);window.addEventListener('resize',later);
+var lastW=0;function size(){var w=document.documentElement.scrollWidth,h=document.documentElement.scrollHeight;
+ if(Math.abs(w-lastW)>4){lastW=w;post({type:'size',w:w,h:h});}}
+window.addEventListener('load',function(){size();setTimeout(size,400);setTimeout(size,1500);});
 function watch(){if(!document.body)return setTimeout(watch,50);new MutationObserver(later).observe(document.body,{childList:true,subtree:true,characterData:true,attributes:true,attributeFilter:['hidden','class','style','aria-current']});later();}
 watch();post({type:'ready'});
 })();`;
