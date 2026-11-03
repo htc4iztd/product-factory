@@ -27,7 +27,7 @@ from .team import DOMAIN, KEYS, PM_OF, PMS, TeamError, _iso, name_of
 RESPONDERS = (*PMS, "platform")
 ACTION_TYPES = (
     "set_field", "issue_create", "issue_update", "schedule", "agent_enabled", "platform_act",
-    "stage_complete", "ui_proto",
+    "stage_complete", "ui_proto", "consult_note",
 )
 STATUS_JA = {"not_started": "未着手", "in_progress": "作業中", "awaiting_approval": "承認待ち", "revising": "修正中",
              "completed": "更新済み（完了）", "skipped": "使わない", "needs_recheck": "要再確認"}
@@ -71,6 +71,8 @@ def parse_path(path: str) -> dict:
         st = STAGE_BY_ID[parts[1]]
         # ⑥の UI はプロトタイプ（画面の移り方まで操作できる1つの HTML）だけ
         return {**ctx, "kind": "ui", "stage_id": st.id, "label": f"{st.no}{st.name}の UI プロトタイプ", "proto": True}
+    if parts[:1] == ["s"] and len(parts) > 2 and parts[1] in STAGE_BY_ID and parts[2] == "consult":
+        return consult_ctx(ctx, parts[1])
     if parts[:1] == ["s"] and len(parts) > 1 and parts[1] in STAGE_BY_ID:
         st = STAGE_BY_ID[parts[1]]
         return {**ctx, "kind": "stage", "stage_id": st.id, "label": f"{st.no}{st.name}"}
@@ -89,6 +91,8 @@ def focus(ctx: dict, mentions: list[dict]) -> dict:
         if k == "stage" and ref in STAGE_BY_ID:
             st = STAGE_BY_ID[ref]
             return {**ctx, "kind": "stage", "stage_id": ref, "label": f"{st.no}{st.name}", "mentioned": True}
+        if k == "agent" and ref in STAGE_BY_ID:  # 工程の担当に @ で話しかける＝相談
+            return {**consult_ctx(ctx, ref), "mentioned": True}
         if k == "agent" and ref in RESPONDERS:
             return {**ctx, "kind": "agent", "agent": ref, "label": name_of(ref), "mentioned": True}
         if k == "issue" and ref.isdigit():
@@ -105,6 +109,12 @@ def focus(ctx: dict, mentions: list[dict]) -> dict:
     return ctx
 
 
+def consult_ctx(ctx: dict, sid: str) -> dict:
+    """工程の担当（その分野の専門家）との相談。"""
+    st = STAGE_BY_ID[sid]
+    return {**ctx, "kind": "consult", "stage_id": sid, "label": f"{st.no}{st.name}の担当との相談"}
+
+
 def _stage_in_text(text: str) -> str | None:
     for st in STAGES:
         if st.no in text or st.name in text:
@@ -115,6 +125,8 @@ def _stage_in_text(text: str) -> str | None:
 def route(conn, ctx: dict, text: str) -> str:
     """答えるエージェント（PdM が話せる相手：PM か プラットフォーム）。"""
     k = ctx["kind"]
+    if k == "consult":
+        return ctx["stage_id"]
     if k == "agent":
         return ctx["agent"]
     if k in PLATFORM_KINDS or not ctx.get("product_id"):
@@ -306,6 +318,15 @@ def prepare_action(tenant: str, product: Product | None, responder: str, a: Acti
         }
     if a.type == "ui_proto":
         return _prepare_proto(product, base, a)
+    if a.type == "consult_note":
+        if product is None or a.stage_id not in STAGE_BY_ID:
+            raise ValueError("どの工程の合意メモかが分かりません")
+        if not a.value.strip():
+            raise ValueError("合意メモが空です")
+        st = STAGE_BY_ID[a.stage_id]
+        return {**base, "title": f"{st.no}{st.name}の合意メモに残す", "before": "（なし）",
+                "after": a.value.strip()[:2000],
+                "args": {"stage_id": a.stage_id, "text": a.value.strip()[:2000]}}
     if a.type == "stage_complete":
         return _prepare_complete(product, base, a)
     if a.type == "platform_act":
@@ -427,7 +448,7 @@ def _material(product: Product | None, ctx: dict, mentions: list[dict]) -> str:
     t = tl.Ctx(product, "pm_design", product.tenant_id)
     parts = []
     k = ctx["kind"]
-    if k == "stage":
+    if k in ("stage", "consult"):
         parts.append(tl.call(t, "stage_draft", {"stage_id": ctx["stage_id"]}))
         parts.append(tl.call(t, "stage_fields", {"stage_id": ctx["stage_id"]}))
     if k == "issue":
@@ -476,6 +497,19 @@ def _stub(product: Product | None, ctx: dict, responder: str, text: str) -> Assi
             new = f'<p class="pf-stub">（スタブ）修正：{note}</p></body>'
             acts.append(ActionOut(type="ui_proto", edits=[EditOut(old="</body>", new=new)],
                                   reason="コメントの指示でプロトタイプを直しました"))
+    if ctx["kind"] == "consult" and product is not None:
+        # スタブ：専門家として問いを返し、PdM が言い切ったことを合意メモの案にする
+        st = STAGE_BY_ID[ctx["stage_id"]]
+        if re.search(r"始め|はじめ|どこから", text):
+            return AssistantReply(reply=(
+                f"（スタブ）{st.no}{st.name}の担当です。まず3つだけ教えてください。\n"
+                "1. 最初に一番うれしくなってほしい人は誰ですか（どの判断に効くか：対象者を絞る）\n"
+                "2. その人はいま何で代わりに済ませていますか（代替手段の不満が機会になる）\n"
+                "3. 最初のリリースで通しでできるようにしたいタスクは何ですか"))
+        acts.append(ActionOut(type="consult_note", stage_id=st.id, value=text[:200], reason="PdM が決めたこと"))
+        return AssistantReply(reply=f"（スタブ）{st.no}{st.name}の担当です。"
+                                    f"「{text[:40]}」を合意メモに残す承認依頼を出しました。"
+                                    "次は、その人がつまずく瞬間を一緒に特定しましょう。", actions=acts)
     if ctx["kind"] == "stage":
         sid = ctx["stage_id"]
         m = re.match(r"^「?(.+?)」?を「?(.+?)」?に(して|する|変えて)", text.strip())
@@ -534,12 +568,26 @@ def _prompt(
     history: list[dict],
 ) -> str:
     who = name_of(responder)
+    consult_part = ""
+    if ctx.get("kind") == "consult":
+        from . import consult
+
+        st = STAGE_BY_ID[ctx["stage_id"]]
+        consult_part = (
+            f"\n\nあなたは{st.no}{st.name}（成果物：{st.artifact}）の分野の第一線の専門家として、"
+            "PdM と相談しています。PdM は「相談」で、あなたの専門的な意見を取り入れて、"
+            "この工程をゼロから磨き上げたい。\n"
+            + consult.RULES
+            + (f"\n## 知識の束\n{consult.knowledge(st.id)}\n" if consult.knowledge(st.id) else "")
+            + "\n## これまでの合意メモ\n" + (consult.notes_md(product.id, st.id) if product else "") + "\n"
+        )
     return (
         f"あなたは{who}です。PdM（人）がファクトリーのチャットで話しかけています。"
         + (f"プロダクト「{product.name}」（{product.idea}）。" if product else "")
         + f"いま PdM が見ているのは「{ctx.get('label')}」です"
         + "（メンションがなければ、このページについての指示・質問）。\n"
         + header
+        + consult_part
         + "\n\n## 出力\n- reply：日本語で短く直接答える。前置き・称賛は書かない。"
             "根拠の弱い意図には率直に指摘する。報告だけで終えない：最後は、"
             "自分が次にやること（承認依頼にしたもの）か、"
@@ -560,7 +608,9 @@ def _prompt(
         "必要なところだけを直し、ほかは変えない。"
         "全体を作り直すときは、プロトタイプの画面の「AI で作る」を使うよう案内する。PdM が添付した HTML を"
         "プロトタイプにしたい・取り込みたいと言ったら、attachment にその添付 id を入れる（中身は写さない））。"
-        "質問への答えだけなら空にする。\n\n"
+        + ("consult_note（相談で PdM と合意したことを合意メモに残す：stage_id にこの工程の id、value に1文で"
+           "決めたことと理由）、" if ctx.get("kind") == "consult" else "")
+        + "質問への答えだけなら空にする。\n\n"
         + (f"## ページの中身\n{material}\n\n" if material else "")
         + (f"## 添えられたもの\n{extra}\n\n" if extra else "")
         + "## これまでの対話\n"
@@ -649,7 +699,7 @@ def quote_of(tenant: str, message_id: int) -> dict:
         if m is None or m.tenant_id != tenant or m.role != "agent":
             raise AssistantError(404, "返事をする元の発言がありません")
         return {"id": m.id, "agent": m.agent, "agent_name": name_of(m.agent), "text": m.text[:1500],
-                "ask": (m.context or {}).get("ask"), "product_id": m.product_id}
+                "ask": (m.context or {}).get("ask"), "product_id": m.product_id, "kind": (m.context or {}).get("kind")}
 
 
 def send(
@@ -675,7 +725,9 @@ def send(
     if quote:
         # 返事の宛先：PM・プラットフォームはそのまま。工程の担当・リリースエージェントの書き込みには、窓口の PM が答える
         # （PdM が話せるのは PM だけ）。引用で何への返事かは伝わる
-        who = quote["agent"] if quote["agent"] in RESPONDERS else PM_OF.get(quote["agent"])
+        # 相談の中の発言への返事は、その工程の担当に（相談を続ける）
+        who = (quote["agent"] if quote["agent"] in RESPONDERS or quote.get("kind") == "consult"
+               else PM_OF.get(quote["agent"]))
         if who and not any(m.get("ref") == who for m in mentions):
             mentions = [{"kind": "agent", "ref": who, "label": name_of(who)}, *mentions]
     ctx = parse_path(path)
@@ -696,7 +748,8 @@ def send(
     if material.strip():
         extra = (extra + "\n\n" if extra else "") + material.strip()[:40000]
     ctx = focus(ctx, mentions)
-    if product is not None and ctx["kind"] not in ("stage", "agent", "issue") and ctx["kind"] not in PLATFORM_KINDS:
+    if (product is not None and ctx["kind"] not in ("stage", "agent", "issue", "consult")
+            and ctx["kind"] not in PLATFORM_KINDS):
         sid = _stage_in_text(text)  # 工程の名前・番号が出てきたら、その工程の話として扱う
         if sid:
             st = STAGE_BY_ID[sid]
@@ -844,6 +897,11 @@ def _execute(tenant: str, product: Product | None, user: str, a: dict) -> str:
         pages = [page if p["id"] == pid else p for p in pages] if any(p["id"] == pid for p in pages) else [*pages, page]
         repo.set_field(product.id, "s06", "ui", {**cur, "pages": pages}, user, "chat")
         return f"UI デザインの「{x['name']}」に反映しました"
+    if a["type"] == "consult_note":
+        from . import consult
+
+        consult.add(product.id, x["stage_id"], x["text"], user)
+        return "合意メモに残しました（担当が下書きを作るときの土台になります）"
     if a["type"] == "ui_proto":
         from . import proto
 
@@ -871,6 +929,7 @@ def mention_choices(product: Product | None) -> list[dict]:
     if product is None:
         return out
     out += [{"kind": "stage", "ref": s.id, "label": f"{s.no}{s.name}"} for s in STAGES]
+    out += [{"kind": "agent", "ref": s.id, "label": name_of(s.id)} for s in STAGES]  # 工程の担当（相談）
     out += [
         {"kind": "page", "ref": f"/p/{product.id}/{k}" if k else f"/p/{product.id}", "label": label}
         for k, (_, label) in PAGES.items()

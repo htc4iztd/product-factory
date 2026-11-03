@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { ArrowRight, Lock, Target } from "lucide-react";
+import { ArrowRight, Lock, MessagesSquare, Target } from "lucide-react";
 import { agent, AgentError, type FrameworkDefT, type Overview, type StageDetail, type VariantStage } from "@/lib/agent";
 import { auth } from "@/lib/auth";
 import { PatternStageBar } from "@/components/autodev/PatternStageBar";
@@ -66,6 +66,7 @@ export default async function StagePage({ params, searchParams }: Props) {
             {st.enabled && !awaiting && !pp && (
               <CommitButton pid={id} sid={stage} missing={st.missing} dirty={st.dirty} approval={st.approval_required} hasVersion={st.current_version > 0} />
             )}
+            {!pp && <Link href={`/p/${id}/s/${stage}/consult`} className="btn-secondary"><MessagesSquare size={14} />担当に相談</Link>}
             {!pp && <ExportMenu printHref={`/print/p/${id}/s/${stage}`} doc={{
               title: `${st.no} ${st.name}`, subtitle: `${ov?.product.name ?? ""}・${st.framework.title}${st.approved_version ? `・v${st.approved_version}` : ""}`,
               markdown: st.markdown, filename: `${ov?.product.name ?? "product"}_${st.no}${st.name}`.replace(/[\\/:*?"<>|\s]+/g, "_"),

@@ -18,6 +18,7 @@ from . import (
     avatars,
     canvasjob,
     collab,
+    consult,
     cycles,
     fwlib,
     ghsync,
@@ -99,6 +100,11 @@ async def _approval_error(_, exc: approvals.ApprovalError):
 
 @app.exception_handler(assistant.AssistantError)
 async def _assistant_error(_, exc: assistant.AssistantError):
+    return JSONResponse(status_code=exc.status, content={"detail": exc.message})
+
+
+@app.exception_handler(consult.ConsultError)
+async def _consult_error(_, exc: consult.ConsultError):
     return JSONResponse(status_code=exc.status, content={"detail": exc.message})
 
 
@@ -489,6 +495,30 @@ def set_field(product_id: str, stage_id: str, body: FieldValue, c: Caller = Depe
     p = _stage_product(c, product_id, stage_id, "create")
     engine.set_field(p, stage_id, c.user, body.field, body.value)
     return engine.stage_detail(p, stage_id)
+
+
+class ConsultNoteBody(BaseModel):
+    text: str = Field(min_length=1, max_length=2000)
+
+
+@app.get("/products/{product_id}/stages/{stage_id}/consult")
+def get_consult(product_id: str, stage_id: str, c: Caller = Depends(caller)):
+    """工程の担当（専門家）との相談：担当・持っている知識の見出し・合意メモ・相談の発言。"""
+    p = _stage_product(c, product_id, stage_id, "view")
+    return consult.view(c.tenant, c.user, p.id, stage_id)
+
+
+@app.post("/products/{product_id}/stages/{stage_id}/consult/notes")
+def add_consult_note(product_id: str, stage_id: str, body: ConsultNoteBody, c: Caller = Depends(caller)):
+    p = _stage_product(c, product_id, stage_id, "create")
+    return consult.add(p.id, stage_id, body.text, c.user)
+
+
+@app.delete("/products/{product_id}/stages/{stage_id}/consult/notes/{note_id}")
+def drop_consult_note(product_id: str, stage_id: str, note_id: int, c: Caller = Depends(caller)):
+    p = _stage_product(c, product_id, stage_id, "create")
+    consult.drop(p.id, stage_id, note_id)
+    return {"ok": True}
 
 
 class ProtoBody(BaseModel):

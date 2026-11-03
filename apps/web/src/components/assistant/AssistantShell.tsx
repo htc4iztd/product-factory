@@ -102,12 +102,13 @@ export function AssistantShell({ children, initialOpen }: { children: React.Reac
   const unread = msgs.filter((m) => m.id > seen && m.role === "agent").length;
   const pending = msgs.reduce((n, m) => n + m.actions.filter((a) => a.status === "pending").length, 0);
   const [toggles, setToggles] = useState(0);
+  const consulting = /\/s\/s\d\d\/consult$/.test(path); // 相談の部屋は、それ自体がチャット（右のチャットは出さない）
   const mount = useCallback((d: number) => setToggles((n) => n + d), []);
   return (
     <ChatContext.Provider value={{ open, setOpen, unread, pending, mount }}>
     <div className="flex min-h-screen">
       <div className="min-w-0 flex-1">{children}</div>
-      {open ? (
+      {consulting ? null : open ? (
         <aside className="sticky top-0 flex h-screen w-[400px] shrink-0 flex-col border-l border-zinc-200 bg-white" aria-label="チャット">
           <div className="flex items-center gap-2 border-b border-zinc-100 px-4 py-2.5">
             <MessageSquare size={15} className="text-brand-600" />
@@ -162,11 +163,11 @@ export function Feed({ msgs, onChanged, live = null }: { msgs: AssistantMsg[]; o
                 <button className={`mt-2 ${m.context.ask === "question" || m.context.ask === "consult" ? "btn-secondary btn-sm" : "btn-ghost btn-sm h-6 px-1.5 text-[11px]"}`} onClick={() => {
                   // 元の発言を引用して返事をする（何への返事かを、PM にも記録にも残す）。
                   // 宛先：PM・プラットフォームはそのまま。工程の担当・リリースエージェントの書き込みには、窓口の PM が答える
-                  const to = replyTo(m.agent, m.agent_name);
+                  const to = m.context.kind === "consult" ? { key: m.agent, name: m.agent_name } : replyTo(m.agent, m.agent_name);
                   const mention = { kind: "agent" as const, ref: to.key, label: to.name };
                   const quote = { id: m.id, agent: m.agent, agent_name: m.agent_name, text: m.text, ask: m.context.ask };
                   window.dispatchEvent(new CustomEvent("pf:compose", { detail: { mention, quote } }));
-                }} aria-label={`${m.agent_name}に返事をする`}><CornerDownLeft size={12} />{m.agent_name}に返事をする{replyTo(m.agent, m.agent_name).key !== m.agent ? `（${replyTo(m.agent, m.agent_name).name}が受けます）` : ""}</button>
+                }} aria-label={`${m.agent_name}に返事をする`}><CornerDownLeft size={12} />{m.agent_name}に返事をする{m.context.kind !== "consult" && replyTo(m.agent, m.agent_name).key !== m.agent ? `（${replyTo(m.agent, m.agent_name).name}が受けます）` : ""}</button>
               )}
             </div>
           </li>

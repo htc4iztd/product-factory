@@ -326,3 +326,45 @@ def test_think_stream_parts(monkeypatch):
     evs.clear()
     out = agentrun.think_stream(conn, prep, "p", AssistantReply, evs.append)
     assert out.reply == "作り直した返事" and any(e["type"] == "reset" for e in evs)
+
+
+def test_consult(client):
+    """工程の担当（専門家）との相談：相談のページで話すと担当が答え、問いを立てて導く。PdM が決めたことは合意メモの
+    承認依頼になり、承認すると残る。合意メモは担当が動くときに必ず読む。相談の発言への返事・@担当 も相談になる。"""
+    from pf_agent import agentrun, db
+
+    c = client
+    pid = c.post("/products", headers=H, json={"name": "相談", "idea": "家計簿"}).json()["id"]
+    wait_idle(c, pid)
+    v = c.get(f"/products/{pid}/stages/s06/consult", headers=H).json()
+    assert v["agent"]["name"] == "⑥UXデザイン担当" and "ゼロから磨き上げる順番" in v["knowledge"] and v["notes"] == []
+    rep = say(c, f"/p/{pid}/s/s06/consult", "相談を始めたい。どこから考えるとよい？").json()["reply"]
+    assert rep["agent"] == "s06" and rep["context"]["kind"] == "consult" and not rep["actions"] and "1." in rep["text"]
+    rep = say(c, f"/p/{pid}/s/s06/consult", "対象は共働きの夫婦に絞る").json()["reply"]
+    a = rep["actions"][0]
+    assert a["type"] == "consult_note" and a["after"] == "対象は共働きの夫婦に絞る"
+    c.post(f"/assistant/messages/{rep['id']}/actions/{a['id']}", headers=H, json={"approve": True})
+    v = c.get(f"/products/{pid}/stages/s06/consult", headers=H).json()
+    assert [n["text"] for n in v["notes"]] == ["対象は共働きの夫婦に絞る"]
+    assert all(m["context"]["kind"] == "consult" for m in v["thread"]) and len(v["thread"]) == 4
+    # 相談の発言への返事（どのページからでも）・@担当 は相談になる
+    r2 = say(c, f"/p/{pid}", "代替手段は Excel です").json()
+    assert r2["reply"]["agent"] == "pm_biz" or r2["reply"]["context"]["kind"] != "consult"
+    r3 = c.post("/assistant/messages", headers=H, json={"path": f"/p/{pid}", "text": "代替手段は Excel です",
+                                                          "reply_to": rep["id"]}).json()["reply"]
+    assert r3["agent"] == "s06" and r3["context"]["kind"] == "consult"
+    r4 = say(c, f"/p/{pid}", "@⑥UXデザイン担当 締めの時間を短くしたい",
+             mentions=[{"kind": "agent", "ref": "s06", "label": "⑥UXデザイン担当"}]).json()["reply"]
+    assert r4["agent"] == "s06" and r4["context"]["kind"] == "consult"
+    # 合意メモは担当が動くときに読む
+    with db.session() as s:
+        product = s.get(db.Product, pid)
+        s.expunge(product)
+    prep = agentrun.prepare("tenant-a", product, "s06")
+    assert "対象は共働きの夫婦に絞る" in prep.prefetched and "合意メモ" in prep.prefetched
+    assert "対象は" not in agentrun.prepare("tenant-a", product, "s07").prefetched
+    # 手で足す・消す。閲覧者は足せない
+    n = c.post(f"/products/{pid}/stages/s06/consult/notes", headers=H, json={"text": "MVP は締めの1タスク"}).json()
+    assert c.post(f"/products/{pid}/stages/s06/consult/notes", headers=VIEWER, json={"text": "x"}).status_code == 403
+    assert c.delete(f"/products/{pid}/stages/s06/consult/notes/{n['id']}", headers=H).json() == {"ok": True}
+    assert c.get(f"/products/{pid}/stages/s99/consult", headers=H).status_code in (404, 422)

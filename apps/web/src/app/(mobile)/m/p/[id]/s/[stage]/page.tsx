@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { notFound } from "next/navigation";
 import { agent, AgentError, STATUS_LABEL, type StageDetail } from "@/lib/agent";
 import { Md } from "@/components/md/Md";
@@ -11,7 +12,7 @@ export default async function MobileStage({ params }: { params: Promise<{ id: st
   return (
     <div>
       <SubHeader back={`/p/${id}?tab=progress`} title={`${st.no} ${st.name}`} sub={<>{STATUS_LABEL[st.status] ?? st.status}{st.missing.length > 0 && `・未記入 ${st.missing.length}`}</>} />
-      <div className="flex justify-end px-2 pt-1"><ExportMenu compact printHref={`/print/p/${id}/s/${stage}`} doc={{
+      <div className="flex justify-end gap-1 px-2 pt-1"><Link href={`/p/${id}/s/${stage}/consult`} className="flex h-9 items-center gap-1 rounded-lg bg-zinc-900 px-3 text-[12px] font-medium text-white">担当に相談</Link><ExportMenu compact printHref={`/print/p/${id}/s/${stage}`} doc={{
         title: `${st.no} ${st.name}`, subtitle: st.framework.title, markdown: st.markdown, filename: `${st.no}${st.name}`.replace(/[\\/:*?"<>|\s]+/g, "_"),
       }} /></div>
       {st.missing.length > 0 && <p className="mx-3 mt-3 rounded-lg bg-amber-50 px-3 py-2 text-[12.5px] text-amber-900">まだ書いていない項目：{st.missing.join("・")}</p>}

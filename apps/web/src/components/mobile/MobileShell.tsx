@@ -26,6 +26,11 @@ function topicOf(path: string, nav: Nav): Topic {
   const m = path.match(/^\/p\/([0-9a-f]{8,32})(?:\/(.*))?$/);
   if (!m) return { path: "/", label: "ファクトリー全体" };
   const [, pid, rest = ""] = m;
+  const cs = rest.match(/^s\/(s\d\d)\/consult/);
+  if (cs) {
+    const s = nav?.stages.find((x) => x.id === cs[1]);
+    return { path: `/p/${pid}/s/${cs[1]}/consult`, label: `${s ? `${s.no}${s.name}` : cs[1]}の担当に相談` };
+  }
   const st = rest.match(/^s\/(s\d\d)(\/ui)?/);
   if (st) {
     const s = nav?.stages.find((x) => x.id === st[1]);
@@ -47,6 +52,7 @@ export function MobileShell({ children, products }: { children: React.ReactNode;
   const [drawer, setDrawer] = useState(false);
   const [sheet, setSheet] = useState(false);
   const home = path === "/" || /^\/p\/[0-9a-f]+$/.test(path);
+  const inline = home || /\/consult$/.test(path); // 対話がページの中にある（チャットを下から出さない）
 
   const load = useCallback(async () => {
     if (document.visibilityState !== "visible") return;
@@ -69,7 +75,7 @@ export function MobileShell({ children, products }: { children: React.ReactNode;
     setMsgs((xs) => [...xs.filter((x) => x.id !== mine.id && x.id !== reply.id), mine, reply].sort((a, b) => a.id - b.id));
     load();
   });
-  const onSend = (b: SendBody) => { if (!home) setSheet(true); return chat.send(b); };
+  const onSend = (b: SendBody) => { if (!inline) setSheet(true); return chat.send(b); };
   const title = pid ? (nav?.product.name ?? products.find((p) => p.id === pid)?.name ?? "") : "ファクトリー";
 
   return (
@@ -83,7 +89,7 @@ export function MobileShell({ children, products }: { children: React.ReactNode;
           )}
         </header>
         <main className="min-h-0 flex-1 overflow-y-auto overscroll-contain">{children}</main>
-        <Composer key={path} path={path} pid={pid} nav={nav} home={home} busy={!!chat.live} onSend={onSend} onOpenChat={() => setSheet(true)} />
+        <Composer key={path} path={path} pid={pid} nav={nav} home={inline} busy={!!chat.live} onSend={onSend} onOpenChat={() => setSheet(true)} />
         {drawer && <Drawer products={products} pid={pid} nav={nav} path={path} onClose={() => setDrawer(false)} />}
         {sheet && !home && (
           <div className="fixed inset-0 z-40 flex flex-col bg-black/30" onClick={(e) => { if (e.target === e.currentTarget) setSheet(false); }}>

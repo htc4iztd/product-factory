@@ -46,6 +46,14 @@ def prepare(tenant: str, product: Product | None, key: str) -> Prepared:
     lo = personas.loadout(tenant, key)
     ctx = tl.Ctx(product=product, key=key, tenant=tenant)
     parts = [f"### {name}\n{tl.call(ctx, name, {})}" for name in lo.prefetch]
+    if product is not None:
+        from . import consult
+        from .stages import STAGE_BY_ID
+
+        if key in STAGE_BY_ID:  # 工程の担当は、PdM との相談で合意したことを必ず読む（下書きの土台にする）
+            md = consult.notes_md(product.id, key)
+            if md:
+                parts.append("### PdM との相談で合意したこと（合意メモ。下書きはこれと食い違わせない）\n" + md)
     return Prepared(lo, ctx, "\n\n".join(parts))
 
 

@@ -24,7 +24,7 @@ dev = ["pytest>=8", "httpx>=0.27", "ruff>=0.6"]
 packages = ["pf_agent"]
 
 [tool.setuptools.package-data]
-pf_agent = ["skills/*.md"]
+pf_agent = ["skills/*.md", "knowledge/*.md"]
 
 [tool.pytest.ini_options]
 pythonpath = ["."]

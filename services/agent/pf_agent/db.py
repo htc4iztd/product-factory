@@ -748,6 +748,18 @@ class PmNote(Base):
     created_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), default=_now)
 
 
+class ConsultNote(Base):
+    """工程の担当（その分野の専門家）との相談で、PdM と合意したこと（合意メモ）。担当が下書きを作るときの土台にする。"""
+    __tablename__ = "consult_notes"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    product_id: Mapped[str] = mapped_column(String(32), index=True)
+    stage_id: Mapped[str] = mapped_column(String(4), index=True)
+    text: Mapped[str] = mapped_column(Text)
+    by: Mapped[str] = mapped_column(String(200), default="")
+    msg_id: Mapped[int | None] = mapped_column(Integer, nullable=True)   # もとになったチャットの発言
+    created_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), default=_now)
+
+
 class PmMessage(Base):
     """PdM と PM の対話（PdM が話せるのは PM だけ）。会議の中の発言も持つ。"""
     __tablename__ = "pm_messages"
