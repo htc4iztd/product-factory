@@ -726,6 +726,48 @@ def assistant_send(body: AssistantBody, c: Caller = Depends(caller)):
     )
 
 
+@router.post("/assistant/messages/stream")
+def assistant_send_stream(body: AssistantBody, c: Caller = Depends(caller)):
+    """send と同じ。途中の様子を1行ずつの JSON（NDJSON）で流す：user（PdM の発言を残した）・route（答える人）・
+    step（いま読んでいるもの・していること）・delta（返事の文章の続き）・reset（文章を出し直す）・done（答え）・error。"""
+    import json
+    import queue
+    import threading
+
+    from fastapi.responses import StreamingResponse
+
+    from . import assistant
+
+    _write(c)
+    q: queue.Queue = queue.Queue()
+
+    def work() -> None:
+        try:
+            assistant.send(c.tenant, c.user, body.path, body.text, body.mentions, body.attachments, body.material,
+                           body.reply_to, emit=q.put)
+        except Exception as e:  # noqa: BLE001  途中で失敗したことも流して伝える
+            q.put({"type": "error", "status": getattr(e, "status", 500),
+                   "detail": getattr(e, "message", None) or str(e)[:500] or type(e).__name__})
+        finally:
+            q.put(None)
+
+    threading.Thread(target=work, daemon=True).start()
+
+    def lines():
+        while True:
+            try:
+                ev = q.get(timeout=15)
+            except queue.Empty:
+                yield json.dumps({"type": "ping"}) + "\n"  # 間が空いても、つながりを切らない
+                continue
+            if ev is None:
+                return
+            yield json.dumps(ev, ensure_ascii=False, default=str) + "\n"
+
+    return StreamingResponse(lines(), media_type="application/x-ndjson",
+                             headers={"cache-control": "no-store", "x-accel-buffering": "no"})
+
+
 @router.get("/assistant/messages")
 def assistant_feed(after: int = 0, limit: int = 80, product: str = "", c: Caller = Depends(caller)):
     from . import assistant

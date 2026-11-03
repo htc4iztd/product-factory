@@ -661,8 +661,12 @@ def send(
     attachment_ids: list[int],
     material: str = "",
     reply_to: int | None = None,
+    emit=None,
 ) -> dict:
+    """PdM の発言に答える。emit を渡すと、途中の様子（誰が答えるか・読んでいるもの・返事の文章）を少しずつ知らせる。"""
     from . import agentrun, attachments, pms
+
+    say = emit or (lambda _e: None)
 
     text = text.strip()
     if not text:
@@ -705,15 +709,34 @@ def send(
     if quote:
         ctx["reply_to"] = {k: quote[k] for k in ("id", "agent", "agent_name", "text", "ask")}
     mine = _save(tenant, user, ctx.get("product_id"), "pdm", "", text, ctx, mentions, files)
+    say({"type": "user", "message": mine})
+    say({"type": "route", "agent": responder, "agent_name": name_of(responder)})
+    say({"type": "step", "text": f"{ctx.get('label') or 'このページ'}の中身を読んでいます"})
+    if files:
+        say({"type": "step", "text": f"添えたもの（{'・'.join(f['filename'] for f in files)[:60]}）を読んでいます"})
     if conn.provider == "stub":
         out = _stub(product, {**ctx, "files": files}, responder, text)
+        if emit:  # スタブでも、流れて出る様子は同じにする（画面の確かめのため）
+            import time
+
+            say({"type": "step", "text": "返事を書いています"})
+            for i in range(0, len(out.reply), 4):
+                say({"type": "delta", "text": out.reply[i:i + 4]})
+                time.sleep(0.04)
     else:
         prep = agentrun.prepare(tenant, product, responder)
         history = feed(tenant, user, 12, product_id=ctx.get("product_id"))
         prompt = _prompt(
             product, ctx, responder, text, prep.header(), _material(product, ctx, mentions), extra, history
         )
-        out = agentrun.think(conn, prep, prompt, AssistantReply, images)
+        if emit and not images:
+            out = agentrun.think_stream(conn, prep, prompt, AssistantReply, say)
+        else:
+            say({"type": "step", "text": "考えています"})
+            out = agentrun.think(conn, prep, prompt, AssistantReply, images)
+            say({"type": "delta", "text": out.reply})
+    if out.actions:
+        say({"type": "step", "text": "承認依頼を用意しています"})
     actions, dropped = [], []
     for a in out.actions[:6]:
         if a.type not in ACTION_TYPES:
@@ -727,6 +750,7 @@ def send(
     if product is not None:  # 根拠のない「状態が変わった」という文には印を付ける（PdM に作り話を伝えない）
         from . import facts
 
+        say({"type": "step", "text": "書いたことの根拠を確かめています"})
         out.reply = facts.scrub(product.id, out.reply, out.evidence, mark=True)[0]
     # 出せなかった変更は、何も変えていないことを先頭ではっきり出す（本文が「更新しました」と書いていても）
     reply = (
@@ -738,6 +762,7 @@ def send(
         said = (f"> {quote['text'][:300]}\n\n" if quote else "") + text  # 何への返事かを PM の記録にも残す
         pms._say(product.id, responder, "pdm", user, said, ctx.get("stage_id"), ctx.get("meeting_id"), files)
         pms._say(product.id, responder, "pm", name_of(responder), reply, ctx.get("stage_id"), ctx.get("meeting_id"))
+    say({"type": "done", "message": mine, "reply": answer})
     return {"message": mine, "reply": answer}
 
 

@@ -437,6 +437,51 @@ def _text(conn: Conn, model: str, prompt: str) -> str:
     raise LLMError(f"未対応の接続方式：{conn.provider}")
 
 
+def stream_text(conn: Conn, model: str, prompt: str, on_delta) -> str:
+    """文章を少しずつ出す（届いた分から on_delta に渡す）。全体を返す。
+    流せない接続・失敗したときは、まとめて1回渡す。"""
+    sent = []
+
+    def push(t: str) -> None:
+        if t:
+            sent.append(t)
+            on_delta(t)
+
+    try:
+        if _is_claude(conn, model):
+            client = _anthropic(conn)
+            kw = _claude_kwargs(prompt, model)
+            if conn.provider == "anthropic" and model in _FALLBACK_MODELS:
+                ctx = client.beta.messages.stream(**kw, betas=["server-side-fallback-2026-07-01"],
+                                                  fallbacks="default")
+            else:
+                ctx = client.messages.stream(**kw)
+            with ctx as st:
+                for t in st.text_stream:
+                    push(t)
+                resp = st.get_final_message()
+            _record_claude(model, resp)
+            _claude_check(resp)
+            return "".join(sent)
+        if conn.provider in ("gemini", "vertex"):
+            client = _genai(conn)
+            last = None
+            for chunk in client.models.generate_content_stream(model=model, contents=prompt):
+                push(chunk.text or "")
+                last = chunk
+            if last is not None:
+                _record_gemini(model, last)
+            return "".join(sent)
+    except LLMError:
+        raise
+    except Exception:  # noqa: BLE001  流せなかったら、まとめて出し直す（途中まで出していたらそのまま失敗にする）
+        if sent:
+            raise
+    text = _wrap(lambda: _text(conn, model, prompt))
+    push(text)
+    return text
+
+
 def _strip_fence(text: str) -> str:
     t = text.strip()
     if t.startswith("```"):

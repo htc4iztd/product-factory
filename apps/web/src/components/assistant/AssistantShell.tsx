@@ -10,6 +10,7 @@ import { ResearchImport } from "@/components/chat/ResearchImport";
 import { srcDoc } from "@/lib/uikit";
 import { withBridge } from "@/lib/protoBridge";
 import { ValueDiff, summarize } from "@/components/diff/ValueDiff";
+import { ChatMd, LiveTurn, useChatSend, type Live, type SendBody } from "@/components/chat/LiveTurn";
 
 const POLL_MS = 4000;
 const PM_OF: Record<string, string> = Object.fromEntries([
@@ -91,6 +92,11 @@ export function AssistantShell({ children, initialOpen }: { children: React.Reac
     const t = setInterval(load, POLL_MS);
     return () => clearInterval(t);
   }, [load]);
+  // 送る：その場で発言を出し、返事は流れてくるまま出す。終わったら残った2つの発言に置き換える
+  const chat = useChatSend((mine, reply) => {
+    setMsgs((xs) => [...xs.filter((x) => x.id !== mine.id && x.id !== reply.id), mine, reply].sort((a, b) => a.id - b.id));
+    load();
+  });
   const lastId = msgs.at(-1)?.id ?? 0;
   useEffect(() => { if (open) setSeen(lastId); }, [open, lastId]);
   const unread = msgs.filter((m) => m.id > seen && m.role === "agent").length;
@@ -109,8 +115,8 @@ export function AssistantShell({ children, initialOpen }: { children: React.Reac
             {pending > 0 && <span className="rounded-full bg-amber-100 px-2 text-[11px] font-medium text-amber-800">承認待ち {pending}</span>}
             <button onClick={() => setOpen(false)} className="btn-ghost btn-sm ml-auto h-7 w-7 p-0" aria-label="チャットを閉じる"><PanelRightClose size={15} /></button>
           </div>
-          <Feed msgs={msgs} onChanged={(m) => { setMsgs((xs) => xs.map((x) => (x.id === m.id ? m : x))); router.refresh(); }} />
-          <Composer path={path} pid={pid} incoming={incoming} onSent={(m) => { setMsgs((xs) => [...xs.filter((x) => x.id < m.id), m]); load(); }} />
+          <Feed msgs={msgs} live={chat.live} onChanged={(m) => { setMsgs((xs) => xs.map((x) => (x.id === m.id ? m : x))); router.refresh(); }} />
+          <Composer path={path} pid={pid} incoming={incoming} busy={!!chat.live} onSend={chat.send} onSent={(m) => { setMsgs((xs) => [...xs.filter((x) => x.id < m.id), m]); load(); }} />
         </aside>
       ) : toggles > 0 ? null : (
         <button onClick={() => setOpen(true)} className="btn-secondary fixed right-3 top-3 z-40 gap-1.5" aria-label="チャットを開く">
@@ -123,16 +129,17 @@ export function AssistantShell({ children, initialOpen }: { children: React.Reac
   );
 }
 
-export function Feed({ msgs, onChanged }: { msgs: AssistantMsg[]; onChanged: (m: AssistantMsg) => void }) {
+export function Feed({ msgs, onChanged, live = null }: { msgs: AssistantMsg[]; onChanged: (m: AssistantMsg) => void; live?: Live | null }) {
   const end = useRef<HTMLDivElement>(null);
-  useEffect(() => { end.current?.scrollIntoView({ block: "end" }); }, [msgs.length]);
+  // 新しい発言・流れてくる返事に合わせて、いちばん下を見せる
+  useEffect(() => { end.current?.scrollIntoView({ block: "end", behavior: live ? "smooth" : "auto" }); }, [msgs.length, live?.reply.length, live?.steps.length, live]);
   return (
     <ol className="flex-1 space-y-2.5 overflow-y-auto px-3 py-3" aria-label="チャットのやり取り">
       {msgs.length === 0 && <li className="px-1 text-[12px] text-zinc-400">下の欄から話しかけます。何も指さなければ、いま開いているページについての指示・質問になります。@ で別のページ・工程・エージェントを指せます。何かを変えるときは、ここに承認依頼が出ます。</li>}
       {msgs.map((m) => {
         const me = m.role === "pdm";
         return (
-          <li key={m.id} className={`flex items-end gap-2 ${me ? "justify-end" : ""}`} data-msg={m.id}>
+          <li key={m.id} className={`pf-rise flex items-end gap-2 ${me ? "justify-end" : ""}`} data-msg={m.id}>
             {!me && <Avatar k={m.agent} size={26} />}
             <div className={`max-w-[88%] rounded-xl px-3 py-2 text-[12.5px] ${me ? "bg-zinc-900 text-white" : m.context.ask ? "bg-amber-50 text-zinc-900 ring-1 ring-amber-200" : "bg-zinc-100 text-zinc-800"}`}>
               <div className={`mb-0.5 flex flex-wrap gap-x-1 text-[10px] ${me ? "text-zinc-400" : "text-zinc-500"}`}>
@@ -145,7 +152,7 @@ export function Feed({ msgs, onChanged }: { msgs: AssistantMsg[]; onChanged: (m:
                 )}
               </div>
               {m.context.reply_to && <QuoteBox q={m.context.reply_to} dark={me} />}
-              <div className="whitespace-pre-wrap">{m.text}</div>
+              {me ? <div className="whitespace-pre-wrap">{m.text}</div> : <ChatMd text={m.text} />}
               {(m.context as { link?: string }).link && (
                 <a href={(m.context as { link?: string }).link} className="btn-secondary btn-sm mt-2">{m.context.label ?? "開く"}を開く</a>
               )}
@@ -165,6 +172,7 @@ export function Feed({ msgs, onChanged }: { msgs: AssistantMsg[]; onChanged: (m:
           </li>
         );
       })}
+      {live && <LiveTurn live={live} msgs={msgs} />}
       <div ref={end} />
     </ol>
   );
@@ -247,7 +255,10 @@ function ActionCard({ m, a, onChanged }: { m: AssistantMsg; a: ChatActionT; onCh
   );
 }
 
-function Composer({ path, pid, incoming, onSent }: { path: string; pid: string | null; incoming: { text?: string; mention?: MentionT; quote?: Quote; n: number } | null; onSent: (m: AssistantMsg) => void }) {
+function Composer({ path, pid, incoming, busy, onSend, onSent }: {
+  path: string; pid: string | null; incoming: { text?: string; mention?: MentionT; quote?: Quote; n: number } | null; busy: boolean;
+  onSend: (b: SendBody) => Promise<string | null>; onSent: (m: AssistantMsg) => void;
+}) {
   const [text, setText] = useState("");
   const [quote, setQuote] = useState<Quote | null>(null);
   const [mentions, setMentions] = useState<MentionT[]>([]);
@@ -289,17 +300,17 @@ function Composer({ path, pid, incoming, onSent }: { path: string; pid: string |
     setQuery(null);
     setTimeout(() => box.current?.focus(), 10);
   };
-  const send = (t = text, material = "") => {
-    if (!t.trim() || pending) return;
+  const send = async (t = text, material = "") => {
+    if (!t.trim() || pending || busy) return;
     const used = mentions.filter((m) => t.includes(`@${m.label}`) || material || (quote && m.ref === quote.agent));
-    start(async () => {
-      // ⑥の UI（プロトタイプ）を開いているときは、そのことも伝える
-      const ui = /\/s\/s06\/ui$/.test(path) ? "mode=proto" : "";
-      const r = await sendAssistant(ui ? `${path}?${ui}` : path, t, used, files.items.map((a) => a.id), material, quote?.id ?? null);
-      if (r.error) { setError(r.error); return; }
-      setText(""); setMentions([]); setQuote(null); setError(null); files.clear();
-      if (r.reply) onSent(r.reply);
-    });
+    // ⑥の UI（プロトタイプ）を開いているときは、そのことも伝える
+    const ui = /\/s\/s06\/ui$/.test(path) ? "mode=proto" : "";
+    const body: SendBody = { path: ui ? `${path}?${ui}` : path, text: t, mentions: used, attachments: files.items.map((a) => a.id), material, reply_to: quote?.id ?? null };
+    // 送ったらすぐ入力欄を空にする（返事は上に流れて出る）。送れなかったら戻す
+    const keep = { text, mentions, quote };
+    setText(""); setMentions([]); setQuote(null); setError(null); files.clear();
+    const err = await onSend(body);
+    if (err) { setError(err); setText(keep.text); setMentions(keep.mentions); setQuote(keep.quote); }
   };
   return (
     <div className="relative border-t border-zinc-200 bg-white px-3 py-2" aria-label="チャットの入力">
@@ -335,7 +346,7 @@ function Composer({ path, pid, incoming, onSent }: { path: string; pid: string |
         ))}
         <AttachChips a={files} />
         {error && <span className="text-rose-600">{error}</span>}
-        {pending && <span className="text-brand-700">{w.who === "内容から PM が決まります" ? "考えています…" : `${w.who}が考えています…`}</span>}
+        {pending && <span className="text-brand-700">考えています…</span>}
       </div>
       <div className="mt-1 space-y-1.5">
         {quote && <QuoteBox q={quote} onRemove={() => setQuote(null)} />}
@@ -358,7 +369,7 @@ function Composer({ path, pid, incoming, onSent }: { path: string; pid: string |
             {pid ? <AttachButton a={files} disabled={pending} /> : null}
             {pid && stage && <button className="btn-ghost btn-sm h-8 w-8 p-0" title="リサーチから取り込む" aria-label="リサーチから取り込む" onClick={() => setImporting((x) => !x)}><Library size={14} /></button>}
           </div>
-          <button className="btn-primary btn-sm" aria-label="チャットを送る" disabled={pending || !text.trim() || files.busy} onClick={() => send()}><Send size={12} />送る</button>
+          <button className="btn-primary btn-sm" aria-label="チャットを送る" disabled={pending || busy || !text.trim() || files.busy} onClick={() => send()}><Send size={12} />送る</button>
         </div>
       </div>
     </div>

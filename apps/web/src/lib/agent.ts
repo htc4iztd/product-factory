@@ -66,6 +66,11 @@ export async function agentRaw(path: string): Promise<Response> {
   return call(path);
 }
 
+// 流れてくる応答をそのまま受け取る（チャットのストリーミング）
+export async function agentPost(path: string, body: unknown): Promise<Response> {
+  return call(path, { method: "POST", body });
+}
+
 export async function agent<T = unknown>(path: string, init?: { method?: string; body?: unknown }): Promise<T> {
   const res = await call(path, init);
   if (!res.ok) {

@@ -1,13 +1,13 @@
 "use client";
-import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, useTransition } from "react";
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { ArrowUp, AtSign, ChevronDown, Menu, MessageSquare, Monitor, Plus, X } from "lucide-react";
 import type { AssistantMsg, MentionT, Quote } from "@/lib/agent";
-import { sendAssistant } from "@/lib/assistant-actions";
 import { Feed, QuoteBox } from "@/components/assistant/AssistantShell";
 import { AttachButton, AttachChips, useAttachments } from "@/components/chat/Attachments";
 import { switchView } from "@/lib/mobile";
+import { useChatSend, type Live, type SendBody } from "@/components/chat/LiveTurn";
 
 const POLL_MS = 4000;
 type NavStage = { id: string; no: string; name: string; status: string; enabled: boolean };
@@ -15,7 +15,7 @@ type Nav = { product: { id: string; name: string }; stages: NavStage[] } | null;
 export type Topic = { path: string; label: string };
 
 type Ctl = {
-  pid: string | null; msgs: AssistantMsg[]; pending: number; nav: Nav;
+  pid: string | null; msgs: AssistantMsg[]; pending: number; nav: Nav; live: Live | null;
   replace: (m: AssistantMsg) => void; reload: () => void; openChat: () => void;
 };
 const MobileContext = createContext<Ctl | null>(null);
@@ -64,10 +64,16 @@ export function MobileShell({ children, products }: { children: React.ReactNode;
   useEffect(() => { setDrawer(false); setSheet(false); }, [path]);
   const pending = msgs.reduce((n, m) => n + m.actions.filter((a) => a.status === "pending").length, 0);
   const replace = useCallback((m: AssistantMsg) => { setMsgs((xs) => xs.map((x) => (x.id === m.id ? m : x))); router.refresh(); }, [router]);
+  // 送る：その場で発言を出し、返事は流れてくるまま出す（ホーム以外では、チャットが下から出る）
+  const chat = useChatSend((mine, reply) => {
+    setMsgs((xs) => [...xs.filter((x) => x.id !== mine.id && x.id !== reply.id), mine, reply].sort((a, b) => a.id - b.id));
+    load();
+  });
+  const onSend = (b: SendBody) => { if (!home) setSheet(true); return chat.send(b); };
   const title = pid ? (nav?.product.name ?? products.find((p) => p.id === pid)?.name ?? "") : "ファクトリー";
 
   return (
-    <MobileContext.Provider value={{ pid, msgs, pending, nav, replace, reload: load, openChat: () => setSheet(true) }}>
+    <MobileContext.Provider value={{ pid, msgs, pending, nav, live: chat.live, replace, reload: load, openChat: () => setSheet(true) }}>
       <div className="flex h-[100dvh] flex-col bg-white" data-mobile>
         <header className="flex h-12 shrink-0 items-center gap-1 border-b border-zinc-200 px-2">
           <button className="flex h-10 w-10 items-center justify-center rounded-lg text-zinc-700 active:bg-zinc-100" aria-label="メニューを開く" onClick={() => setDrawer(true)}><Menu size={20} /></button>
@@ -77,7 +83,7 @@ export function MobileShell({ children, products }: { children: React.ReactNode;
           )}
         </header>
         <main className="min-h-0 flex-1 overflow-y-auto overscroll-contain">{children}</main>
-        <Composer key={path} path={path} pid={pid} nav={nav} home={home} onSent={(m) => { setMsgs((xs) => [...xs.filter((x) => x.id < m.id), m]); load(); if (!home) setSheet(true); }} onOpenChat={() => setSheet(true)} />
+        <Composer key={path} path={path} pid={pid} nav={nav} home={home} busy={!!chat.live} onSend={onSend} onOpenChat={() => setSheet(true)} />
         {drawer && <Drawer products={products} pid={pid} nav={nav} path={path} onClose={() => setDrawer(false)} />}
         {sheet && !home && (
           <div className="fixed inset-0 z-40 flex flex-col bg-black/30" onClick={(e) => { if (e.target === e.currentTarget) setSheet(false); }}>
@@ -86,7 +92,7 @@ export function MobileShell({ children, products }: { children: React.ReactNode;
                 <MessageSquare size={15} className="text-brand-600" /><span className="text-[14px] font-semibold">チャット</span>
                 <button className="ml-auto flex h-9 w-9 items-center justify-center rounded-lg" aria-label="チャットを閉じる" onClick={() => setSheet(false)}><X size={18} /></button>
               </div>
-              <Feed msgs={msgs} onChanged={replace} />
+              <Feed msgs={msgs} live={chat.live} onChanged={replace} />
             </div>
           </div>
         )}
@@ -130,8 +136,8 @@ function Drawer({ products, pid, nav, path, onClose }: { products: { id: string;
 }
 
 // 下の入力欄：話題（どのページについての指示か）を上に出し、タップで切り替える。@ で工程・エージェントを指す。添付もできる
-function Composer({ path, pid, nav, home, onSent, onOpenChat }: {
-  path: string; pid: string | null; nav: Nav; home: boolean; onSent: (m: AssistantMsg) => void; onOpenChat: () => void;
+function Composer({ path, pid, nav, home, busy, onSend, onOpenChat }: {
+  path: string; pid: string | null; nav: Nav; home: boolean; busy: boolean; onSend: (b: SendBody) => Promise<string | null>; onOpenChat: () => void;
 }) {
   const base = useMemo(() => topicOf(path, nav), [path, nav]);
   const [topic, setTopic] = useState<Topic | null>(null);
@@ -144,7 +150,6 @@ function Composer({ path, pid, nav, home, onSent, onOpenChat }: {
   const [picking, setPicking] = useState(false);
   const [more, setMore] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [pending, start] = useTransition();
   const box = useRef<HTMLTextAreaElement>(null);
   const files = useAttachments(pid ?? "_", "assistant");
   useEffect(() => {
@@ -174,15 +179,14 @@ function Composer({ path, pid, nav, home, onSent, onOpenChat }: {
     setQuery(null);
     setTimeout(() => box.current?.focus(), 10);
   };
-  const send = () => {
-    if (!text.trim() || pending) return;
+  const send = async () => {
+    if (!text.trim() || busy) return;
     const used = mentions.filter((m) => text.includes(`@${m.label}`) || (quote && m.ref === quote.agent));
-    start(async () => {
-      const r = await sendAssistant(t.path, text, used, files.items.map((a) => a.id), "", quote?.id ?? null);
-      if (r.error) { setError(r.error); return; }
-      setText(""); setMentions([]); setQuote(null); setError(null); files.clear(); setMore(false);
-      if (r.reply) onSent(r.reply);
-    });
+    const body: SendBody = { path: t.path, text, mentions: used, attachments: files.items.map((a) => a.id), reply_to: quote?.id ?? null };
+    const keep = { text, mentions, quote };
+    setText(""); setMentions([]); setQuote(null); setError(null); files.clear(); setMore(false);
+    const err = await onSend(body);
+    if (err) { setError(err); setText(keep.text); setMentions(keep.mentions); setQuote(keep.quote); }
   };
   // 話題の候補：プロダクト全体・工程・UI のプロトタイプ（プロダクトの外ではファクトリー全体だけ）
   const topics: Topic[] = pid && nav ? [
@@ -225,17 +229,17 @@ function Composer({ path, pid, nav, home, onSent, onOpenChat }: {
       {more && (
         <div className="mb-1 flex gap-2">
           <button className="flex items-center gap-1 rounded-full border border-zinc-200 px-3 py-1.5 text-[13px]" onClick={() => { onType(text + "@"); setMore(false); box.current?.focus(); }}><AtSign size={14} />工程・エージェントを指す</button>
-          {pid && <span className="flex items-center rounded-full border border-zinc-200 px-1"><AttachButton a={files} disabled={pending} /></span>}
+          {pid && <span className="flex items-center rounded-full border border-zinc-200 px-1"><AttachButton a={files} disabled={busy} /></span>}
         </div>
       )}
       <div className="flex items-end gap-1.5">
         <button className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-full ${more ? "bg-zinc-900 text-white" : "bg-zinc-100 text-zinc-700"}`} aria-label="ほかの操作" onClick={() => setMore((x) => !x)}><Plus size={18} /></button>
         <textarea ref={box} rows={1} value={text} aria-label="チャットに話す" onPaste={pid ? files.onPaste : undefined}
-          placeholder={pending ? "考えています…" : "指示・質問を入力"}
+          placeholder={busy ? "返事を書いています…" : "指示・質問を入力"}
           className="min-h-10 flex-1 resize-none rounded-2xl border border-zinc-300 bg-white px-3.5 py-2 text-[16px] leading-6 outline-none focus:border-zinc-500"
           onChange={(e) => onType(e.target.value)}
           onKeyDown={(e) => { if (e.key === "Enter" && (e.metaKey || e.ctrlKey) && !e.nativeEvent.isComposing) { e.preventDefault(); send(); } }} />
-        <button className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-zinc-900 text-white disabled:bg-zinc-300" aria-label="チャットを送る" disabled={pending || !text.trim() || files.busy} onClick={send}><ArrowUp size={18} /></button>
+        <button className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-zinc-900 text-white disabled:bg-zinc-300" aria-label="チャットを送る" disabled={busy || !text.trim() || files.busy} onClick={send}><ArrowUp size={18} /></button>
       </div>
     </div>
   );

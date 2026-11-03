@@ -9,7 +9,7 @@ export type Tab = "chat" | "approve" | "progress";
 
 // ホーム（ファクトリー全体・プロダクト）：上で チャット｜承認｜進捗 を切り替える。入力欄はどれを選んでいても下にある
 export function MobileHome({ progressLabel, progress }: { progressLabel: string; progress: React.ReactNode }) {
-  const { msgs, pending, replace } = useMobile();
+  const { msgs, pending, replace, live } = useMobile();
   const sp = useSearchParams();
   const path = usePathname();
   const router = useRouter();
@@ -31,7 +31,7 @@ export function MobileHome({ progressLabel, progress }: { progressLabel: string;
           {seg("progress", progressLabel)}
         </div>
       </div>
-      {tab === "chat" && <Feed msgs={msgs} onChanged={replace} />}
+      {tab === "chat" && <Feed msgs={msgs} live={live} onChanged={replace} />}
       {tab === "approve" && (waiting.length ? <Feed msgs={waiting} onChanged={(m) => { setKept((k) => [...k, m.id]); replace(m); }} />
         : <p className="px-5 py-10 text-center text-[13px] text-zinc-400">承認待ちはありません。エージェントが何かを変えるときは、ここに承認依頼が届きます。</p>)}
       {tab === "progress" && <div className="px-3 pb-6">{progress}</div>}

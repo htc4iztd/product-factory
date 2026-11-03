@@ -270,3 +270,59 @@ def test_html_attachment(client):
     pr = proto.get(pid)
     assert pr["html"] == doc and pr["source"] == "import"
     assert up("big.html", b"<html>" + b"a" * 1_600_000).status_code == 413
+
+
+def test_stream(client):
+    """チャットを流して出す：PdM の発言 → 答える人 → していること → 返事の文章（少しずつ）→ 答え の順に1行ずつ届く。
+    流した文章をつなぐと、残った返事と同じになる。"""
+    import json
+
+    c = client
+    pid = c.post("/products", headers=H, json={"name": "流す", "idea": "家計簿"}).json()["id"]
+    wait_idle(c, pid)
+    r = c.post("/assistant/messages/stream", headers=H, json={"path": f"/p/{pid}", "text": "いまの状況を教えて"})
+    assert r.status_code == 200 and r.headers["content-type"].startswith("application/x-ndjson")
+    evs = [json.loads(x) for x in r.text.splitlines() if x.strip()]
+    kinds = [e["type"] for e in evs]
+    assert kinds[0] == "user" and kinds[1] == "route" and "step" in kinds and kinds[-1] == "done"
+    assert evs[0]["message"]["text"] == "いまの状況を教えて" and evs[1]["agent_name"]
+    deltas = [e["text"] for e in evs if e["type"] == "delta"]
+    assert len(deltas) > 1 and "".join(deltas) == evs[-1]["reply"]["text"]
+    # 失敗も流して伝える
+    r = c.post("/assistant/messages/stream", headers=H, json={"path": f"/p/{pid}", "text": "x", "attachments": [999]})
+    evs = [json.loads(x) for x in r.text.splitlines() if x.strip()]
+    assert evs[-1]["type"] == "error" and evs[-1]["status"] == 404
+
+
+def test_think_stream_parts(monkeypatch):
+    """返事の文章だけを流し、区切り（<<<JSON>>>）が途中で切れても出さない。JSON から承認依頼を読む。
+    JSON が崩れたら、出し直しを知らせて、決まった形でもう一度作る。"""
+    from types import SimpleNamespace
+
+    from pf_agent import agentrun, llm
+    from pf_agent.assistant import AssistantReply
+
+    prep = SimpleNamespace(lo=SimpleNamespace(reads=[]), ctx=None)
+    conn = SimpleNamespace(chat_model="m")
+    monkeypatch.setattr(llm, "tool_loop", lambda *a, **k: "")
+    chunks = ["## 状況\n進んで", "います。", "\n<<<JS", 'ON>>>\n{"actions": [{"type": "schedule", "keys": ["s01"], ',
+              '"cron": "0 9 * * *"}], "evidence": ["stage:s01"]}']
+
+    def fake(conn, model, prompt, on_delta):
+        assert "<<<JSON>>>" in prompt
+        for ch in chunks:
+            on_delta(ch)
+        return "".join(chunks)
+
+    monkeypatch.setattr(llm, "stream_text", fake)
+    evs = []
+    out = agentrun.think_stream(conn, prep, "p", AssistantReply, evs.append)
+    text = "".join(e["text"] for e in evs if e["type"] == "delta")
+    assert text.strip() == "## 状況\n進んでいます。" and "<<<" not in text
+    assert out.reply == "## 状況\n進んでいます。" and out.actions[0].type == "schedule"
+    assert out.evidence == ["stage:s01"]
+    chunks[:] = ["こんにちは", "\n<<<JSON>>>\n{壊れた"]
+    monkeypatch.setattr(llm, "_json", lambda *a, **k: AssistantReply(reply="作り直した返事"))
+    evs.clear()
+    out = agentrun.think_stream(conn, prep, "p", AssistantReply, evs.append)
+    assert out.reply == "作り直した返事" and any(e["type"] == "reset" for e in evs)

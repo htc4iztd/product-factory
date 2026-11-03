@@ -39,3 +39,11 @@
 @keyframes pf-spin { to { --pf-a: 360deg; } }
 /* 工程グループの色：事業・要求設計・構築・リリース */
 .pf-g-biz { --pf-g: #f59e0b; } .pf-g-design { --pf-g: #6366f1; } .pf-g-build { --pf-g: #10b981; } .pf-g-release { --pf-g: #f43f5e; }
+
+/* チャット：届いた発言がふわっと出る・考え中の点・流れている文章の後ろのカーソル */
+@keyframes pf-rise { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
+@keyframes pf-dot { 0%, 60%, 100% { opacity: .25; transform: translateY(0); } 30% { opacity: 1; transform: translateY(-2px); } }
+@keyframes pf-caret { 50% { opacity: 0; } }
+.pf-rise { animation: pf-rise .28s cubic-bezier(.2,.8,.2,1) both; }
+.pf-caret > :last-child::after { content: ""; display: inline-block; width: .5em; height: 1em; margin-left: 2px; vertical-align: -0.15em; background: currentColor; opacity: .6; animation: pf-caret 1s steps(1) infinite; }
+@media (prefers-reduced-motion: reduce) { .pf-rise, .pf-caret > :last-child::after { animation: none; } }
