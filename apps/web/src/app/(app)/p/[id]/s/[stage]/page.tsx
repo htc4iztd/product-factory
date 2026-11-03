@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { ArrowRight, Lock, Target } from "lucide-react";
-import { agent, AgentError, type FrameworkDefT, type StageDetail, type VariantStage } from "@/lib/agent";
+import { agent, AgentError, type FrameworkDefT, type Overview, type StageDetail, type VariantStage } from "@/lib/agent";
 import { auth } from "@/lib/auth";
 import { PatternStageBar } from "@/components/autodev/PatternStageBar";
 import { StatusBadge, StatusDot } from "@/components/StatusBadge";
@@ -9,6 +9,7 @@ import { DocEditor } from "@/components/stage/DocEditor";
 import { ApprovalPanel, ClosedBanner, CommitButton, RecheckBanner } from "@/components/stage/StageActions";
 import { AutodevButton } from "@/components/autodev/AutodevButton";
 import { ChatToggle } from "@/components/assistant/AssistantShell";
+import { ExportMenu } from "@/components/stage/ExportMenu";
 
 type Props = { params: Promise<{ id: string; stage: string }>; searchParams: Promise<{ tab?: string; session?: string; pp?: string }> };
 
@@ -18,9 +19,10 @@ export default async function StagePage({ params, searchParams }: Props) {
   const { id, stage } = await params;
   const sp = await searchParams;
   const tab = sp.tab ?? "canvas";
-  const [main, lib] = await Promise.all([
+  const [main, lib, ov] = await Promise.all([
     agent<StageDetail>(`/products/${id}/stages/${stage}${sp.session ? `?session=${encodeURIComponent(sp.session)}` : ""}`),
     agent<{ frameworks: FrameworkDefT[] }>("/frameworks").catch(() => ({ frameworks: [] as FrameworkDefT[] })),
+    agent<Overview>(`/products/${id}`).catch(() => null),
   ]);
   // 案（プリプロダクト）のタブ：その案の、このステージの下書きを本線と同じ画面で見る
   const pp = sp.pp && main.variants.some((v) => String(v.number) === sp.pp)
@@ -64,6 +66,10 @@ export default async function StagePage({ params, searchParams }: Props) {
             {st.enabled && !awaiting && !pp && (
               <CommitButton pid={id} sid={stage} missing={st.missing} dirty={st.dirty} approval={st.approval_required} hasVersion={st.current_version > 0} />
             )}
+            {!pp && <ExportMenu printHref={`/print/p/${id}/s/${stage}`} doc={{
+              title: `${st.no} ${st.name}`, subtitle: `${ov?.product.name ?? ""}・${st.framework.title}${st.approved_version ? `・v${st.approved_version}` : ""}`,
+              markdown: st.markdown, filename: `${ov?.product.name ?? "product"}_${st.no}${st.name}`.replace(/[\\/:*?"<>|\s]+/g, "_"),
+            }} />}
             <ChatToggle />
           </div>
         </div>

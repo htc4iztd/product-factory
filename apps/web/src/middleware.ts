@@ -6,7 +6,7 @@ import { isMobile } from "@/lib/mobile";
 const { auth } = NextAuth(authConfig);
 
 // スマホのときは、同じ URL のまま、スマホ専用の骨組み（/m 以下）を出す（lib/mobile の isMobile で決める）
-const NO_REWRITE = ["/m", "/api", "/login", "/register", "/ide", "/_next"];
+const NO_REWRITE = ["/m", "/api", "/login", "/register", "/ide", "/_next", "/print"];
 
 export default auth((req) => {
   const { pathname, search } = req.nextUrl;

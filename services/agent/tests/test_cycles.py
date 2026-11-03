@@ -205,7 +205,8 @@ def test_release_after_review(env, monkeypatch):
     cycles.check_all()
     wait_idle(c, p.id)
     r = c.post(P + "/review/complete", headers=H, json={"next": "release"}).json()
-    assert r["state"] == "onboarding"
+    # リリースエージェントの定義はジョブで動く。返事より先に終わることもあるので、どちらかの状態ならよい
+    assert r["state"] in ("onboarding", "prerelease")
     wait_idle(c, p.id)
     v = c.get(P + "/release", headers=H).json()
     assert v["state"] == "prerelease" and v["current"]["release"]["status"] == "review"
