@@ -13,6 +13,7 @@ from . import (  # noqa: F401  ジョブの処理を登録する
     jobs,
     meetings,
     pms,
+    proto,
     releases,
     reports,
     research,

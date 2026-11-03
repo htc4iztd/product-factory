@@ -184,6 +184,11 @@ class Engine:
 
     def set_field(self, product: Product, stage_id: str, user: str, key: str, value) -> None:
         self._stage(product, stage_id)
+        if stage_id == "s06" and key == "ui" and isinstance(value, dict) and "proto" not in value:
+            # 画面の部品のエディタは pages だけを送る。プロトタイプ（1つの HTML）はそのまま残す
+            old = (repo.draft(product.id, "s06").get("ui") or {}).get("proto")
+            if old:
+                value = {**value, "proto": old}
         try:
             repo.set_field(product.id, stage_id, key, value, user, "edit")
         except KeyError:

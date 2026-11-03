@@ -29,6 +29,7 @@ from . import (
     ontology,
     personas,
     platform_agent,
+    proto,
     releases,
     reports,
     research,
@@ -99,6 +100,11 @@ async def _approval_error(_, exc: approvals.ApprovalError):
 @app.exception_handler(assistant.AssistantError)
 async def _assistant_error(_, exc: assistant.AssistantError):
     return JSONResponse(status_code=exc.status, content={"detail": exc.message})
+
+
+@app.exception_handler(proto.ProtoError)
+async def _proto_error(_, exc: proto.ProtoError):
+    return JSONResponse(status_code=422, content={"detail": str(exc)})
 
 
 @app.exception_handler(personas.ProfileError)
@@ -483,6 +489,36 @@ def set_field(product_id: str, stage_id: str, body: FieldValue, c: Caller = Depe
     p = _stage_product(c, product_id, stage_id, "create")
     engine.set_field(p, stage_id, c.user, body.field, body.value)
     return engine.stage_detail(p, stage_id)
+
+
+class ProtoBody(BaseModel):
+    html: str | None = None
+    comments: list[dict] | None = None
+    source: str | None = None
+
+
+class ProtoGenerate(BaseModel):
+    note: str = ""
+
+
+@app.put("/products/{product_id}/ui/proto")
+def put_proto(product_id: str, body: ProtoBody, c: Caller = Depends(caller)):
+    """⑥のプロトタイプ（1つの HTML）とコメントを保存する。渡さなかったものはそのまま。画面ごとの UI は変えない。"""
+    p = _stage_product(c, product_id, "s06", "create")
+    engine._stage(p, "s06")
+    html = None if body.html is None else (proto.check(body.html) if body.html.strip() else "")
+    try:
+        return proto.save(p.id, c.user, html=html, comments=body.comments, source=body.source)
+    except (ValueError, TypeError) as e:
+        raise FactoryError(422, f"値の形が合いません：{e}") from None
+
+
+@app.post("/products/{product_id}/ui/proto/generate")
+def generate_proto(product_id: str, body: ProtoGenerate, c: Caller = Depends(caller)):
+    """⑥の内容から、AI にプロトタイプを書かせる（ジョブ）。できたら設計PM がチャットで承認依頼を出す。"""
+    p = _stage_product(c, product_id, "s06", "create")
+    engine._stage(p, "s06")
+    return proto.start(p, c.user, body.note)
 
 
 @app.post("/products/{product_id}/stages/s13/import-acceptance")

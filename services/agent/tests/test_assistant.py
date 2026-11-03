@@ -223,3 +223,55 @@ def test_ui_comment_to_ai(client):
     pages = repo.draft(pid, "s06")["ui"]["pages"]
     assert len(pages) == 2 and "ボタンを大きく" in pages[0]["html"] and 'data-go="list"' in pages[0]["html"]
     assert pages[0]["comments"][0]["status"] == "applied"
+
+
+def test_ui_proto(client):
+    """プロトタイプ（1つの HTML）：保存しても画面ごとの UI は残る。AI に作らせると設計PM が承認依頼を出し、
+    承認すると入る。コメントを AI に送ると一部だけの書き換え（edits）の承認依頼が出て、
+    承認でコメントは反映済みになる。"""
+    from pf_agent import proto, repo
+
+    c = client
+    pid = c.post("/products", headers=H, json={"name": "動く見本", "idea": "家計簿"}).json()["id"]
+    wait_idle(c, pid)
+    repo.set_field(pid, "s06", "ui", {"pages": [{"id": "home", "name": "ホーム", "html": "<main>h</main>"}]},
+                   "owner@example.com", "human")
+    repo.set_field(pid, "s06", "screens", [{"id": "SC-01", "name": "ホーム", "purpose": "残りを見る"},
+                                           {"id": "SC-02", "name": "明細", "purpose": "中身を見る"}],
+                   "owner@example.com", "human")
+    # AI に作らせる（ジョブ）→ 設計PM の承認依頼 → 承認で入る
+    j = c.post(f"/products/{pid}/ui/proto/generate", headers=H, json={"note": "スマホで"}).json()
+    wait_idle(c, pid)
+    assert c.get(f"/jobs/{j['id']}", headers=H).json()["status"] == "done"
+    msgs = c.get(f"/assistant/messages?product={pid}", headers=H).json()
+    m = next(x for x in msgs if any(a["type"] == "ui_proto" for a in x["actions"]))
+    a = m["actions"][0]
+    assert m["agent"] == "pm_design" and '"next": "sc02"' in a["preview"]["doc"]
+    c.post(f"/assistant/messages/{m['id']}/actions/{a['id']}", headers=H, json={"approve": True})
+    ui = repo.draft(pid, "s06")["ui"]
+    assert "明細" in ui["proto"]["html"] and ui["proto"]["source"] == "ai" and ui["pages"][0]["id"] == "home"
+    # コメントを保存（HTML はそのまま）。画面ごとの UI も残る
+    cm = {"id": "c1", "target": "div > button", "label": "ボタン「次へ」", "text": "もっと目立たせて",
+          "status": "sent", "context": "ホーム", "by": "owner@example.com"}
+    r = c.put(f"/products/{pid}/ui/proto", headers=H, json={"comments": [cm]}).json()
+    assert r["comments"][0]["context"] == "ホーム" and "明細" in r["html"]
+    # 開いているプロトタイプへのコメントを AI に送る → edits の承認依頼 → 承認で反映済み
+    rep = say(c, f"/p/{pid}/s/s06/ui?mode=proto", "ボタン「次へ」：もっと目立たせて").json()["reply"]
+    a = rep["actions"][0]
+    assert len(rep["actions"]) == 1 and a["type"] == "ui_proto" and a["args"]["edits"]
+    assert "もっと目立たせて" in a["preview"]["doc"]
+    c.post(f"/assistant/messages/{rep['id']}/actions/{a['id']}", headers=H, json={"approve": True})
+    pr = proto.get(pid)
+    assert "（スタブ）修正" in pr["html"] and pr["comments"][0]["status"] == "applied"
+    # 画面ごとの UI を承認で書き換えても、プロトタイプは残る
+    rep = say(c, f"/p/{pid}/s/s06/ui?page=home", "見出しを直して").json()["reply"]
+    c.post(f"/assistant/messages/{rep['id']}/actions/{rep['actions'][0]['id']}", headers=H, json={"approve": True})
+    assert proto.get(pid)["html"] == pr["html"]
+    # 画面の部品のエディタの保存（pages だけ）でも、プロトタイプは残る
+    c.put(f"/products/{pid}/stages/s06/draft", headers=H, json={"field": "ui", "value": {"pages": []}})
+    assert proto.get(pid)["html"] == pr["html"] and repo.draft(pid, "s06")["ui"]["pages"] == []
+    # 当てられない書き換えは止める
+    with pytest.raises(proto.ProtoError):
+        proto.apply_edits("<p>a</p><p>a</p>", [{"old": "<p>a</p>", "new": "x"}])
+    assert c.put(f"/products/{pid}/ui/proto", headers=H, json={"html": "ただの文字"}).status_code == 422
+    assert c.put(f"/products/{pid}/ui/proto", headers=VIEWER, json={"html": "<html></html>"}).status_code == 403

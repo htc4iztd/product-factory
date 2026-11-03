@@ -1,5 +1,6 @@
-// UI のプロトタイプ：画面を通しで見る → ボタン（data-go）・リンクで画面が移る・戻る
-// → コメントのモードで部品を押してコメント → AI（設計PM）に送る → チャットに書き換えの承認依頼 → 承認 → 画面が直り、コメントは「反映済み」
+// UI のプロトタイプ（画面の移り方まで操作できる1つの HTML）：画面の部品から「まとめる」→ 押して画面が移る・戻る
+// → 部品にコメントして AI（設計PM）に送る → 一部を直す承認依頼 → 承認で直り「反映済み」
+// → 「AI で作る」→ 設計PM の承認依頼 → 承認で入れ替わる → script を含む HTML を取り込んで動く
 // 使い方: BASE=http://localhost:3000 SHOTS=./shots node e2e/proto.mjs
 import { chromium } from "playwright";
 import fs from "node:fs";
@@ -10,6 +11,7 @@ fs.mkdirSync(SHOTS, { recursive: true });
 const browser = await chromium.launch();
 const page = await browser.newPage({ viewport: { width: 1680, height: 1000 } });
 page.setDefaultTimeout(30000);
+page.on("dialog", (d) => d.accept());
 const shot = (n) => page.screenshot({ path: `${SHOTS}/${n}.png` });
 const btn = (name, exact = false) => page.getByRole("button", { name, exact });
 
@@ -45,51 +47,68 @@ for (const html of [
 await ed.getByRole("button", { name: "保存" }).click();
 await ed.getByText("保存しました").waitFor();
 
-// プロトタイプ：押して移る・戻る
+// プロトタイプ：画面からまとめる → 押して移る・戻る
 await page.getByRole("link", { name: "プロトタイプ", exact: true }).click();
 await page.waitForURL(/mode=proto/);
 const pr = page.getByLabel("プロトタイプ", { exact: true });
 const fr = page.frameLocator('iframe[title="プロトタイプの画面"]');
-await pr.getByRole("button", { name: "ホーム" }).click();
+await pr.getByRole("button", { name: "画面からまとめる" }).last().click();
+await pr.getByText(/画面からまとめました/).waitFor();
 await fr.getByText("今月の家計").waitFor();
-await pr.getByLabel("設計メモ").getByRole("button", { name: /明細を見る → 一覧/ }).waitFor();
-await fr.getByText("明細を見る").click();
+await fr.getByRole("button", { name: "明細を見る" }).click();
 await fr.getByText("明細の一覧").waitFor();
-if (!(await pr.getByLabel("いまの画面").textContent()).includes("一覧")) throw new Error("一覧に移っていない");
 await fr.getByText("ホームへ戻る").click();
 await fr.getByText("今月の家計").waitFor();
-await pr.getByRole("button", { name: "前の画面に戻る" }).click();
+await fr.getByRole("button", { name: "← 前の画面" }).click();
 await fr.getByText("明細の一覧").waitFor();
-await pr.getByRole("button", { name: "前の画面に戻る" }).click();
+// 案内の画面の一覧（狭いときは選択欄）から飛ぶ
+if (await fr.locator("#steps").isVisible()) await fr.locator("[data-jump]").first().click();
+else await fr.getByLabel("画面へ移動").selectOption({ index: 0 });
 await fr.getByText("今月の家計").waitFor();
 await shot("p1-proto");
 
-// コメント：部品を押す → コメントを書いて AI に送る
-await pr.getByRole("button", { name: "コメント" }).click();
-await fr.getByText("明細を見る").click();
+// コメント：部品を押す → AI に送る → 一部を直す承認依頼 → 承認で直り、反映済み
+await pr.getByRole("button", { name: "コメント", exact: true }).click();
+await fr.getByRole("button", { name: "明細を見る" }).click();
 const pop = pr.getByRole("dialog", { name: "コメントを書く" });
-await pop.getByText(/ボタン「明細を見る」/).waitFor();
+await pop.getByText(/button「明細を見る」/).waitFor();
+if (!(await fr.getByText("今月の家計").isVisible())) throw new Error("コメント中に画面が移った");
 await pop.getByLabel("コメント").fill("このボタンをもっと大きく");
 await pop.getByRole("button", { name: "送る" }).click();
 await pr.getByText("AI に依頼中").waitFor();
-if ((await fr.locator(".pf-pin").count()) !== 1) throw new Error("ピンが出ていない");
-// 押しても画面は移らない（コメント中）
-if (!(await pr.getByLabel("いまの画面").textContent()).includes("ホーム")) throw new Error("コメント中に移ってしまった");
+await fr.locator(".pf-pin").first().waitFor();
 await shot("p2-comment");
-
-// チャットに書き換えの承認依頼 → 承認 → 画面が直り、コメントは反映済み
-const card = page.getByRole("group", { name: /承認依頼：UI デザイン「ホーム」を書き換える/ }).last();
-await card.getByText("下見（変更後）").waitFor();
+let card = page.getByRole("group", { name: /承認依頼：UI のプロトタイプを直す/ }).last();
+await card.getByText("下見（変更後。押して動かせます）").waitFor();
 await card.getByRole("button", { name: "承認", exact: true }).click();
 await card.getByText(/承認しました/).waitFor();
 await pr.getByText("反映済み").waitFor();
 await fr.getByText(/（スタブ）修正/).waitFor();
-await fr.getByRole("button", { name: "明細を見る" }).waitFor();
 await shot("p3-applied");
+await pr.getByRole("button", { name: "コメント中" }).click();
 
-// 解決にすると、ピンが消える
-await pr.getByRole("button", { name: "解決" }).click();
-await pr.getByText("解決", { exact: true }).waitFor();
-await page.waitForFunction(() => !document.querySelector('iframe[title="プロトタイプの画面"]')?.contentDocument?.querySelector(".pf-pin"));
+// AI で作る → 設計PM の承認依頼 → 承認で入れ替わる（スタブは画面一覧から組む）
+await pr.getByRole("tab", { name: "作る" }).click();
+await pr.getByLabel("AI への注文").fill("スマホアプリとして");
+await pr.getByRole("button", { name: "AI で作る" }).last().click();
+card = page.getByRole("group", { name: /承認依頼：UI のプロトタイプを作り直す/ }).last();
+await card.getByRole("button", { name: "承認", exact: true }).click({ timeout: 60000 });
+await card.getByText(/承認しました/).waitFor();
+await pr.getByText(/AI が書いたもの/).waitFor();
+await fr.getByRole("button", { name: "次へ" }).waitFor();
+
+// script を含む HTML を取り込む：その script が動き、押すと移る。外への通信は止める
+await pr.getByRole("tab", { name: "作る" }).click();
+await pr.getByLabel("貼り付ける HTML").fill(`<!doctype html><html><head><title>取込</title></head><body><div id="v"></div>
+<script>let n=0;const r=()=>{document.getElementById('v').innerHTML='<h1>画面'+n+'</h1><button data-go="x">進む</button>'};
+document.addEventListener('click',e=>{if(e.target.closest('[data-go]')){n++;r();}});r();
+fetch('https://example.com/').then(()=>{document.title='leak'}).catch(()=>{document.body.dataset.blocked='1'});</script></body></html>`);
+await pr.getByRole("button", { name: "貼り付けた HTML を取り込む" }).click();
+await pr.getByText("取り込みました").waitFor();
+await fr.getByText("画面0").waitFor();
+await fr.getByRole("button", { name: "進む" }).click();
+await fr.getByText("画面1").waitFor();
+await fr.locator("body[data-blocked='1']").waitFor();
+await pr.getByRole("button", { name: "HTML をダウンロード" }).waitFor();
 console.log("proto e2e OK", pid);
 await browser.close();

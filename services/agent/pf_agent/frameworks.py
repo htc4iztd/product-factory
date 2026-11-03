@@ -392,7 +392,8 @@ def empty_draft(fw: Framework) -> dict:
 
 def is_filled(f: Field, value) -> bool:
     if f.kind == UI:
-        return any(str(p.get("html", "")).strip() for p in (value or {}).get("pages") or [])
+        return any(str(p.get("html", "")).strip() for p in (value or {}).get("pages") or []) or bool(
+            str(((value or {}).get("proto") or {}).get("html") or "").strip())
     if f.kind == MX:
         return any(str(x).strip() for q in (value or {}).values() for x in (q or []))
     if f.kind == PS:
@@ -514,12 +515,30 @@ def _coerce_comments(raw) -> list[dict]:
             "x": max(0.0, min(100.0, float(c.get("x") or 0))), "y": max(0.0, min(100.0, float(c.get("y") or 0))),
             "by": str(c.get("by") or "")[:200], "at": str(c.get("at") or "")[:40],
             "msg_id": int(c["msg_id"]) if str(c.get("msg_id") or "").isdigit() else None,
+            "context": str(c.get("context") or "")[:300],
         })
     return out
 
 
+PROTO_MAX = 1_500_000
+
+
+def coerce_proto(raw) -> dict | None:
+    """プロトタイプ：画面の移り方まで操作できる、1つの HTML（script を含む。表示は隔離した枠の中だけ）。
+    {html, comments, source（assembled・ai・import・edit）, at}"""
+    if not isinstance(raw, dict):
+        return None
+    html = str(raw.get("html") or "")
+    if len(html) > PROTO_MAX:
+        raise ValueError("プロトタイプの HTML が大きすぎます（1.5MB まで）")
+    src = raw.get("source") if raw.get("source") in ("assembled", "ai", "import", "edit") else "edit"
+    return {"html": html, "comments": _coerce_comments(raw.get("comments")), "source": src,
+            "at": str(raw.get("at") or "")[:40]}
+
+
 def coerce_ui(value) -> dict:
-    """{pages: [{id, name, screen, html, css, project, comments}]}。画面の移り方は、要素の data-go（移り先の画面の
+    """{pages: [{id, name, screen, html, css, project, comments}], proto: {html, comments, …}}。
+    画面の移り方は、要素の data-go（移り先の画面の
     id・名前・SC-xx）で表す。comments はプロトタイプで部品を指して書いた修正の指示。"""
     if isinstance(value, str):
         value = json.loads(value) if value.strip() else {}
@@ -542,7 +561,11 @@ def coerce_ui(value) -> dict:
         pages.append({"id": pid, "name": str(p.get("name") or f"画面{i + 1}")[:120],
                       "screen": str(p.get("screen") or "")[:20], "html": html, "css": css, "project": project,
                       "comments": _coerce_comments(p.get("comments"))})
-    return {"pages": pages}
+    out: dict = {"pages": pages}
+    proto = coerce_proto(value.get("proto"))
+    if proto is not None:
+        out["proto"] = proto
+    return out
 
 
 def ui_text(html: str, limit: int = 600) -> str:
@@ -760,6 +783,8 @@ def to_markdown(stage: Stage, fw: Framework, draft: dict) -> str:
             pages = (v or {}).get("pages") or []
             lines += [f"- {p['name']}{'（' + p['screen'] + '）' if p.get('screen') else ''}：{ui_text(p['html'], 300)}"
                       for p in pages] or ["（未記入）"]
+            if ((v or {}).get("proto") or {}).get("html"):
+                lines.append(f"- プロトタイプ（画面遷移を操作できる1つの HTML）：{ui_text(v['proto']['html'], 300)}")
         elif f.kind in dz.KINDS:
             lines += dz.markdown(f.kind, v, draft) or ["（未記入）"]
         else:

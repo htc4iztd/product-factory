@@ -27,7 +27,7 @@ from .team import DOMAIN, KEYS, PM_OF, PMS, TeamError, _iso, name_of
 RESPONDERS = (*PMS, "platform")
 ACTION_TYPES = (
     "set_field", "issue_create", "issue_update", "schedule", "agent_enabled", "platform_act", "ui_page",
-    "stage_complete",
+    "stage_complete", "ui_proto",
 )
 STATUS_JA = {"not_started": "未着手", "in_progress": "作業中", "awaiting_approval": "承認待ち", "revising": "修正中",
              "completed": "更新済み（完了）", "skipped": "使わない", "needs_recheck": "要再確認"}
@@ -71,6 +71,9 @@ def parse_path(path: str) -> dict:
         st = STAGE_BY_ID[parts[1]]
         q = dict(x.split("=", 1) for x in (path.split("?", 1)[1] if "?" in path else "").split("&") if "=" in x)
         page = re.sub(r"[^A-Za-z0-9_-]", "", q.get("page", ""))[:40]
+        if q.get("mode") == "proto":  # プロトタイプ（1つの HTML）を開いている
+            return {**ctx, "kind": "ui", "stage_id": st.id, "label": f"{st.no}{st.name}の UI プロトタイプ",
+                    "proto": True}
         return {**ctx, "kind": "ui", "stage_id": st.id, "label": f"{st.no}{st.name}の UI エディタ",
                 **({"page_id": page} if page else {})}
     if parts[:1] == ["s"] and len(parts) > 1 and parts[1] in STAGE_BY_ID:
@@ -157,10 +160,15 @@ class _Route(BaseModel):
 
 
 # ---------------- 答えと承認依頼 ----------------
+class EditOut(BaseModel):
+    old: str = Field(description="いまの HTML にちょうど1回出てくる、書き換える部分（前後を含めて一意にする）")
+    new: str = Field(description="書き換えたあとの文字列")
+
+
 class ActionOut(BaseModel):
     type: str = Field(
         description="set_field | issue_create | issue_update | schedule | agent_enabled | platform_act | ui_page"
-        " | stage_complete"
+        " | stage_complete | ui_proto"
     )
     stages: list[str] = Field(default_factory=list, description="stage_complete：確定する工程（s01〜s14）")
     stage_id: str = ""
@@ -179,6 +187,7 @@ class ActionOut(BaseModel):
     screen: str = Field(default="", description="ui_page：画面一覧の ID（SC-01 など）")
     html: str = Field(default="", description="ui_page：画面の HTML（body の中身）")
     css: str = Field(default="", description="ui_page：画面の CSS")
+    edits: list[EditOut] = Field(default_factory=list, description="ui_proto：プロトタイプの HTML の一部の書き換え")
     reason: str = ""
 
 
@@ -324,6 +333,8 @@ def prepare_action(tenant: str, product: Product | None, responder: str, a: Acti
                 "css": a.css[:200_000],
             },
         }
+    if a.type == "ui_proto":
+        return _prepare_proto(product, base, a)
     if a.type == "stage_complete":
         return _prepare_complete(product, base, a)
     if a.type == "platform_act":
@@ -340,6 +351,31 @@ def prepare_action(tenant: str, product: Product | None, responder: str, a: Acti
             "args": {"finding": a.number},
         }
     raise ValueError(f"知らない変更の種類：{a.type}")
+
+
+def _prepare_proto(product: Product | None, base: dict, a: ActionOut) -> dict:
+    """プロトタイプ（1つの HTML）の書き換え：edits（一部だけ）か html（全体）。下見は書き換えたあとの全体。"""
+    from . import proto
+
+    if product is None:
+        raise ValueError("プロダクトを開いてから指示してください")
+    cur = proto.get(product.id).get("html", "")
+    edits = [e.model_dump() for e in a.edits]
+    if edits:
+        if not cur:
+            raise ValueError("まだプロトタイプがありません。先に作ってください")
+        new = proto.check(proto.apply_edits(cur, edits))
+    else:
+        new = proto.check(a.html)
+    return {
+        **base,
+        "title": "UI のプロトタイプを" + ("直す" if edits else "作り直す" if cur else "作る"),
+        "before": ("\n".join(f"- {e['old'][:300]}" for e in edits) if edits
+                   else (fx.ui_text(cur, 400) or "（まだありません）")),
+        "after": "\n".join(f"- {e['new'][:300]}" for e in edits) if edits else fx.ui_text(new, 400),
+        "preview": {"doc": new} if len(new) <= 400_000 else None,
+        "args": {"html": "" if edits else new, "edits": edits, "source": "ai"},
+    }
 
 
 def _prepare_complete(product: Product | None, base: dict, a: ActionOut) -> dict:
@@ -411,6 +447,18 @@ def _material(product: Product | None, ctx: dict, mentions: list[dict]) -> str:
         parts.append(tl.call(t, "stage_fields", {"stage_id": ctx["stage_id"]}))
     if k == "issue":
         parts.append(tl.call(t, "issue_read", {"number": ctx["number"]}))
+    if k == "ui" and ctx.get("proto"):  # プロトタイプ（1つの HTML）：全体と、まだ反映していないコメント
+        from . import proto
+
+        pr = proto.get(product.id)
+        cms = [c for c in pr.get("comments") or [] if c.get("status") in ("open", "sent")]
+        parts.append("## いま開いているプロトタイプ（1つの HTML。直すなら ui_proto の edits で一部だけ書き換える）\n"
+                     f"```html\n{pr.get('html', '')[:150000]}\n```")
+        if cms:
+            parts.append("## プロトタイプへのコメント（まだ反映していないもの）\n" + "\n".join(
+                f"- {c['label']}（{c['target']}{'・' + c['context'] if c.get('context') else ''}）：{c['text']}"
+                for c in cms))
+        return "\n\n".join(parts)[:170000]
     if k == "ui":  # UI の画面の一覧と、いま開いている画面の HTML（直すときは page_id で書き換える）
         pages = (repo.draft(product.id, "s06").get("ui") or {}).get("pages") or []
         parts.append("## UI の画面（id・名前・画面一覧の ID）\n" + "\n".join(
@@ -441,7 +489,16 @@ def _stub(product: Product | None, ctx: dict, responder: str, text: str) -> Assi
     where = ctx.get("label", "")
     acts: list[ActionOut] = []
     cur_page = None
-    if ctx["kind"] == "ui" and product is not None and ctx.get("page_id"):
+    if ctx["kind"] == "ui" and product is not None and ctx.get("proto"):
+        from . import proto
+
+        html = proto.get(product.id).get("html", "")
+        if html.count("</body>") == 1:  # スタブ：指示を本文の末尾に書き足す（edits で一部だけ書き換える）
+            note = re.sub(r"[<>&]", "", text[:80])
+            new = f'<p class="pf-stub">（スタブ）修正：{note}</p></body>'
+            acts.append(ActionOut(type="ui_proto", edits=[EditOut(old="</body>", new=new)],
+                                  reason="コメントの指示でプロトタイプを直しました"))
+    elif ctx["kind"] == "ui" and product is not None and ctx.get("page_id"):
         pages = (repo.draft(product.id, "s06").get("ui") or {}).get("pages") or []
         cur_page = next((p for p in pages if p["id"] == ctx["page_id"]), None)
     if cur_page is not None:
@@ -450,7 +507,7 @@ def _stub(product: Product | None, ctx: dict, responder: str, text: str) -> Assi
         acts.append(ActionOut(type="ui_page", page_id=cur_page["id"], subject=cur_page["name"], html=html,
                               css=cur_page.get("css", ""), screen=cur_page.get("screen", ""),
                               reason="コメントの指示で画面を直しました"))
-    elif ctx["kind"] == "ui" and product is not None:
+    elif ctx["kind"] == "ui" and product is not None and not ctx.get("proto"):
         # UI エディタで話すと、言葉から画面を組んで承認依頼にする（スタブ：決まった部品で組む）
         title = re.sub(r"(画面|ページ)?を?(作って|作る|直して|変えて|にして).*$", "", text.strip())[:40] or "新しい画面"
         html = (
@@ -547,6 +604,11 @@ def _prompt(
         "フォントは使わない。押すと別の画面に移るボタン・リンク・タブには data-go=\"移り先の画面の id か名前\" を付ける"
         "（プロトタイプで画面遷移できるように）。開いている画面へのコメント・指示なら、その画面の page_id で書き換え、"
         "指された部品だけを直して、ほかは変えない）。"
+        "ui_proto（⑥UIのプロトタイプ＝画面の移り方まで操作できる1つの HTML。"
+        "edits に {old, new} を並べて一部だけ書き換える。"
+        "old はいまの HTML にちょうど1回出てくる部分を、前後も含めてそのまま写す。コメントで指された部品と、その指示に"
+        "必要なところだけを直し、ほかは変えない。"
+        "全体を作り直すときは、プロトタイプの画面の「AI で作る」を使うよう案内する）。"
         "質問への答えだけなら空にする。\n\n"
         + (f"## ページの中身\n{material}\n\n" if material else "")
         + (f"## 添えられたもの\n{extra}\n\n" if extra else "")
@@ -804,8 +866,16 @@ def _execute(tenant: str, product: Product | None, user: str, a: dict) -> str:
             "comments": comments,
         }
         pages = [page if p["id"] == pid else p for p in pages] if any(p["id"] == pid for p in pages) else [*pages, page]
-        repo.set_field(product.id, "s06", "ui", {"pages": pages}, user, "chat")
+        repo.set_field(product.id, "s06", "ui", {**cur, "pages": pages}, user, "chat")
         return f"UI デザインの「{x['name']}」に反映しました"
+    if a["type"] == "ui_proto":
+        from . import proto
+
+        cur = proto.get(product.id)
+        html = proto.apply_edits(cur.get("html", ""), x["edits"]) if x.get("edits") else x["html"]
+        proto.save(product.id, user, html=proto.check(html), comments=proto.mark_applied(cur.get("comments") or []),
+                   source=x.get("source") or "ai", by="chat")
+        return "UI のプロトタイプに反映しました"
     if a["type"] == "platform_act":
         from . import platform_agent as pa
 

@@ -8,6 +8,7 @@ import { Avatar } from "@/components/rail/Avatar";
 import { AttachButton, AttachChips, SentAttachments, useAttachments } from "@/components/chat/Attachments";
 import { ResearchImport } from "@/components/chat/ResearchImport";
 import { srcDoc } from "@/lib/uikit";
+import { withBridge } from "@/lib/protoBridge";
 import { ValueDiff, summarize } from "@/components/diff/ValueDiff";
 
 const POLL_MS = 4000;
@@ -215,12 +216,19 @@ function ActionCard({ m, a, onChanged }: { m: AssistantMsg; a: ChatActionT; onCh
           <div><div className="text-[10px] text-zinc-400">変更後</div><div className="max-h-40 overflow-y-auto whitespace-pre-wrap rounded bg-emerald-50 px-2 py-1 text-zinc-900">{a.after}</div></div>
         </div>
       )}
-      {(a as ChatActionT & { preview?: { html: string; css: string } }).preview && (
+      {(a as ChatActionT & { preview?: { doc?: string } }).preview?.doc && (
+        <div className="mt-1.5 overflow-hidden rounded border border-zinc-200 bg-zinc-50">
+          <div className="px-2 py-0.5 text-[10px] text-zinc-400">下見（変更後。押して動かせます）</div>
+          <iframe title="変更後の下見" sandbox="allow-scripts" className="block h-80 w-full border-0 bg-white"
+            srcDoc={withBridge((a as ChatActionT & { preview: { doc: string } }).preview.doc)} />
+        </div>
+      )}
+      {(a as ChatActionT & { preview?: { html?: string; css: string } }).preview?.html !== undefined && (
         <div className="mt-1.5 overflow-hidden rounded border border-zinc-200 bg-zinc-50">
           <div className="px-2 py-0.5 text-[10px] text-zinc-400">下見（変更後）</div>
           <div className="relative h-48 overflow-hidden">
             <iframe title="変更後の下見" sandbox="" className="pointer-events-none absolute left-0 top-0 h-[384px] w-[200%] origin-top-left scale-50 border-0"
-              srcDoc={srcDoc((a as ChatActionT & { preview: { html: string; css: string } }).preview.html, (a as ChatActionT & { preview: { html: string; css: string } }).preview.css)} />
+              srcDoc={srcDoc((a as ChatActionT & { preview: { html: string; css: string } }).preview.html ?? "", (a as ChatActionT & { preview: { html: string; css: string } }).preview.css)} />
           </div>
         </div>
       )}
@@ -286,8 +294,10 @@ function Composer({ path, pid, incoming, onSent }: { path: string; pid: string |
     const used = mentions.filter((m) => t.includes(`@${m.label}`) || material || (quote && m.ref === quote.agent));
     start(async () => {
       // UI のプロトタイプ・エディタでは、開いている画面（?page=）も伝える
-      const pg = /\/s\/s06\/ui$/.test(path) ? new URLSearchParams(window.location.search).get("page") : null;
-      const r = await sendAssistant(pg ? `${path}?page=${encodeURIComponent(pg)}` : path, t, used, files.items.map((a) => a.id), material, quote?.id ?? null);
+      // プロトタイプ（mode=proto）なら、そのことも伝える
+      const qs = new URLSearchParams(window.location.search);
+      const ui = /\/s\/s06\/ui$/.test(path) ? (qs.get("mode") === "proto" ? "mode=proto" : qs.get("page") ? `page=${encodeURIComponent(qs.get("page")!)}` : "") : "";
+      const r = await sendAssistant(ui ? `${path}?${ui}` : path, t, used, files.items.map((a) => a.id), material, quote?.id ?? null);
       if (r.error) { setError(r.error); return; }
       setText(""); setMentions([]); setQuote(null); setError(null); files.clear();
       if (r.reply) onSent(r.reply);
