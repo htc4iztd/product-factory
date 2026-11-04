@@ -28,12 +28,19 @@ export function useChatSend(onDone: (mine: AssistantMsg, reply: AssistantMsg) =>
   done.current = onDone;
   const send = useCallback(async (body: SendBody): Promise<string | null> => {
     setLive({ text: body.text, at: Date.now(), user: null, agent: null, steps: [], reply: "", error: null });
+    // 見張り：サーバーは 15 秒ごとに合図（ping）を送る。60 秒なにも届かなければ、つながりが切れたとみなす
+    const ctl = new AbortController();
+    let quiet: ReturnType<typeof setTimeout> | undefined;
+    let stalled = false;
+    const kick = () => { clearTimeout(quiet); quiet = setTimeout(() => { stalled = true; ctl.abort(); }, 60_000); };
+    kick();
     let res: Response;
     try {
-      res = await fetch("/api/assistant/stream", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
+      res = await fetch("/api/assistant/stream", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body), signal: ctl.signal });
     } catch {
+      clearTimeout(quiet);
       setLive(null);
-      return "送れませんでした（つながりを確かめてください）";
+      return stalled ? "返事が届きません（60秒なにも来ませんでした）。もう一度送ってください" : "送れませんでした（つながりを確かめてください）";
     }
     if (!res.ok || !res.body) {
       const err = await res.json().catch(() => ({ detail: "送れませんでした" }));
@@ -46,8 +53,18 @@ export function useChatSend(onDone: (mine: AssistantMsg, reply: AssistantMsg) =>
     let failed: string | null = null;
     let finished = false;
     for (;;) {
-      const { value, done: end } = await reader.read();
+      let chunk: ReadableStreamReadResult<Uint8Array>;
+      try {
+        chunk = await reader.read();
+      } catch {
+        // 途中でつながりが切れた（サーバーの時間切れ・通信の切断・見張りの打ち切り）
+        failed = stalled ? "返事が届かなくなりました（60秒なにも来ませんでした）。もう一度送ってください"
+          : "途中でつながりが切れました。もう一度送ってください（届いていれば、チャットに出ます）";
+        break;
+      }
+      const { value, done: end } = chunk;
       if (end) break;
+      kick();
       buf += dec.decode(value, { stream: true });
       let i: number;
       while ((i = buf.indexOf("\n")) >= 0) {
@@ -65,6 +82,7 @@ export function useChatSend(onDone: (mine: AssistantMsg, reply: AssistantMsg) =>
         else if (ev.type === "done") { finished = true; done.current(ev.message as AssistantMsg, ev.reply as AssistantMsg); setLive(null); }
       }
     }
+    clearTimeout(quiet);
     if (!finished && !failed) failed = "途中で切れました（答えが届いたら、チャットに出ます）";
     // 失敗したら、届くまでの表示を消して文言を返す（入力欄に出す。残った発言は読み直しで出る）
     if (failed) setLive(null);

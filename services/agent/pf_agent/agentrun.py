@@ -87,7 +87,10 @@ def think_stream(conn, prep: Prepared, prompt: str, schema: type[BaseModel], emi
     読むツールを呼ぶたびに emit({type: step})、返事の文章は emit({type: delta})。
     文章のあとに MARK の行と JSON（actions・evidence）を書かせ、最後に schema の形にまとめる。"""
     import json
+    import logging
+    import time
 
+    t0 = time.monotonic()
     specs = [(n, tl.TOOLS[n].description, tl.TOOLS[n].schema()) for n in prep.lo.reads]
 
     def runner(name: str, args: dict) -> str:
@@ -97,6 +100,7 @@ def think_stream(conn, prep: Prepared, prompt: str, schema: type[BaseModel], emi
         return tl.call(prep.ctx, name, args)
 
     log = llm.tool_loop(conn, conn.chat_model, prompt, specs, runner, MAX_CALLS)
+    t_tools = time.monotonic() - t0
     rest = {k: v for k, v in schema.model_json_schema().get("properties", {}).items() if k != "reply"}
     defs = schema.model_json_schema().get("$defs", {})
     fmt = (
@@ -122,7 +126,21 @@ def think_stream(conn, prep: Prepared, prompt: str, schema: type[BaseModel], emi
         if i >= 0:
             buf["done"] = True
 
-    text = llm.stream_text(conn, conn.chat_model, final, on_delta)
+    first = {"at": None}
+
+    def on_first(t: str) -> None:
+        if first["at"] is None:
+            first["at"] = time.monotonic() - t0
+        on_delta(t)
+
+    # 全体で 480 秒（Cloud Run の 600 秒より前）に収める。読むのに使った分を引く
+    try:
+        text = llm.stream_text(conn, conn.chat_model, final, on_first, total=max(60.0, 480.0 - t_tools))
+    finally:
+        logging.getLogger("pf.chat").warning(json.dumps({
+            "event": "chat_stream", "model": conn.chat_model, "prompt_chars": len(final), "tools_s": round(t_tools, 1),
+            "first_token_s": None if first["at"] is None else round(first["at"], 1),
+            "total_s": round(time.monotonic() - t0, 1), "chars": len(buf["all"])}, ensure_ascii=False))
     reply, _, tail = text.partition(MARK)
     if not buf["done"] and len(reply) > buf["sent"]:
         emit({"type": "delta", "text": reply[buf["sent"]:]})

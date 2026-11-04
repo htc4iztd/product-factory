@@ -58,5 +58,13 @@ await box.fill("もう一度");
 await btn("チャットを送る").click();
 await chat.getByText("添付が見つかりません").waitFor();
 if ((await box.inputValue()) !== "もう一度") throw new Error("入力欄に戻っていない");
+// 途中で切れた（答えが来ないまま流れが終わった）ら、書いている表示を止めて、わけを出す（待ち続けない）
+await page.unroute("**/api/assistant/stream");
+await page.route("**/api/assistant/stream", (r) => r.fulfill({ status: 200, contentType: "application/x-ndjson",
+  body: JSON.stringify({ type: "route", agent: "pm_biz", agent_name: "事業PM" }) + "\n" + JSON.stringify({ type: "step", text: "返事を書いています" }) + "\n" }));
+await box.fill("切れる発言");
+await btn("チャットを送る").click();
+await chat.getByText(/途中で切れました/).waitFor();
+if (await chat.getByLabel("返事を書いています").count()) throw new Error("書いている表示が残っている");
 console.log("chat e2e OK", pid);
 await browser.close();

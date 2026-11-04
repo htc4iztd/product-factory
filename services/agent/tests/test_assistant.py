@@ -308,7 +308,7 @@ def test_think_stream_parts(monkeypatch):
     chunks = ["## 状況\n進んで", "います。", "\n<<<JS", 'ON>>>\n{"actions": [{"type": "schedule", "keys": ["s01"], ',
               '"cron": "0 9 * * *"}], "evidence": ["stage:s01"]}']
 
-    def fake(conn, model, prompt, on_delta):
+    def fake(conn, model, prompt, on_delta, **kw):
         assert "<<<JSON>>>" in prompt
         for ch in chunks:
             on_delta(ch)
@@ -368,3 +368,39 @@ def test_consult(client):
     assert c.post(f"/products/{pid}/stages/s06/consult/notes", headers=VIEWER, json={"text": "x"}).status_code == 403
     assert c.delete(f"/products/{pid}/stages/s06/consult/notes/{n['id']}", headers=H).json() == {"ok": True}
     assert c.get(f"/products/{pid}/stages/s99/consult", headers=H).status_code in (404, 422)
+
+
+def test_stream_text_time_limit(monkeypatch):
+    """AI の返事が長くかかりすぎたら止める（Cloud Run に切られて画面が待ち続けないように）。
+    時間切れ・途中で切れたものは、まとめて出し直さない。"""
+    import time
+    from types import SimpleNamespace
+
+    from pf_agent import llm
+
+    def slow(**kw):
+        for t in ["あ", "い", "う"]:
+            time.sleep(0.05)
+            yield SimpleNamespace(text=t, usage_metadata=None)
+
+    client = SimpleNamespace(models=SimpleNamespace(generate_content_stream=slow))
+    monkeypatch.setattr(llm, "_genai", lambda conn: client)
+    monkeypatch.setattr(llm, "_record_gemini", lambda *a: None)
+    called = []
+    monkeypatch.setattr(llm, "_text", lambda *a: called.append(1) or "")
+    conn = SimpleNamespace(provider="gemini")
+    got = []
+    assert llm.stream_text(conn, "gemini-x", "p", got.append, total=5) == "あいう" and got == ["あ", "い", "う"]
+    got.clear()
+    with pytest.raises(llm.LLMError, match="秒を超えたので止めました"):
+        llm.stream_text(conn, "gemini-x", "p", got.append, total=0.07)
+    assert got and not called
+
+    def broken(**kw):
+        yield SimpleNamespace(text="あ", usage_metadata=None)
+        raise TimeoutError("read timed out")
+
+    client.models.generate_content_stream = broken
+    with pytest.raises(llm.LLMError, match="途中で止まりました"):
+        llm.stream_text(conn, "gemini-x", "p", lambda t: None)
+    assert not called

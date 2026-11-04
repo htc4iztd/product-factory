@@ -437,20 +437,32 @@ def _text(conn: Conn, model: str, prompt: str) -> str:
     raise LLMError(f"未対応の接続方式：{conn.provider}")
 
 
-def stream_text(conn: Conn, model: str, prompt: str, on_delta) -> str:
+STREAM_IDLE = 90      # AI から次の文字が届かないまま待つ秒数の上限
+STREAM_TOTAL = 420    # 返事を書かせる全体の秒数の上限（Cloud Run の 600 秒で切られる前に止める）
+
+
+class StreamTimeout(LLMError):
+    pass
+
+
+def stream_text(conn: Conn, model: str, prompt: str, on_delta, total: float = STREAM_TOTAL) -> str:
     """文章を少しずつ出す（届いた分から on_delta に渡す）。全体を返す。
-    流せない接続・失敗したときは、まとめて1回渡す。"""
+    次の文字が STREAM_IDLE 秒届かない・全体が total 秒を超えたら止める。
+    流す仕組みのない接続は、まとめて1回渡す。"""
     sent = []
+    end = time.monotonic() + total
 
     def push(t: str) -> None:
         if t:
             sent.append(t)
             on_delta(t)
+        if time.monotonic() > end:
+            raise StreamTimeout(f"返事を書くのに {int(total)} 秒を超えたので止めました。短く分けて頼み直してください")
 
     try:
         if _is_claude(conn, model):
             client = _anthropic(conn)
-            kw = _claude_kwargs(prompt, model)
+            kw = {**_claude_kwargs(prompt, model), "timeout": STREAM_IDLE}
             if conn.provider == "anthropic" and model in _FALLBACK_MODELS:
                 ctx = client.beta.messages.stream(**kw, betas=["server-side-fallback-2026-07-01"],
                                                   fallbacks="default")
@@ -474,9 +486,13 @@ def stream_text(conn: Conn, model: str, prompt: str, on_delta) -> str:
             return "".join(sent)
     except LLMError:
         raise
-    except Exception:  # noqa: BLE001  流せなかったら、まとめて出し直す（途中まで出していたらそのまま失敗にする）
-        if sent:
-            raise
+    except Exception as e:  # noqa: BLE001
+        # 時間切れ・途中で切れたものは、まとめて出し直さない（同じだけ待たせることになる）
+        if sent or "timeout" in type(e).__name__.lower() or "timed out" in str(e).lower():
+            raise LLMError(f"AI の返事が{'途中で' if sent else ''}止まりました（{type(e).__name__}）。"
+                           "もう一度送ってください") from None
+        if _is_claude(conn, model) or conn.provider in ("gemini", "vertex"):
+            raise LLMError(f"AI に返事を書かせられませんでした（{type(e).__name__}：{str(e)[:200]}）") from None
     text = _wrap(lambda: _text(conn, model, prompt))
     push(text)
     return text
@@ -595,7 +611,7 @@ def _claude_loop(conn: Conn, model: str, text: str, specs: list[ToolSpec], run, 
     messages: list[dict] = [{"role": "user", "content": text}]
     calls = 0
     while calls < max_calls:
-        resp = client.messages.create(model=model, max_tokens=2000, tools=tools, messages=messages)
+        resp = client.messages.create(model=model, max_tokens=2000, tools=tools, messages=messages, timeout=120)
         _record_claude(model, resp)
         uses = [b for b in resp.content if b.type == "tool_use"]
         if resp.stop_reason != "tool_use" or not uses:
