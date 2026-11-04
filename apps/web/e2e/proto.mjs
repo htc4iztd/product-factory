@@ -45,7 +45,6 @@ await pr.getByRole("button", { name: "AI で作る" }).last().click();
 let card = page.getByRole("group", { name: /承認依頼：UI のプロトタイプを作る/ }).last();
 await card.getByRole("button", { name: "承認", exact: true }).click({ timeout: 60000 });
 await card.getByText(/承認しました/).waitFor();
-await pr.getByText(/AI が書いたもの/).waitFor();
 // 押して移る・戻る
 await fr.locator("#view").getByRole("heading", { name: "ホーム" }).waitFor();
 await fr.getByRole("button", { name: "次へ" }).click();
@@ -122,6 +121,20 @@ if (bb.width < 1400) throw new Error("画面いっぱいになっていない");
 await shot("p4-full");
 await page.keyboard.press("Escape");
 await big.waitFor({ state: "detached" });
+
+// ノートパソコンの幅（1366×768）：開き直すと右の欄は閉じていて、ボタン列がプレビューの枠からはみ出さない
+await page.setViewportSize({ width: 1366, height: 768 });
+await page.reload();
+await fr.getByText("右の端").waitFor();
+if (await page.getByLabel("プロトタイプの操作").count()) throw new Error("右の欄が最初から開いている");
+await page.waitForFunction(() => parseInt(document.querySelector('iframe[title="プロトタイプの画面"]').style.width) >= 1600);
+const sec = await page.locator("section").filter({ has: page.locator('iframe[title="プロトタイプの画面"]') }).first().boundingBox();
+for (const b of await pr.locator("section button").all()) {
+  const r = await b.boundingBox();
+  if (r && r.x + r.width > sec.x + sec.width + 1) throw new Error(`ボタンが枠からはみ出している：${await b.getAttribute("aria-label")}`);
+}
+await shot("p5-laptop");
+await page.setViewportSize({ width: 1440, height: 900 });
 
 // ⑥の工程に下見が出る
 await page.goto(`${BASE}/p/${pid}/s/s06`);

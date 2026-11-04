@@ -30,7 +30,8 @@ export function UiProto({ pid, product, proto, pages, screens, flows, readOnly, 
   // 見え方：収める（全体を縮めて収める）・100%（そのままの大きさ。はみ出したら横に送る）・スマホの幅
   const [zoom, setZoom] = useState<"fit" | "actual" | "phone">("fit");
   const [full, setFull] = useState(false);   // 画面いっぱいに出す
-  const [side, setSide] = useState(true);    // 右の欄（コメント・作る・コード）
+  // 右の欄（コメント・作る・コード）：ふだんは閉じてプレビューを広く。プロトタイプがまだないときだけ「作る」を開く
+  const [side, setSide] = useState(!proto?.html);
   const [cw, setCw] = useState(0);           // プロトタイプの中身の幅（枠の中から知らせてくる）
   const grow = useRef(0);
   const [pick, setPick] = useState<Pick | null>(null);
@@ -142,6 +143,7 @@ export function UiProto({ pid, product, proto, pages, screens, flows, readOnly, 
   };
 
   const open = comments.filter((c) => c.status !== "resolved").length;
+  const compact = fit.w < 760; // 枠が狭いときは、ボタンの文字を省いてアイコンだけにする
   const tab = (k: Panel, label: string, Icon: typeof Layers) => (
     <button role="tab" aria-selected={panel === k} onClick={() => setPanel(k)} className={`flex flex-1 items-center justify-center gap-1 py-2 ${panel === k ? "border-b-2 border-zinc-900 font-semibold" : "text-zinc-500"}`}><Icon size={12} />{label}</button>
   );
@@ -149,20 +151,23 @@ export function UiProto({ pid, product, proto, pages, screens, flows, readOnly, 
   return (
     <div className={`grid h-full overflow-hidden rounded-xl border border-zinc-200 bg-white ${side && !full ? "grid-cols-[minmax(0,1fr)_300px]" : "grid-cols-[minmax(0,1fr)]"}`} aria-label="プロトタイプ">
       <section className={`flex min-h-0 min-w-0 flex-col bg-zinc-100 ${full ? "fixed inset-0 z-[90]" : ""}`} aria-label={full ? "プロトタイプを大きく見る" : undefined}>
-        <div className="flex items-center gap-1 border-b border-zinc-200 bg-white px-3 py-1.5">
-          <span className="truncate text-[12px] text-zinc-500">{html ? `${SOURCE_JA[source] ?? ""}・${Math.round(html.length / 1000)}KB` : "まだありません"}</span>
-          <span className="ml-auto flex shrink-0 items-center gap-1">
+        <div className="flex min-w-0 flex-wrap items-center gap-1 border-b border-zinc-200 bg-white px-3 py-1.5">
+          {!compact && <span className="min-w-0 flex-1 truncate text-[12px] text-zinc-500">{html ? `${SOURCE_JA[source] ?? ""}・${Math.round(html.length / 1000)}KB` : "まだありません"}</span>}
+          <span className="ml-auto flex min-w-0 flex-wrap items-center justify-end gap-1">
             {([["fit", "収める", "全体が収まるよう縮める", Maximize2], ["actual", "100%", "そのままの大きさ（はみ出したら横に送る）", ScanSearch], ["phone", "スマホ", "スマホの幅（390px）", Smartphone]] as const).map(([k, l, t, I]) => (
-              <button key={k} className={`flex items-center gap-1 rounded-md px-2 py-1 text-[11.5px] ${zoom === k ? "bg-zinc-900 text-white" : "text-zinc-600 hover:bg-zinc-100"}`} aria-pressed={zoom === k} aria-label={t} title={t} onClick={() => setZoom(k)}><I size={12} />{l}</button>
+              <button key={k} className={`flex items-center gap-1 rounded-md px-2 py-1 text-[11.5px] ${zoom === k ? "bg-zinc-900 text-white" : "text-zinc-600 hover:bg-zinc-100"}`} aria-pressed={zoom === k} aria-label={t} title={t} onClick={() => setZoom(k)}><I size={12} />{!compact && l}</button>
             ))}
             <span className="text-[11px] tabular-nums text-zinc-400" title="表示の倍率">{Math.round(scale * 100)}%</span>
             <button className="btn-ghost btn-sm h-7 px-1.5" onClick={() => setFull((x) => !x)} aria-label={full ? "元の大きさに戻す" : "大きく見る"} title={full ? "元に戻す（Esc）" : "大きく見る"}>{full ? <Minimize2 size={14} /> : <Expand size={14} />}</button>
-            {!full && <button className="btn-ghost btn-sm h-7 px-1.5" onClick={() => setSide((x) => !x)} aria-label={side ? "右の欄を閉じる" : "右の欄を開く"} title={side ? "右の欄を閉じる（プレビューを広く）" : "右の欄を開く"}>{side ? <PanelRightClose size={14} /> : <PanelRightOpen size={14} />}</button>}
+            {!full && <button className={`flex items-center gap-1 rounded-md px-2 py-1 text-[11.5px] ${side ? "bg-zinc-100 text-zinc-800" : "text-zinc-600 hover:bg-zinc-100"}`} onClick={() => setSide((x) => !x)}
+              aria-label={side ? "右の欄を閉じる" : "右の欄を開く"} title={side ? "コメント・作る・コードの欄を閉じる（プレビューを広く）" : "コメント・作る・コードの欄を開く"}>
+              {side ? <PanelRightClose size={13} /> : <PanelRightOpen size={13} />}{!compact && "コメント・作る"}
+              {open > 0 && <span className="rounded-full bg-amber-500 px-1.5 text-[10px] font-semibold text-white">{open}</span>}</button>}
             {html && <button className="btn-ghost btn-sm h-7 px-1.5" onClick={download} aria-label="HTML をダウンロード" title="HTML をダウンロード"><Download size={14} /></button>}
             {!readOnly && html && (
               <button className={`ml-1 flex items-center gap-1 whitespace-nowrap rounded-md px-2.5 py-1 text-[12px] font-medium ${commenting ? "bg-amber-500 text-white" : "border border-zinc-200 text-zinc-700 hover:bg-zinc-50"}`}
-                aria-pressed={commenting} title="コメント中は、画面の部品を押すとコメントを付けられます" onClick={() => { setCommenting((x) => !x); setPick(null); }}>
-                <MessageSquarePlus size={13} />{commenting ? "コメント中" : "コメント"}</button>
+                aria-pressed={commenting} aria-label={commenting ? "コメント中" : "コメント"} title="コメント中は、画面の部品を押すとコメントを付けられます" onClick={() => { setCommenting((x) => !x); setPick(null); }}>
+                <MessageSquarePlus size={13} />{commenting ? "コメント中" : compact ? "" : "コメント"}</button>
             )}
           </span>
         </div>
