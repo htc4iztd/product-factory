@@ -1,7 +1,7 @@
 "use client";
 import { useCallback, useEffect, useMemo, useState, useTransition } from "react";
 import { AlertTriangle, ArrowDownToLine, Bot, Check, CircleDashed, Code2, FileCode2, FolderTree, GitCommitHorizontal, Github, Loader2, RefreshCw, UploadCloud, User } from "lucide-react";
-import { importWorkspace, pushWorkspace, type WsCommit, type WsView } from "@/app/(app)/p/[id]/code/actions";
+import { importWorkspace, overwriteWorkspace, pushWorkspace, type WsCommit, type WsView } from "@/app/(app)/p/[id]/code/actions";
 
 const when = (t: string | null) => (t ? new Date(t).toLocaleString("ja-JP", { timeZone: "Asia/Tokyo", month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit" }) : "");
 const OP: Record<string, { label: string; tone: string }> = { add: { label: "追加", tone: "text-emerald-700" }, modify: { label: "変更", tone: "text-sky-700" }, delete: { label: "削除", tone: "text-rose-700" } };
@@ -103,10 +103,14 @@ function SyncBar({ pid, v, canSync, onChanged }: { pid: string; v: WsView; canSy
         <span>{badge[1]}{s.unpushed ? `（未送信 ${s.unpushed} 件）` : ""}</span>
       </div>
       {s.error && <p className="text-rose-700">{s.error}</p>}
+      <p className="text-[10.5px] text-zinc-400">GitHub は作業場の写しです。GitHub で直接変更しないでください（変更は作業場で）。</p>
       {canSync && (
         <div className="flex gap-1.5">
           {s.status === "diverged"
-            ? <button className="btn-primary btn-sm" disabled={pending} onClick={() => run(importWorkspace)}><ArrowDownToLine size={12} />GitHub の変更を取り込む</button>
+            ? <>
+              <button className="btn-primary btn-sm" disabled={pending} onClick={() => { if (confirm("GitHub で直接された変更を捨てて、GitHub を作業場の内容に戻します（履歴は残ります）。よいですか？")) run(overwriteWorkspace); }}><UploadCloud size={12} />作業場の内容で上書き</button>
+              <button className="btn-secondary btn-sm" disabled={pending} onClick={() => run(importWorkspace)} title="例外：GitHub で直した内容を残したいとき"><ArrowDownToLine size={12} />GitHub の変更を取り込む</button>
+            </>
             : s.unpushed > 0 && <button className="btn-secondary btn-sm" disabled={pending} onClick={() => run(pushWorkspace)}><UploadCloud size={12} />いま送る</button>}
           {pending && <Loader2 size={13} className="animate-spin self-center text-zinc-400" />}
         </div>

@@ -258,8 +258,11 @@ def remote_head(product: Product) -> str:
         raise
 
 
-def push(product_id: str) -> dict:
-    """作業場の、まだ送っていない変更を GitHub に送る。GitHub 側に作業場にない変更があれば止める。"""
+def push(product_id: str, overwrite: bool = False) -> dict:
+    """作業場の、まだ送っていない変更を GitHub に送る。GitHub 側に作業場にない変更があれば止める。
+    overwrite：GitHub を作業場の内容そのものにする（GitHub で直接された変更を戻す。
+    GitHub は作業場の写しなので、運用では GitHub での直接の変更は禁止）。
+    履歴は消さず、作業場の内容に戻すコミットを重ねる（強制プッシュはしない）。"""
     lock = _locks.setdefault(product_id, threading.Lock())
     with lock:
         p = _product(product_id)
@@ -270,9 +273,10 @@ def push(product_id: str) -> dict:
         st = sync_state(product_id)
         head = remote_head(p)
         diverged = bool(st["remote_sha"] and head and head != st["remote_sha"])
-        if diverged or (not st["remote_sha"] and head and st["status"] == "diverged"):
+        if (diverged or (not st["remote_sha"] and head and st["status"] == "diverged")) and not overwrite:
             _set_state(product_id, repo=p.repo, branch=branch, status="diverged",
-                       error="GitHub に、作業場にない変更があります。取り込んでから送り直してください")
+                       error="GitHub で直接変更されています（GitHub は作業場の写しです）。"
+                             "作業場の内容で上書きするか、GitHub の変更を取り込んでください")
             return sync_state(product_id)
         with session() as s:
             todo = s.execute(select(WorkspaceCommit).where(WorkspaceCommit.product_id == product_id,
@@ -282,14 +286,18 @@ def push(product_id: str) -> dict:
             files = {f.path: f.content for f in s.execute(select(WorkspaceFile).where(
                 WorkspaceFile.product_id == product_id)).scalars()}
             touched: dict[str, str | None] = {}
-            if first:  # はじめて写す：作業場のファイルをすべて（GitHub にだけあるファイルは残す）
+            if first or overwrite:  # はじめて写す・上書き：作業場のファイルをすべて
                 touched = dict(files)
             for c in todo:
                 for f in c.files or []:
                     touched[f["path"]] = files.get(f["path"])
             numbers = [c.number for c in todo]
-            message = (f"作業場から {len(todo)} 件の変更（#{numbers[0]}〜#{numbers[-1]}）" if len(todo) > 1
-                       else (todo[0].message if todo else "ファクトリーの作業場から"))
+            if overwrite:
+                message = "作業場の内容で上書き（GitHub で直接された変更を戻しました）"
+            elif len(todo) > 1:
+                message = f"作業場から {len(todo)} 件の変更（#{numbers[0]}〜#{numbers[-1]}）"
+            else:
+                message = todo[0].message if todo else "ファクトリーの作業場から"
         if not touched:
             _set_state(product_id, repo=p.repo, branch=branch, status="ok", error="", remote_sha=head)
             return sync_state(product_id)
@@ -304,7 +312,9 @@ def push(product_id: str) -> dict:
         tree = [{"path": path, "mode": "100644", "type": "blob", **({"content": c} if c is not None else {"sha": None})}
                 for path, c in touched.items()]
         base = code.call("GET", f"/repos/{p.repo}/git/commits/{head}", tok)
-        t = code.call("POST", f"/repos/{p.repo}/git/trees", tok, {"base_tree": base["tree"]["sha"], "tree": tree})
+        # 上書きは、作業場のファイルだけでツリーを作る（GitHub にだけあるファイルは消える）。ふだんは差分だけを重ねる
+        body = {"tree": tree} if overwrite else {"base_tree": base["tree"]["sha"], "tree": tree}
+        t = code.call("POST", f"/repos/{p.repo}/git/trees", tok, body)
         cm = code.call("POST", f"/repos/{p.repo}/git/commits", tok,
                        {"message": f"{message}\n\nProduct Factory の作業場から送りました", "tree": t["sha"],
                         "parents": [head]})

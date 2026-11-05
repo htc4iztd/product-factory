@@ -677,14 +677,14 @@ def workspace_commit(product_id: str, number: int, c: Caller = Depends(caller)):
 
 
 @app.post("/products/{product_id}/workspace/push")
-def workspace_push(product_id: str, c: Caller = Depends(caller)):
-    """まだ送っていない変更を、いま GitHub に送る。"""
+def workspace_push(product_id: str, overwrite: bool = False, c: Caller = Depends(caller)):
+    """まだ送っていない変更を、いま GitHub に送る。overwrite で、GitHub で直接された変更を作業場の内容に戻す。"""
     from . import code as gh
     from . import workspace as ws
 
     p = _product(c, product_id, "build", "assign")
     try:
-        return ws.push(p.id)
+        return ws.push(p.id, overwrite=overwrite)
     except gh.CodeError as e:
         ws._set_state(p.id, status="error", error=e.message)
         raise ws.WorkspaceError(e.status, e.message) from None

@@ -49,7 +49,7 @@ export default async function CodePage({ params, searchParams }: Props) {
           {sp.error && <p className="rounded-md bg-rose-50 px-3 py-2 text-xs text-rose-700">{sp.error}</p>}
           <p className="text-[11px] leading-5 text-zinc-500">
             写すには、そのリポジトリに書き込めるトークン（contents の書き込み）が要ります（テナントの設定か、Secret Manager の GITHUB_TOKEN）。
-            作業場から GitHub への一方向で写し、GitHub 側に作業場にない変更があれば上書きせずに止めます。空にして保存すると、つなぎを外します（作業場はそのまま残ります）。
+            作業場から GitHub への一方向で写します。GitHub は作業場の写しなので、GitHub で直接変更しないでください（されたときは止めて、作業場の内容で上書きするか取り込むかを選べます）。空にして保存すると、つなぎを外します（作業場はそのまま残ります）。
           </p>
           <div className="flex items-center gap-2"><button className="btn-primary">つなぐ</button><Link href={`/p/${id}/code`} className="btn-ghost">やめる</Link></div>
         </form>

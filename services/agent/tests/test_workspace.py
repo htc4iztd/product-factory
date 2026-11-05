@@ -140,7 +140,7 @@ class FakeGitHub:
             sha = path.rsplit("/", 1)[1]
             return {"tree": {"sha": "t:" + sha}}
         if method == "POST" and path.endswith("/git/trees"):
-            base = dict(self.commits[body["base_tree"][2:]]["tree"])
+            base = dict(self.commits[body["base_tree"][2:]]["tree"]) if "base_tree" in body else {}
             for e in body["tree"]:
                 if e.get("content") is None and "sha" in e:
                     base.pop(e["path"], None)
@@ -201,6 +201,13 @@ def test_github_copy_diverge_and_import(client, monkeypatch):
     assert r["commit"]["source"] == "github" and ws.read(pid, "docs/note.md") == "人が書いた\n"
     st = ws.push(pid)
     assert st["status"] == "ok" and st["unpushed"] == 0
+    assert gh.commits[gh.head]["tree"] == {"src/a.py": "b\n", "src/b.py": "c\n", "docs/note.md": "人が書いた\n"}
+    # 運用では GitHub での直接の変更は禁止：されたら、作業場の内容で上書きして戻す（履歴は重ねる・強制しない）
+    gh.human_commit({"hack.py": "禁止の変更\n", "src/a.py": "人が書き換えた\n"})
+    before = gh.head
+    assert ws.push(pid)["status"] == "diverged"
+    st = ws.push(pid, overwrite=True)
+    assert st["status"] == "ok" and gh.commits[gh.head]["parents"] == [before]
     assert gh.commits[gh.head]["tree"] == {"src/a.py": "b\n", "src/b.py": "c\n", "docs/note.md": "人が書いた\n"}
     # 作業場は GitHub につないだあとも、原本として読める
     assert ws.read(pid, "src/b.py") == "c\n"
