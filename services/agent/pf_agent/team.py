@@ -686,12 +686,25 @@ class PostOut(BaseModel):
     evidence: list[str] = Field(default_factory=list)  # 状態の変化を書くときの根拠の ID
 
 
+class CodeFileOut(BaseModel):
+    path: str
+    content: str
+
+
+class CodeOut(BaseModel):
+    unit: str = Field(default="", description="作ったユニットの ID（⑨のユニット分割の UN-xx）")
+    message: str = Field(default="", description="何を作った・直したか（1〜3文）")
+    files: list[CodeFileOut] = Field(default_factory=list, description="書くファイル（パスと中身の全体）")
+    deletes: list[str] = Field(default_factory=list, description="消すファイルのパス")
+
+
 class TurnOut(BaseModel):
     report: ReportOut
     issue_updates: list[IssueUpdateOut]
     changes: list[ChangeOut]
     new_issues: list[NewIssueOut]
     posts: list[PostOut]
+    code: CodeOut | None = None
 
 
 def _issue_brief(i: AgentIssue, journals: list[IssueJournal]) -> str:
@@ -729,6 +742,11 @@ OUTPUT_RULES = {
     "board_post": "posts：掲示板（to・intent は confirm/answer/notice・text・thread は返信先の番号か 0）。"
     "確認（confirm）と回答（answer）は相手がすぐ動いて読む。回答への返事は書かない（続きは Issue で）。"
     "期限や時刻（「本日15時までに」など）は書かない。",
+    "code_write": "code：開発の作業場に書くコード。⑨のユニット分割から、まだ作っていない（または直すべき）ユニットを"
+    "1回に1つだけ選び、unit にその ID、message に何を作ったか、files にファイルのパスと中身の全体を入れる。"
+    "まず code_tree で作業場を見て、直すファイルは code_read で読んでから書く。⑨の設計・⑩⑪の方式に沿い、"
+    "そのまま動く完全なコードにする（「…省略…」「TODO」で済ませない）。秘密の値（鍵・パスワード）は書かない。"
+    "書くことがなければ code は空にする。",
 }
 
 
@@ -737,7 +755,8 @@ def turn_schema(writes: list[str]) -> type[BaseModel]:
     from pydantic import create_model
 
     cols = {"set_field": ("changes", list[ChangeOut]), "issue_update": ("issue_updates", list[IssueUpdateOut]),
-            "issue_create": ("new_issues", list[NewIssueOut]), "board_post": ("posts", list[PostOut])}
+            "issue_create": ("new_issues", list[NewIssueOut]), "board_post": ("posts", list[PostOut]),
+            "code_write": ("code", CodeOut | None)}
     fields = {"report": (ReportOut, ...)}
     for w in writes:
         if w in cols:
@@ -793,6 +812,26 @@ def _prompt(
     )
 
 
+def _stub_code(product: Product) -> CodeOut:
+    """スタブ：⑨のユニット分割から、まだ作っていないユニットを1つ選んで、小さなコードを書く。"""
+    import re as _re
+
+    from . import workspace as ws
+
+    todo = [u for u in ws.units(product.id) if u["id"] and u["commits"] == 0 and u["name"] != "（⑨にないユニット）"]
+    uid, name = (todo[0]["id"], todo[0]["name"]) if todo else (f"UN-{ws.count(product.id) + 1:02d}", "追加の機能")
+    slug = _re.sub(r"[^a-z0-9]", "", uid.lower()) or "unit"
+    try:
+        readme = ws.read(product.id, "README.md")
+    except ws.WorkspaceError:
+        readme = f"# {product.name}\n\n{product.idea[:200]}\n\n## ユニット\n"
+    return CodeOut(unit=uid, message=f"（スタブ）{uid} {name} を作りました", files=[
+        CodeFileOut(path=f"src/{slug}.py", content=f'"""{uid} {name}（スタブ）"""\n\n\ndef run() -> str:\n'
+                    f'    return "{uid} ok"\n'),
+        CodeFileOut(path="README.md", content=readme.rstrip("\n") + f"\n- {uid} {name}：src/{slug}.py\n"),
+    ])
+
+
 def _stub_turn(
     product: Product, key: str, issues: list[AgentIssue], writes: list[str] | None = None, box: list | None = None
 ) -> BaseModel:
@@ -807,7 +846,9 @@ def _stub_turn(
     if "set_field" not in writes:
         changes = []
     total = len([f for f in fw.fields if f.required]) or 1
+    code = _stub_code(product) if "code_write" in writes else None
     full = TurnOut(
+        code=code,
         report=ReportOut(
             health="green",
             progress=100 if total else 0,
@@ -893,6 +934,18 @@ def _apply(product: Product, key: str, out: BaseModel, job_id: str, model: str) 
         ).scalars():
             p.read = True
         s.commit()
+    # 開発の作業場にコードを書く（変更の記録と差分が残る。GitHub がつながっていれば写す）
+    code = getattr(out, "code", None)
+    if code is not None and (code.files or code.deletes):
+        from . import workspace as ws
+
+        try:
+            c = ws.commit(product.id, name_of(key), code.message, [f.model_dump() for f in code.files[:30]],
+                          code.deletes[:30], unit=code.unit)
+            if c:
+                own.append(f"code:#{c['number']}")
+        except ws.WorkspaceError:
+            pass
     wake: list[str] = []
     for u in getattr(out, "issue_updates", [])[:10]:
         try:

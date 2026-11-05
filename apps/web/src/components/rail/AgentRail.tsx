@@ -72,7 +72,7 @@ export function AgentRail({ pid, product, agents: initial, platform: initialPlat
     [`/p/${pid}/agents`, "定期の仕事", Bot], [`/p/${pid}/preproducts`, "プリプロダクト", Boxes],
     [`/jobs?product=${pid}`, "ジョブ", Activity],
     [`/p/${pid}/docs`, "ドキュメント", FileText],
-    [`/p/${pid}/code`, "コード（IDE）", Code2], [`/p/${pid}/settings`, "ステージの設定", Settings2],
+    [`/p/${pid}/code`, "開発（コード）", Code2], [`/p/${pid}/settings`, "ステージの設定", Settings2],
     [`/p/${pid}/audit`, "監査ログ", ScrollText],
   ];
   const on = (href: string) => (href === `/p/${pid}` ? path === href : path === href || path.startsWith(href + "/"));

@@ -91,6 +91,39 @@ class IssuesArg(BaseModel):
     scope: str = Field(default="mine", description="mine（自分宛て）| sent（自分が起票）| open（終わっていない全部）")
 
 
+class CodeReadArg(BaseModel):
+    paths: list[str] = Field(description="読むファイルのパス（作業場の中。5つまで）", max_length=5)
+
+
+def _code_tree(ctx: Ctx, _a: BaseModel) -> str:
+    from . import workspace as ws
+
+    p = _need_product(ctx)
+    files = [e for e in ws.tree(p.id)["entries"] if e["type"] == "file"]
+    if not files:
+        return "作業場にはまだファイルがありません（⑨のユニット分割に沿って、最初のユニットから作る）"
+    hist = ws.history(p.id, 10)
+    return ("## 作業場のファイル\n" + "\n".join(f"- {e['path']}（{e['size']}B）" for e in files[:400])
+            + ("\n（ほか省略）" if len(files) > 400 else "")
+            + "\n\n## 最近の変更\n" + "\n".join(
+                f"- #{c['number']} [{c['unit'] or '-'}] {c['message'][:80]}（{c['author']}）" for c in hist))
+
+
+def _code_read(ctx: Ctx, a: CodeReadArg) -> str:
+    from . import workspace as ws
+
+    p = _need_product(ctx)
+    out = []
+    for path in a.paths[:5]:
+        try:
+            body = ws.read(p.id, path)
+            more = "\n（長いので途中まで）" if len(body) > 30000 else ""
+            out.append(f"### {path}\n```\n{body[:30000]}\n```{more}")
+        except ws.WorkspaceError as e:
+            out.append(f"### {path}\nエラー：{e.message}")
+    return "\n\n".join(out)
+
+
 def _stage_draft(ctx: Ctx, a: StageArg) -> str:
     from . import frameworks as fx
     from . import repo
@@ -388,6 +421,10 @@ TOOLS: dict[str, Tool] = {
         Tool(
             "findings", "稼働の問題を読む", "read", "見つかっている稼働の問題と対処の案", None, _findings, ("platform",)
         ),
+        Tool("code_tree", "作業場のファイルを見る", "read",
+             "開発の作業場（このプロダクトのコード）のファイルの一覧と、最近の変更", None, _code_tree, ("stage", "pm")),
+        Tool("code_read", "作業場のファイルを読む", "read", "開発の作業場のファイルの中身を読む（5つまで）",
+             CodeReadArg, _code_read, ("stage", "pm")),
         # 書くツール：AI は最後の出力に入れ、コードが検証してから実行する
         Tool(
             "set_field",
@@ -420,6 +457,15 @@ TOOLS: dict[str, Tool] = {
             "他のエージェントへの確認・回答・共有を掲示板に書く",
             roles=("stage", "pm"),
             section="posts",
+        ),
+        Tool(
+            "code_write",
+            "作業場にコードを書く",
+            "write",
+            "開発の作業場にファイルを書く・消す"
+            "（ユニットと説明を付け、変更の記録と差分が残る。GitHub がつながっていれば写す）",
+            roles=("stage",),
+            section="code",
         ),
         Tool(
             "pm_note",

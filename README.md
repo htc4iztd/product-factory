@@ -75,7 +75,7 @@ ide               Code-OSS の Web 版（ソースからビルド）と、リポ
 - AI の利用上限（429 Resource exhausted）：1分あたりの上限に当たったら、上限が戻るまで待ってやり直す（Gemini・Vertex は4秒から倍々・最大60秒・計7回、Anthropic は retry-after を読んで6回まで）。それでもだめならジョブの失敗になり、プラットフォームが知らせる。
 - GitHub の接続：テナントのトークン（設定）を、コード（IDE）・自動開発・Issue の同期（押したときだけ）が使う。webhook は使わない（チケットとの自動同期は、チケットの廃止とともに外した）。
 - 右上の歯車（設定）で、テナントが使う LLM の接続を決める。接続方式は Gemini API・Vertex AI（キー不要。Gemini と Claude）・Anthropic API・OpenAI 互換 API（ローカルLLM など）・スタブ。対話・レポート・画像でモデルを分けられる（画像は Gemini 系だけ）。アプリ全体の既定はプラットフォーム管理者（`PF_ADMIN_EMAILS`）が決め、各テナントの OWNER が自分のキーで上書きできる。API キーは `PF_SECRET_KEY` から作る鍵で暗号化して DB に置き、画面には末尾4文字だけを出す。Vertex AI（キー不要）はアプリの GCP の費用になるので、選べるのはプラットフォーム管理者と、管理者が全テナントに許したときだけ。テナントの OpenAI 互換 URL は https の公開アドレスだけを受け付ける（内部ネットワークへの到達を防ぐ）。
-- 「コード（IDE）」では、プロダクトに GitHub リポジトリ（owner/name とブランチ）をつなぎ、Code-OSS の Web 版で読む（読み取り専用、ターミナルなし）。Code-OSS は `ide/VSCODE_VERSION` のタグからソースでビルドし（`ide/build.sh`）、Microsoft のマーケットプレイスや製品版の資産は使わない。IDE 内の拡張機能（`ide/extension`）が `pfrepo://<プロダクトID>/` のファイルシステムとして web の `/api/p/{id}/code/*` を読み、agent-api が GitHub の REST API から木と中身を取る。非公開リポジトリは `GITHUB_TOKEN`（読み取りだけの fine-grained token）が要る。
+- 開発（`/p/{id}/code`。旧「コード（IDE）」）：⑫の担当が、⑨のユニット分割に沿って、開発の作業場（ファクトリーの DB の中のファイル。`workspace_files`）にコードを書く（書くツール `code_write`。読むのは `code_tree`・`code_read`）。書くたびに変更の記録（誰が・どのユニットで・何を・差分。`workspace_commits`）が残る。開発の画面では、左にユニット（未着手・記録の数）と変更の記録、中央に差分・ファイル・IDE（Code-OSS。配置していれば）を出し、数秒ごとに読み直す（エージェントが書いているところがそのまま見える）。作業場が原本で、GitHub につなぐと作業場のコードを写す（作業場 → GitHub の一方向。Git Data API で、送っていない変更をまとめて1コミットにする。作業場が空で GitHub に中身があれば、先に作業場に取り込む）。つないだあとも作業場は更新を続ける（GitHub に届かないときの控え・エージェントが GitHub を見に行かずに読むため）。GitHub 側に作業場にない変更（人が直接コミットしたなど）があれば上書きせずに止め（diverged）、「GitHub の変更を取り込む」で作業場に入れてから送り直す。写すには書き込めるトークンが要る。IDE が読むファイル（`/code/tree`・`/code/file`）も作業場から出す。
 - ループ L1〜L5、トレーサビリティ画面、worker / scheduler は R2。
 - `GOOGLE_API_KEY` が無ければ LLM はスタブ（必須見出しを埋めたダミー成果物）になり、全工程をそのまま通せる。
 
@@ -102,6 +102,7 @@ cd apps/web && npm ci && DATABASE_URL=postgresql://pf@127.0.0.1:5432/pf AUTH_SEC
 - `services/agent`: `pytest`（対話・採用・更新・承認と差し戻し・要再確認・設定・テナント分離・対話セッションとレポート・再起動後の対話の継続・文書からの反映）
 - `apps/web`: `BASE=http://localhost:3000 node e2e/full-cycle.mjs`（登録→①〜⑤をAIの下書き・採用・更新で通す→文書タブからの反映→承認と差し戻し→下流の要再確認→ステージの開閉→参照タブ→対話セッションとレポート→振り返り）
 - フレームワーク: `BASE=... node e2e/frameworks.mjs`（②に最初から PEST とファイブフォース→SWOT を足して象限を書く→必須→ポジショニング図に点→エディタで独自のフレームワーク（2×2・図）→⑦に足して図に要素）
+- 開発: `BASE=... node e2e/dev.mjs`（GitHub 未連携で開発の画面→⑫の画面から実装PM に頼んで⑫に Issue→⑫が作業場にコードを書く→変更の記録・差分・ファイルがそのまま出る）
 - 相談: `BASE=... node e2e/consult.mjs`（工程から相談の部屋→相談を始める→問いが流れて届く→決めたことを話す→合意メモの承認→手で足す・消す→下書きを頼む→スマホで同じ相談を続ける）
 - 書き出し: `BASE=... node e2e/export.mjs`（Word・PowerPoint・Markdown をダウンロードして中身を確かめ、PDF は印刷用のページが開いて PDF にできる）
 - チャット: `BASE=... node e2e/chat.mjs`（送るとすぐ自分の発言が出て入力欄が空→答える人・手順→返事が流れて出る→残った発言に置き換わる（二重に出ない）→送れなかったら入力欄に戻す）

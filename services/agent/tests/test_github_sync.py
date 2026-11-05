@@ -84,7 +84,8 @@ def test_sync_only_when_asked(env):
     c.put("/settings/github", headers=H, json={"token": "tok"})
     # 起票・更新しただけでは GitHub を呼ばない（自動では送らない）
     c.put(P + f"/issues/{n}", headers=H, json={"notes": "急ぎで"})
-    assert gh.calls == []
+    # （リポジトリをつなぐと、開発の作業場のコードを写すために git の API は呼ぶ。Issue の API は呼ばない）
+    assert [x for x in gh.calls if "/git/" not in x[1]] == []
     assert c.post(P + f"/issues/{n}/github", headers=VIEWER).status_code == 403
     # 押すと GitHub に Issue を作り、これまでの記録をコメントで送る
     r = c.post(P + f"/issues/{n}/github", headers=H).json()

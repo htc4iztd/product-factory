@@ -364,6 +364,9 @@ class Engine:
             s.commit()
             body = {"repo": p.repo, "branch": p.repo_branch}
         repo.log(product.id, None, "human", user, "code.repo", body=body)
+        from . import workspace as ws
+
+        ws.on_link(product.id, user)  # 作業場のコードを GitHub に写す（作業場が空で GitHub に中身があれば取り込む）
         return info
 
     @staticmethod
@@ -373,12 +376,24 @@ class Engine:
         return product.repo, product.repo_branch or "main"
 
     def code_tree(self, product: Product) -> dict:
+        """コードの一覧：開発の作業場が原本。作業場が空で GitHub だけがつながっていれば、GitHub を読む。"""
+        from . import workspace as ws
+
+        if ws.count(product.id) or not product.repo:
+            return ws.tree(product.id)
         try:
             return code.tree(*self._repo(product), token=ghsync.token(product.tenant_id)[0])
         except code.CodeError as e:
             raise FactoryError(e.status, e.message) from None
 
     def code_file(self, product: Product, path: str) -> bytes:
+        from . import workspace as ws
+
+        if ws.count(product.id) or not product.repo:
+            try:
+                return ws.read(product.id, path).encode("utf-8")
+            except ws.WorkspaceError as e:
+                raise FactoryError(e.status, e.message) from None
         try:
             return code.read_file(*self._repo(product), path, token=ghsync.token(product.tenant_id)[0])
         except code.CodeError as e:

@@ -35,6 +35,7 @@ from . import (
     reports,
     research,
     team,
+    workspace,
 )
 from .api_collab import router as collab_router
 from .api_jobs import router as jobs_router
@@ -100,6 +101,11 @@ async def _approval_error(_, exc: approvals.ApprovalError):
 
 @app.exception_handler(assistant.AssistantError)
 async def _assistant_error(_, exc: assistant.AssistantError):
+    return JSONResponse(status_code=exc.status, content={"detail": exc.message})
+
+
+@app.exception_handler(workspace.WorkspaceError)
+async def _workspace_error(_, exc: workspace.WorkspaceError):
     return JSONResponse(status_code=exc.status, content={"detail": exc.message})
 
 
@@ -650,6 +656,51 @@ def code_file(product_id: str, path: str, c: Caller = Depends(caller)):
     data = engine.code_file(_product(c, product_id, "build", "view"), path)
     return Response(content=data, media_type="application/octet-stream",
                     headers={"cache-control": "private, max-age=30", "x-content-type-options": "nosniff"})
+
+
+@app.get("/products/{product_id}/workspace")
+def workspace_view(product_id: str, c: Caller = Depends(caller)):
+    """開発の作業場：ユニットごとの進み・変更の記録・GitHub への写しの状態。"""
+    from . import workspace as ws
+
+    p = _product(c, product_id, "build", "view")
+    return {"units": ws.units(p.id), "commits": ws.history(p.id, 100), "files": ws.count(p.id),
+            "sync": ws.sync_state(p.id), "repo": p.repo, "branch": p.repo_branch}
+
+
+@app.get("/products/{product_id}/workspace/commits/{number}")
+def workspace_commit(product_id: str, number: int, c: Caller = Depends(caller)):
+    from . import workspace as ws
+
+    p = _product(c, product_id, "build", "view")
+    return ws.get_commit(p.id, number)
+
+
+@app.post("/products/{product_id}/workspace/push")
+def workspace_push(product_id: str, c: Caller = Depends(caller)):
+    """まだ送っていない変更を、いま GitHub に送る。"""
+    from . import code as gh
+    from . import workspace as ws
+
+    p = _product(c, product_id, "build", "assign")
+    try:
+        return ws.push(p.id)
+    except gh.CodeError as e:
+        ws._set_state(p.id, status="error", error=e.message)
+        raise ws.WorkspaceError(e.status, e.message) from None
+
+
+@app.post("/products/{product_id}/workspace/import")
+def workspace_import(product_id: str, c: Caller = Depends(caller)):
+    """GitHub のいまの中身を作業場に取り込む（GitHub 側に作業場にない変更があるとき）。"""
+    from . import code as gh
+    from . import workspace as ws
+
+    p = _product(c, product_id, "build", "assign")
+    try:
+        return ws.import_remote(p.id, c.user)
+    except gh.CodeError as e:
+        raise ws.WorkspaceError(e.status, e.message) from None
 
 
 @app.post("/products/{product_id}/phases/{phase_id}/review")

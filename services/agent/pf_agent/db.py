@@ -748,6 +748,49 @@ class PmNote(Base):
     created_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), default=_now)
 
 
+class WorkspaceFile(Base):
+    """開発の作業場：エージェントが書くコード（ファクトリーの中の原本。GitHub はその写し）。"""
+    __tablename__ = "workspace_files"
+    __table_args__ = (UniqueConstraint("product_id", "path"),)
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    product_id: Mapped[str] = mapped_column(String(32), index=True)
+    path: Mapped[str] = mapped_column(String(400))
+    content: Mapped[str] = mapped_column(Text, default="")
+    sha: Mapped[str] = mapped_column(String(40), default="")
+    size: Mapped[int] = mapped_column(Integer, default=0)
+    updated_by: Mapped[str] = mapped_column(String(200), default="")
+    updated_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), default=_now)
+
+
+class WorkspaceCommit(Base):
+    """作業場の変更の記録（誰が・どのユニットで・何を変えたか・差分）。GitHub に送ったら github_sha が入る。"""
+    __tablename__ = "workspace_commits"
+    __table_args__ = (UniqueConstraint("product_id", "number"),)
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    product_id: Mapped[str] = mapped_column(String(32), index=True)
+    number: Mapped[int] = mapped_column(Integer)
+    author: Mapped[str] = mapped_column(String(200), default="")
+    unit: Mapped[str] = mapped_column(String(40), default="")
+    message: Mapped[str] = mapped_column(Text, default="")
+    files: Mapped[list] = mapped_column(JSON, default=list)   # [{path, op: add|modify|delete, lines: [+n, -n]}]
+    patch: Mapped[str] = mapped_column(Text, default="")
+    source: Mapped[str] = mapped_column(String(20), default="agent")  # agent | human | github
+    github_sha: Mapped[str | None] = mapped_column(String(40), nullable=True)
+    created_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), default=_now)
+
+
+class WorkspaceSync(Base):
+    """作業場と GitHub の写しの状態。"""
+    __tablename__ = "workspace_sync"
+    product_id: Mapped[str] = mapped_column(String(32), primary_key=True)
+    repo: Mapped[str] = mapped_column(String(200), default="")
+    branch: Mapped[str] = mapped_column(String(200), default="")
+    remote_sha: Mapped[str] = mapped_column(String(40), default="")   # 最後に送った（取り込んだ）ときの GitHub の先頭
+    status: Mapped[str] = mapped_column(String(20), default="off")    # off | ok | pending | diverged | error
+    error: Mapped[str] = mapped_column(Text, default="")
+    at: Mapped[dt.datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
 class ConsultNote(Base):
     """工程の担当（その分野の専門家）との相談で、PdM と合意したこと（合意メモ）。担当が下書きを作るときの土台にする。"""
     __tablename__ = "consult_notes"

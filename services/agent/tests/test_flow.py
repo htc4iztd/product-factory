@@ -421,7 +421,8 @@ def test_repo_link_and_code_read(client, monkeypatch):
     code._tree_cache.clear()
     c = client
     pid = new_product(c)
-    assert c.get(f"/products/{pid}/code/tree", headers=H).status_code == 409   # まだつないでいない
+    # まだつないでいない：開発の作業場（空）を読む
+    assert c.get(f"/products/{pid}/code/tree", headers=H).json()["entries"] == []
     assert c.put(f"/products/{pid}/repo", headers=H, json={"repo": "bad repo"}).status_code == 422
     r = c.put(f"/products/{pid}/repo", headers=H, json={"repo": "https://github.com/acme/kakeibo.git"}).json()
     assert r["product"]["repo"] == "acme/kakeibo" and r["product"]["repo_branch"] == "main"
