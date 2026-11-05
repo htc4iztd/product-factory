@@ -647,13 +647,14 @@ def set_repo(product_id: str, body: RepoBody, c: Caller = Depends(caller)):
 
 
 @app.get("/products/{product_id}/code/tree")
-def code_tree(product_id: str, c: Caller = Depends(caller)):
-    return engine.code_tree(_product(c, product_id, "build", "view"))
+def code_tree(product_id: str, source: str = "", c: Caller = Depends(caller)):
+    """source：workspace（開発の作業場）・github（つないだリポジトリ）。空なら作業場。"""
+    return engine.code_tree(_product(c, product_id, "build", "view"), source)
 
 
 @app.get("/products/{product_id}/code/file")
-def code_file(product_id: str, path: str, c: Caller = Depends(caller)):
-    data = engine.code_file(_product(c, product_id, "build", "view"), path)
+def code_file(product_id: str, path: str, source: str = "", c: Caller = Depends(caller)):
+    data = engine.code_file(_product(c, product_id, "build", "view"), path, source)
     return Response(content=data, media_type="application/octet-stream",
                     headers={"cache-control": "private, max-age=30", "x-content-type-options": "nosniff"})
 

@@ -209,5 +209,12 @@ def test_github_copy_diverge_and_import(client, monkeypatch):
     st = ws.push(pid, overwrite=True)
     assert st["status"] == "ok" and gh.commits[gh.head]["parents"] == [before]
     assert gh.commits[gh.head]["tree"] == {"src/a.py": "b\n", "src/b.py": "c\n", "docs/note.md": "人が書いた\n"}
+    # IDE は、作業場と GitHub を分けて読める（作業場が原本・GitHub は写し）
+    c = client
+    t_ws = c.get(f"/products/{pid}/code/tree?source=workspace", headers=H).json()
+    t_gh = c.get(f"/products/{pid}/code/tree?source=github", headers=H).json()
+    assert t_ws["source"] == "workspace" and "src/b.py" in {e["path"] for e in t_ws["entries"]}
+    assert {e["path"] for e in t_gh["entries"]} == set(gh.commits[gh.head]["tree"])
+    assert c.get(f"/products/{pid}/code/file?path=src/a.py&source=github", headers=H).content == b"b\n"
     # 作業場は GitHub につないだあとも、原本として読める
     assert ws.read(pid, "src/b.py") == "c\n"

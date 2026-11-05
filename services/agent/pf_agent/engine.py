@@ -375,21 +375,22 @@ class Engine:
             raise FactoryError(409, "リポジトリがつながっていません")
         return product.repo, product.repo_branch or "main"
 
-    def code_tree(self, product: Product) -> dict:
-        """コードの一覧：開発の作業場が原本。作業場が空で GitHub だけがつながっていれば、GitHub を読む。"""
+    def code_tree(self, product: Product, source: str = "") -> dict:
+        """コードの一覧。source：workspace（開発の作業場）・github（つないだリポジトリ）。
+        指定がなければ作業場（作業場が空で GitHub だけがつながっていれば GitHub）。"""
         from . import workspace as ws
 
-        if ws.count(product.id) or not product.repo:
+        if source == "workspace" or (source != "github" and (ws.count(product.id) or not product.repo)):
             return ws.tree(product.id)
         try:
             return code.tree(*self._repo(product), token=ghsync.token(product.tenant_id)[0])
         except code.CodeError as e:
             raise FactoryError(e.status, e.message) from None
 
-    def code_file(self, product: Product, path: str) -> bytes:
+    def code_file(self, product: Product, path: str, source: str = "") -> bytes:
         from . import workspace as ws
 
-        if ws.count(product.id) or not product.repo:
+        if source == "workspace" or (source != "github" and (ws.count(product.id) or not product.repo)):
             try:
                 return ws.read(product.id, path).encode("utf-8")
             except ws.WorkspaceError as e:

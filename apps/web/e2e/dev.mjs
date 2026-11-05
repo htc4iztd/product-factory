@@ -35,7 +35,8 @@ const pid = page.url().split("/p/")[1];
 await page.goto(`${BASE}/p/${pid}/code`);
 const dev = page.getByLabel("開発", { exact: true });
 await dev.getByText(/GitHub は未連携です/).waitFor();
-await dev.getByText(/まだありません。⑫の担当が Issue を受けて動くと/).waitFor();
+await dev.getByRole("tab", { name: /変更/ }).click();
+await dev.getByText(/まだ変更の記録がありません/).waitFor();
 // ⑫の画面から実装PM に頼む → ⑫に Issue（承認）→ ⑫が動いてコードを書く
 await page.goto(`${BASE}/p/${pid}/s/s12`);
 await page.getByLabel("チャットに話す").fill("最初のユニットを作って");
@@ -45,17 +46,23 @@ await card.getByRole("button", { name: "承認", exact: true }).click();
 await card.getByText(/承認しました/).waitFor();
 await page.getByRole("link", { name: "開発を見る" }).click();
 await page.waitForURL(/\/code$/);
-// 数秒ごとに読み直すので、⑫が書くとそのまま出る
-await dev.getByRole("button", { name: /⑫コーディング担当/ }).first().waitFor({ timeout: 90000 });
-await dev.getByLabel("差分").getByText(/^\+?"""UN-/).first().waitFor({ timeout: 30000 }).catch(async () => {
-  await dev.getByRole("button", { name: /⑫コーディング担当/ }).first().click();
-  await dev.getByLabel("差分").waitFor();
-});
-await dev.getByLabel("差分").getByText("README.md").first().waitFor();
+// 数秒ごとに読み直すので、⑫が書くとそのまま出る（左の列はなく、上で記録を選ぶ）
+await dev.getByLabel("変更の記録").locator("option", { hasText: "⑫コーディング担当" }).first().waitFor({ state: "attached", timeout: 90000 });
+const diff = dev.getByLabel("差分");
+await diff.getByText("README.md").first().waitFor();
+if (await page.getByLabel("ユニット").count()) throw new Error("ユニットの列が残っている");
 await shot("d1-diff");
-await dev.getByRole("tab", { name: /ファイル/ }).click();
-await dev.getByLabel("ファイルの一覧").getByRole("button", { name: /README\.md/ }).click();
-await dev.getByText("作る家計簿").first().waitFor();
-await shot("d2-files");
+// IDE：作業場か GitHub か（GitHub につないでいなければ選べない）。「ファイル」のタブはない
+if (await dev.getByRole("tab", { name: /ファイル/ }).count()) throw new Error("ファイルのタブが残っている");
+await dev.getByRole("tab", { name: "IDE" }).click();
+const ideFrame = dev.locator('iframe[title="IDE"]');
+if (await ideFrame.count()) {
+  if (!(await ideFrame.getAttribute("src")).endsWith(`p=${pid}`)) throw new Error("IDE が作業場を開いていない");
+} else {
+  await dev.getByLabel("ファイルの一覧").getByRole("button", { name: /README\.md/ }).click();
+  await dev.getByText("作る家計簿").first().waitFor();
+}
+if (!(await dev.getByRole("button", { name: /GitHub/ }).last().isDisabled())) throw new Error("未連携なのに GitHub を選べる");
+await shot("d2-ide");
 console.log("dev e2e OK", pid);
 await browser.close();
