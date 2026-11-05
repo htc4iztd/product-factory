@@ -133,7 +133,8 @@ def test_cycle_review_and_next(env):
     assert c.post(P + "/review/next", headers=H, json={**body, "strategy": " "}).status_code == 422
     assert c.post(P + "/review/next", headers=VIEWER, json=body).status_code == 403
     r = c.post(P + "/review/next", headers=H, json=body).json()
-    assert r["cycle"] == 2 and r["state"] == "running" and r["progress"]["total"] == 0 and r["job_id"]
+    # 進み具合は新しいサイクルで測り直す（裏で担当がすぐ動き出すので、0 とは限らない。前のサイクルの 100% ではない）
+    assert r["cycle"] == 2 and r["state"] == "running" and r["progress"]["total"] < 100 and r["job_id"]
     wait_idle(c, p.id)
     # PM が工程ごとの目標を決め、担当に Issue を出し、担当が動いた
     st = c.get(P + "/cycle", headers=H).json()
