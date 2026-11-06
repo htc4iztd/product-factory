@@ -97,7 +97,11 @@ export function LiveTurn({ live, msgs }: { live: Live; msgs: AssistantMsg[] }) {
   const [now, setNow] = useState(Date.now());
   useEffect(() => { const t = setInterval(() => setNow(Date.now()), 1000); return () => clearInterval(t); }, []);
   const sec = Math.max(0, Math.round((now - live.at) / 1000));
-  const userShown = live.user && msgs.some((m) => m.id === live.user!.id); // 読み直しで本物が出ていれば、仮の発言は出さない
+  // 本物の発言がチャットに出ていれば、仮の発言は出さない。サーバーの「残した」の知らせ（user）より先に、
+  // 数秒ごとの読み直しで本物が届くことがあるので、送ったあとに増えた同じ文の PdM の発言でも判断する（二重に見せない）
+  const base = useRef(msgs.reduce((n, m) => Math.max(n, m.id), 0));
+  const userShown = (live.user && msgs.some((m) => m.id === live.user!.id))
+    || msgs.some((m) => m.role === "pdm" && m.id > base.current && m.text.trim() === live.text.trim());
   const last = live.steps.at(-1);
   return (
     <>
