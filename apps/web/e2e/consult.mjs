@@ -66,6 +66,23 @@ await shot("k2-notes");
 await room.getByText("⑥UXデザイン担当が持っている知識").click();
 await room.getByText("・ゼロから磨き上げる順番").waitFor();
 
+// 部屋の中の発言への返事は、部屋の入力欄で受ける（右のチャットへは行かない）
+await room.locator("[data-msg]").filter({ hasText: "最初に一番うれしくなってほしい人" }).getByRole("button", { name: /返事をする/ }).click();
+await room.getByLabel("相談の入力").getByLabel("引用", { exact: true }).waitFor();
+await room.getByLabel("相談に話す").fill("共働きの夫婦です");
+await room.getByLabel("相談に話す").press("Enter");
+await room.locator("[data-msg]").filter({ hasText: "共働きの夫婦です" }).first().waitFor();
+// 相談の部屋のやり取りは、右のチャットには出ない
+await page.goto(`${BASE}/p/${pid}/s/s06`);
+const side = page.getByRole("complementary", { name: "チャット" });
+await side.waitFor();
+await page.waitForTimeout(1500);
+if (await side.getByText("対象は共働きの夫婦に絞る").count()) throw new Error("相談の部屋のやり取りが右のチャットに出ている");
+// ②市場分析の画面から、リサーチライブラリへ
+await page.goto(`${BASE}/p/${pid}/s/s02`);
+await page.getByRole("link", { name: "リサーチライブラリ" }).first().click();
+await page.waitForURL(/\/research$/);
+
 // スマホ：同じ相談の続き
 const sp = await browser.newContext({ ...devices["iPhone 13"], storageState: await pc.storageState() });
 const m = await sp.newPage();

@@ -1,14 +1,24 @@
 "use client";
+import { useCallback, useEffect, useState } from "react";
 import { ClipboardCheck } from "lucide-react";
+import type { AssistantMsg } from "@/lib/agent";
 import { Feed } from "@/components/assistant/AssistantShell";
 import { Avatar } from "@/components/rail/Avatar";
 import type { ConsultNote } from "@/app/(app)/p/[id]/s/[stage]/consult/actions";
 import { useMobile } from "./MobileShell";
 
 // スマホの相談：合意メモ（たためる）と、担当との対話。入力は下の入力欄（話題はこの担当との相談）
-export function MobileConsult({ sid, name, notes }: { sid: string; name: string; notes: ConsultNote[] }) {
-  const { msgs, live, replace } = useMobile();
-  const thread = msgs.filter((m) => m.context.kind === "consult" && m.context.stage_id === sid);
+export function MobileConsult({ pid, sid, name, notes, initial }: { pid: string; sid: string; name: string; notes: ConsultNote[]; initial: AssistantMsg[] }) {
+  const { live } = useMobile();
+  // 相談の部屋のやり取りは右のチャット（下の入力欄のチャット）とは別。部屋の発言をここで読む
+  const [thread, setThread] = useState(initial);
+  const load = useCallback(async () => {
+    const r = await fetch(`/api/p/${pid}/consult/${sid}`, { cache: "no-store" }).catch(() => null);
+    if (r?.ok) setThread((await r.json()).thread);
+  }, [pid, sid]);
+  useEffect(() => { const t = setInterval(load, 4000); return () => clearInterval(t); }, [load]);
+  useEffect(() => { if (!live) load(); }, [live, load]);
+  const replace = (m: AssistantMsg) => setThread((xs) => xs.map((x) => (x.id === m.id ? m : x)));
   return (
     <div>
       <details className="mx-3 mt-2 rounded-xl bg-emerald-50/60 px-3 py-2 text-[13px]">

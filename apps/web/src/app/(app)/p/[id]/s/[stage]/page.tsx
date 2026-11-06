@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { ArrowRight, Code2, Lock, MessagesSquare, Target } from "lucide-react";
+import { ArrowRight, Code2, Library, Lock, MessagesSquare, Target } from "lucide-react";
 import { agent, AgentError, type FrameworkDefT, type Overview, type StageDetail, type VariantStage } from "@/lib/agent";
 import { auth } from "@/lib/auth";
 import { PatternStageBar } from "@/components/autodev/PatternStageBar";
@@ -66,6 +66,7 @@ export default async function StagePage({ params, searchParams }: Props) {
             {st.enabled && !awaiting && !pp && (
               <CommitButton pid={id} sid={stage} missing={st.missing} dirty={st.dirty} approval={st.approval_required} hasVersion={st.current_version > 0} />
             )}
+            {stage === "s02" && <Link href="/research" className="btn-secondary"><Library size={14} />リサーチライブラリ</Link>}
             {stage === "s12" && <Link href={`/p/${id}/code`} className="btn-secondary"><Code2 size={14} />開発を見る</Link>}
             {!pp && <Link href={`/p/${id}/s/${stage}/consult`} className="btn-secondary"><MessagesSquare size={14} />担当に相談</Link>}
             {!pp && <ExportMenu printHref={`/print/p/${id}/s/${stage}`} doc={{

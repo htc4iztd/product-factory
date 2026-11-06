@@ -72,7 +72,10 @@ export function MobileShell({ children, products }: { children: React.ReactNode;
   const replace = useCallback((m: AssistantMsg) => { setMsgs((xs) => xs.map((x) => (x.id === m.id ? m : x))); router.refresh(); }, [router]);
   // 送る：その場で発言を出し、返事は流れてくるまま出す（ホーム以外では、チャットが下から出る）
   const chat = useChatSend((mine, reply) => {
-    setMsgs((xs) => [...xs.filter((x) => x.id !== mine.id && x.id !== reply.id), mine, reply].sort((a, b) => a.id - b.id));
+    // 相談の部屋のやり取りは、右のチャットに足さない（部屋の中だけ）
+    if (!(mine.context.kind === "consult" && String((mine.context as { path?: string }).path ?? "").includes("/consult"))) {
+      setMsgs((xs) => [...xs.filter((x) => x.id !== mine.id && x.id !== reply.id), mine, reply].sort((a, b) => a.id - b.id));
+    }
     load();
   });
   const onSend = (b: SendBody) => { if (!inline) setSheet(true); return chat.send(b); };

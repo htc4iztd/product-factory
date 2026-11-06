@@ -87,7 +87,7 @@ def notes_md(product_id: str, sid: str) -> str:
 
 
 def thread(tenant: str, user: str, product_id: str, sid: str, limit: int = 120) -> list[dict]:
-    """この工程の担当との相談の発言（新しいものから limit 件を、古い順に）。"""
+    """この工程の担当との相談の部屋の発言（新しいものから limit 件を、古い順に）。右のチャットとは別。"""
     from .assistant import message_dict
 
     _stage(sid)
@@ -96,8 +96,9 @@ def thread(tenant: str, user: str, product_id: str, sid: str, limit: int = 120) 
             AssistantMessage.tenant_id == tenant, AssistantMessage.product_id == product_id,
             (AssistantMessage.user == user) | AssistantMessage.user.is_(None),
         ).order_by(AssistantMessage.id.desc()).limit(600)).scalars().all()
-        out = [m for m in rows
-               if (m.context or {}).get("kind") == "consult" and (m.context or {}).get("stage_id") == sid]
+        from .assistant import in_room
+
+        out = [m for m in rows if in_room(m.context) and (m.context or {}).get("stage_id") == sid]
         return [message_dict(m) for m in reversed(out[:limit])]
 
 

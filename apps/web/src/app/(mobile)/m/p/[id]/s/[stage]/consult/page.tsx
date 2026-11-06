@@ -10,7 +10,7 @@ export default async function MobileConsultPage({ params }: { params: Promise<{ 
   return (
     <div>
       <SubHeader back={`/p/${id}/s/${stage}`} title={`${v.agent.name}との相談`} sub="決めたことは合意メモに残り、下書きの土台になる" pc={false} />
-      <MobileConsult sid={stage} name={v.agent.name} notes={v.notes} />
+      <MobileConsult pid={id} sid={stage} name={v.agent.name} notes={v.notes} initial={v.thread} />
     </div>
   );
 }

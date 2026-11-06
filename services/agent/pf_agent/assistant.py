@@ -649,8 +649,16 @@ def feed(tenant: str, user: str, limit: int = 80, after: int = 0, product_id: st
             AssistantMessage.id > after,
             AssistantMessage.product_id == product_id if product_id else AssistantMessage.product_id.is_(None),
         )
-        rows = list(s.execute(q.order_by(AssistantMessage.id.desc()).limit(limit)).scalars())
+        # 相談の部屋（/consult）でのやり取りは、右のチャットには出さない（部屋の中だけ）
+        rows = [m for m in s.execute(q.order_by(AssistantMessage.id.desc()).limit(limit * 3)).scalars()
+                if not in_room(m.context)][:limit]
         return [message_dict(m) for m in reversed(rows)]
+
+
+def in_room(ctx: dict | None) -> bool:
+    """相談の部屋（/p/{id}/s/{sid}/consult）でのやり取りか。@担当・返事で始めた相談は、右のチャットのもの。"""
+    c = ctx or {}
+    return c.get("kind") == "consult" and "/consult" in str(c.get("path") or "")
 
 
 def notify(

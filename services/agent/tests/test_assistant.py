@@ -356,6 +356,11 @@ def test_consult(client):
     r4 = say(c, f"/p/{pid}", "@⑥UXデザイン担当 締めの時間を短くしたい",
              mentions=[{"kind": "agent", "ref": "s06", "label": "⑥UXデザイン担当"}]).json()["reply"]
     assert r4["agent"] == "s06" and r4["context"]["kind"] == "consult"
+    # 相談の部屋のやり取りは右のチャットには出ず、部屋の中だけ。@担当・返事で始めた相談は右のチャットに出る
+    feed = [m["text"] for m in c.get(f"/assistant/messages?product={pid}", headers=H).json()]
+    assert "対象は共働きの夫婦に絞る" not in feed and "@⑥UXデザイン担当 締めの時間を短くしたい" in feed
+    room = [m["text"] for m in c.get(f"/products/{pid}/stages/s06/consult", headers=H).json()["thread"]]
+    assert "対象は共働きの夫婦に絞る" in room and "@⑥UXデザイン担当 締めの時間を短くしたい" not in room
     # 合意メモは担当が動くときに読む
     with db.session() as s:
         product = s.get(db.Product, pid)

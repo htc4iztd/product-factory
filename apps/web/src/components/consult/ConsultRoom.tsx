@@ -2,8 +2,8 @@
 import { useCallback, useEffect, useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { ArrowUp, BookOpen, ClipboardCheck, FilePenLine, Plus, Sparkles, Trash2 } from "lucide-react";
-import type { AssistantMsg } from "@/lib/agent";
-import { Feed } from "@/components/assistant/AssistantShell";
+import type { AssistantMsg, Quote } from "@/lib/agent";
+import { Feed, QuoteBox } from "@/components/assistant/AssistantShell";
 import { Avatar } from "@/components/rail/Avatar";
 import { useChatSend } from "@/components/chat/LiveTurn";
 import { addConsultNote, dropConsultNote, type ConsultView } from "@/app/(app)/p/[id]/s/[stage]/consult/actions";
@@ -27,7 +27,7 @@ export function ConsultRoom({ pid, sid, initial, readOnly }: { pid: string; sid:
     load();
   });
   const changed = (m: AssistantMsg) => { setView((v) => ({ ...v, thread: v.thread.map((x) => (x.id === m.id ? m : x)) })); load(); router.refresh(); };
-  const send = (text: string) => chat.send({ path, text, mentions: [], attachments: [] });
+  const send = (text: string, replyTo: number | null = null) => chat.send({ path, text, mentions: [], attachments: [], reply_to: replyTo });
   const empty = view.thread.length === 0 && !chat.live;
   return (
     <div className="grid h-full min-h-0 grid-cols-[minmax(0,1fr)_340px] overflow-hidden rounded-xl border border-zinc-200 bg-white" aria-label="担当との相談">
@@ -95,21 +95,30 @@ function Notes({ pid, sid, notes, readOnly, busy, onChanged, onDraft }: {
   );
 }
 
-function Composer({ busy, onSend, name }: { busy: boolean; onSend: (t: string) => Promise<string | null>; name: string }) {
+function Composer({ busy, onSend, name }: { busy: boolean; onSend: (t: string, replyTo: number | null) => Promise<string | null>; name: string }) {
   const [text, setText] = useState("");
+  const [quote, setQuote] = useState<Quote | null>(null);
+  // 部屋の中の発言の「返事をする」は、この部屋の入力欄で受ける（右のチャットには行かない）
+  useEffect(() => {
+    const on = (e: Event) => { const q = (e as CustomEvent<{ quote?: Quote }>).detail?.quote; if (q) { setQuote(q); setTimeout(() => box.current?.focus(), 10); } };
+    window.addEventListener("pf:compose", on);
+    return () => window.removeEventListener("pf:compose", on);
+  }, []);
   const [err, setErr] = useState<string | null>(null);
   const box = useRef<HTMLTextAreaElement>(null);
   useEffect(() => { const el = box.current; if (!el) return; el.style.height = "auto"; el.style.height = `${Math.min(el.scrollHeight, 180)}px`; }, [text]);
   const send = async () => {
     const t = text.trim();
     if (!t || busy) return;
-    setText(""); setErr(null);
-    const e = await onSend(t);
-    if (e) { setErr(e); setText(t); }
+    const q = quote;
+    setText(""); setErr(null); setQuote(null);
+    const e = await onSend(t, q?.id ?? null);
+    if (e) { setErr(e); setText(t); setQuote(q); }
   };
   return (
     <div className="border-t border-zinc-200 px-4 py-3" aria-label="相談の入力">
       {err && <p className="mb-1 text-[12px] text-rose-600">{err}</p>}
+      {quote && <QuoteBox q={quote} onRemove={() => setQuote(null)} />}
       <div className="flex items-end gap-2 rounded-2xl border border-zinc-300 bg-white px-3 py-2 focus-within:border-zinc-500">
         <textarea ref={box} rows={1} value={text} onChange={(e) => setText(e.target.value)} aria-label="相談に話す"
           placeholder={busy ? `${name}が書いています…` : `${name}に相談する（Enter で送る・Shift+Enter で改行）`}
