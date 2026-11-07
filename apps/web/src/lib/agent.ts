@@ -96,7 +96,7 @@ export type StageSummary = {
 export type Product = {
   id: string; name: string; idea: string; scope: string; mode: string; status: string;
   cover_image_id: string | null; repo: string | null; repo_branch: string | null; created_at: string;
-  cycle?: number; cycle_state?: string;
+  cycle?: number; cycle_state?: string; schedule_paused?: boolean;
 };
 // サイクルとプロダクトレビュー
 export type CycleGoal = { goal: string; plan: string; done_when: string; by: string };

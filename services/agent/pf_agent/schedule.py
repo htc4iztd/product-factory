@@ -72,6 +72,26 @@ def _hours(expr: str, tz: str, start: dt.datetime) -> list[int]:
     return counts
 
 
+def manually_paused(product_id: str) -> bool:
+    """PdM が全エージェントの定期実行を一時停止しているか。"""
+    with session() as s:
+        p = s.get(Product, product_id)
+        return bool(p and p.schedule_paused)
+
+
+def set_paused(product: Product, user: str, paused: bool) -> dict:
+    """全エージェントの定期実行（工程の担当・PM・定期の仕事）を一時停止する／再開する。予定の設定はそのまま残る。"""
+    from . import repo
+
+    with session() as s:
+        p = s.get(Product, product.id)
+        p.schedule_paused = paused
+        p.schedule_paused_at = _now().isoformat(timespec="seconds") if paused else None  # 列は30文字
+        s.commit()
+    repo.log(product.id, None, "human", user, "schedule.pause" if paused else "schedule.resume", body={})
+    return {"paused": paused}
+
+
 def view(product: Product) -> dict:
     ensure(product)
     now = _now()
@@ -115,7 +135,19 @@ def view(product: Product) -> dict:
         "groups": [{"key": g, "label": lb} for g, lb, _ in GROUPS],
         "agents": agents,
         "platform": platform_setting(product.tenant_id),
+        "paused": _paused_info(product.id),
     }
+
+
+def _paused_info(product_id: str) -> dict:
+    from . import cycles
+
+    with session() as s:
+        p = s.get(Product, product_id)
+        manual, at = bool(p and p.schedule_paused), (p.schedule_paused_at if p else None)
+    st = cycles.state_of(product_id)
+    return {"manual": manual, "at": at, "review": st != cycles.RUNNING,
+            "review_label": cycles.STATE_LABEL.get(st, st) if st != cycles.RUNNING else ""}
 
 
 def bulk(product: Product, keys: list[str], expr: str | None, enabled: bool | None) -> dict:

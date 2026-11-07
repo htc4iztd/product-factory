@@ -598,8 +598,10 @@ def tick(now: dt.datetime | None = None) -> list[str]:
     by: dict[str, list[str]] = {}
     claimed: dict[tuple[str, str], tuple[int, dt.datetime]] = {}
     from . import cycles
+    from . import schedule as sched
 
-    paused = {pid for _, pid, *_ in due if cycles.paused(pid)}
+    # プロダクトレビューなどサイクル実行中でないとき・PdM が定期実行を一時停止しているときは動かさない
+    paused = {pid for _, pid, *_ in due if cycles.paused(pid) or sched.manually_paused(pid)}
     for aid, pid, key, at, expr, tz in due:
         with session() as s:
             try:

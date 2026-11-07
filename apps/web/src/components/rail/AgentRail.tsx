@@ -116,6 +116,7 @@ export function AgentRail({ pid, product, agents: initial, platform: initialPlat
         <span className={`ml-auto shrink-0 ${tickOk ? "text-zinc-500" : "font-medium text-rose-600"}`} title="定期実行（tick）が最後に来た時刻">
           {tickMin === null ? "定期実行：記録なし" : `定期実行 ${tickMin < 1 ? "1分以内" : `${tickMin}分前`}`}
         </span>
+        {product.schedule_paused && <Link href={`/p/${pid}/schedule`} className="shrink-0 rounded bg-amber-100 px-1 font-medium text-amber-800" title="全エージェントの定期実行を一時停止しています">一時停止中</Link>}
       </div>
       {working > 0 && <div className="mx-2.5 mb-1 px-1.5 text-[10.5px] font-medium text-brand-700">{working} 人が作業中</div>}
       <nav className="flex-1 space-y-4 overflow-y-auto px-2.5 py-2" aria-label="エージェント">

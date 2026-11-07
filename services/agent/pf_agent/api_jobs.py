@@ -676,6 +676,18 @@ def put_schedule(product_id: str, body: ScheduleBody, c: Caller = Depends(caller
     return schedule.bulk(_p(c, product_id, True), body.keys, body.cron, body.enabled)
 
 
+class PauseBody(BaseModel):
+    paused: bool
+
+
+@router.put(P + "/schedule/pause")
+def pause_schedule(product_id: str, body: PauseBody, c: Caller = Depends(caller)):
+    """全エージェントの定期実行を一時停止する／再開する（このプロダクトだけ）。"""
+    from . import schedule
+
+    return schedule.set_paused(_p(c, product_id, True), c.user, body.paused)
+
+
 class PreviewBody(BaseModel):
     cron: str = Field(min_length=1, max_length=100)
 

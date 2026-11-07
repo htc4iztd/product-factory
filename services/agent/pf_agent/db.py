@@ -50,6 +50,9 @@ class Product(Base):
     gh_sync: Mapped[str] = mapped_column(String(8), default="off")
     gh_import: Mapped[bool] = mapped_column(Boolean, default=False)
     gh_synced_at: Mapped[str | None] = mapped_column(String(30), nullable=True)   # 最後に取り込んだ時刻
+    # 全エージェントの定期実行を、PdM が一時停止している（「今すぐ動かす」・チャット・Issue を受けて動くのは止めない）
+    schedule_paused: Mapped[bool] = mapped_column(Boolean, default=False)
+    schedule_paused_at: Mapped[str | None] = mapped_column(String(30), nullable=True)
     # サイクル（全工程が100%になったら1回り。プロダクトレビューを経て次のサイクルへ）
     cycle: Mapped[int] = mapped_column(Integer, default=1)
     # サイクルの計画（PdM が決める）：[{label: 位置付け, purpose: 目的, exit: 終える条件}]。並べた数がサイクル数
@@ -1068,7 +1071,8 @@ _ADDED_COLUMNS = {
                  "cycle": "INTEGER DEFAULT 1", "cycle_state": "VARCHAR(10) DEFAULT 'running'", "cycle_plan": "JSON",
                  "release_target": "JSON",
                  "gh_sync": "VARCHAR(8) DEFAULT 'off'", "gh_import": "BOOLEAN DEFAULT {false}",
-                 "gh_synced_at": "VARCHAR(30)"},
+                 "gh_synced_at": "VARCHAR(30)", "schedule_paused": "BOOLEAN DEFAULT {false}",
+                 "schedule_paused_at": "VARCHAR(30)"},
     "chat_messages": {"session_id": "VARCHAR(32)", "attachments": "JSON"},
     "import_docs": {"readers": "JSON"},
     "docs": {"readers": "JSON"},

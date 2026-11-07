@@ -3,7 +3,7 @@ import Link from "next/link";
 import { useEffect, useMemo, useState, useTransition } from "react";
 import { CalendarClock, Pause, Play, Save } from "lucide-react";
 import { DAYS, EVERY_HOURS, EVERY_MIN, MODES, defaultFor, fromCron, toCron, type Sched } from "@/lib/schedule";
-import { previewSchedule, saveSchedule, setPlatformEvery } from "@/app/(app)/p/[id]/org-actions";
+import { pauseSchedule, previewSchedule, saveSchedule, setPlatformEvery } from "@/app/(app)/p/[id]/org-actions";
 import { Avatar } from "@/components/rail/Avatar";
 
 const when = (t: string) => new Date(t).toLocaleString("ja-JP", { timeZone: "Asia/Tokyo", month: "numeric", day: "numeric", weekday: "short", hour: "2-digit", minute: "2-digit" });
@@ -74,8 +74,33 @@ export type SchedAgent = {
 export type ScheduleView = {
   start: string; now: string; hours: number; groups: { key: string; label: string }[]; agents: SchedAgent[];
   platform: { every_min: number; label: string; last_at: string | null; choices: number[]; what: string };
+  paused?: { manual: boolean; at: string | null; review: boolean; review_label: string };
 };
 export type OverviewRow = { id: string; name: string; set_up: boolean; groups: { key: string; label: string; schedules: string[]; stopped: number; total: number; next_run_at: string | null }[] };
+
+// 全エージェントの定期実行の一時停止（このプロダクトだけ）。予定の設定はそのまま残り、再開すると予定どおり動く
+function PauseAll({ pid, paused }: { pid: string; paused?: ScheduleView["paused"] }) {
+  const [pending, start] = useTransition();
+  const [err, setErr] = useState<string | null>(null);
+  const on = !!paused?.manual;
+  const when = paused?.at ? new Date(paused.at).toLocaleString("ja-JP", { timeZone: "Asia/Tokyo", month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit" }) : "";
+  return (
+    <section className={`card flex flex-wrap items-center gap-3 p-4 ${on ? "border-amber-300 bg-amber-50/60" : ""}`} aria-label="定期実行の一時停止">
+      <div className="min-w-0 flex-1">
+        <div className="text-[13px] font-semibold">{on ? `全エージェントの定期実行を止めています${when ? `（${when}から）` : ""}` : "全エージェントの定期実行"}</div>
+        <p className="text-[12px] text-zinc-500">{on
+          ? "予定の時刻が来ても動きません（予定の設定はそのまま）。「今すぐ動かす」・チャット・Issue を受けて動くのは止めていません。"
+          : "このプロダクトのすべてのエージェント（工程の担当・PM・定期の仕事）の定期実行を、まとめて一時停止できます。"}
+          {paused?.review && <span className="ml-1 text-zinc-600">いまは{paused.review_label}なので、定期実行はもともと止まっています。</span>}</p>
+        {err && <p className="text-[12px] text-rose-600">{err}</p>}
+      </div>
+      <button className={on ? "btn-primary" : "btn-secondary"} disabled={pending}
+        onClick={() => start(async () => { const r = await pauseSchedule(pid, !on); setErr(r.error ?? null); })}>
+        {on ? <><Play size={14} />定期実行を再開する</> : <><Pause size={14} />全エージェントの定期実行を一時停止する</>}
+      </button>
+    </section>
+  );
+}
 
 // プロダクトの予定：時間割（これから24時間）と、選んだエージェントの予定をまとめて変える
 export function ScheduleBoard({ pid, v, versions }: { pid: string; v: ScheduleView; versions: Record<string, string> }) {
@@ -91,6 +116,7 @@ export function ScheduleBoard({ pid, v, versions }: { pid: string; v: ScheduleVi
   });
   return (
     <div className="space-y-4">
+      <PauseAll pid={pid} paused={v.paused} />
       <section className="card p-4" aria-label="予定を変える">
         <div className="flex flex-wrap items-start gap-4">
           <div className="min-w-0 flex-1">

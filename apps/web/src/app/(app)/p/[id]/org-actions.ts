@@ -73,6 +73,10 @@ export async function previewSchedule(cron: string): Promise<{ error?: string; l
 export async function saveSchedule(pid: string, keys: string[], body: { cron?: string; enabled?: boolean }) {
   return call(pid, "/schedule", "PUT", { keys, ...body });
 }
+// 全エージェントの定期実行を一時停止する／再開する（このプロダクトだけ）
+export async function pauseSchedule(pid: string, paused: boolean) {
+  return call(pid, "/schedule/pause", "PUT", { paused });
+}
 export async function setPlatformEvery(pid: string, every_min: number): Promise<R> {
   try {
     await agent("/platform/schedule", { method: "PUT", body: { every_min } });

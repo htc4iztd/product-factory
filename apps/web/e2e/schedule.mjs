@@ -83,5 +83,14 @@ for (const n of ["①アイディエーション担当", "②市場分析担当"
   await thread.getByText(n).first().waitFor();
 }
 await shot("s2-board", true);
+// 全エージェントの定期実行を一時停止 → 左のレールに「一時停止中」→ 再開
+await page.goto(`${BASE}/p/${pid}/schedule`);
+const pause = page.getByLabel("定期実行の一時停止");
+await pause.getByRole("button", { name: "全エージェントの定期実行を一時停止する" }).click();
+await pause.getByText(/全エージェントの定期実行を止めています/).waitFor();
+await page.getByRole("link", { name: "一時停止中" }).waitFor();
+await pause.getByRole("button", { name: "定期実行を再開する" }).click();
+await pause.getByRole("button", { name: "全エージェントの定期実行を一時停止する" }).waitFor();
+if (await page.getByRole("link", { name: "一時停止中" }).count()) throw new Error("再開したのに一時停止中のまま");
 console.log(`ok product=${pid}`);
 await browser.close();

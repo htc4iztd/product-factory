@@ -556,4 +556,5 @@ def product_dict(p: Product) -> dict:
     return {"id": p.id, "name": p.name, "idea": p.idea, "scope": p.scope, "mode": p.mode,
             "status": p.status, "cover_image_id": p.cover_image_id, "repo": p.repo, "repo_branch": p.repo_branch,
             "created_by": p.created_by, "cycle": p.cycle or 1, "cycle_state": p.cycle_state or "running",
+            "schedule_paused": bool(p.schedule_paused),
             "created_at": p.created_at.isoformat()}

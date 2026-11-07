@@ -231,6 +231,8 @@ def tick(now: dt.datetime | None = None) -> list[str]:
             info = schedule_dict(a)
             product = s.get(Product, a.product_id)
             s.expunge(product)
+        if product.schedule_paused:  # PdM が定期実行を一時停止している（予定の時刻だけ進める）
+            continue
         try:
             job_id = _dispatch(product, info, info["created_by"])
         except Exception as e:  # noqa: BLE001  1つの失敗で他の予定を止めない

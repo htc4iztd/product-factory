@@ -240,3 +240,44 @@ def test_schedule_view_bulk_preview_and_overview(client):
     assert c.put("/platform/schedule", headers=H, json={"every_min": 15}).json()["label"] == "15分ごと"
     assert c.put("/platform/schedule", headers=H, json={"every_min": 7}).status_code == 422
     assert c.put("/platform/schedule", headers=VIEWER, json={"every_min": 15}).status_code == 403
+
+
+def test_pause_all_schedules(client):
+    """プロダクトごとに全エージェントの定期実行を一時停止できる。止めている間は予定の時刻が来ても動かさない
+    （時刻だけ進める）。「今すぐ動かす」は止めない。再開すると、また予定どおり動く。"""
+    from pf_agent import team
+    from pf_agent.db import TeamAgent, session
+    c = client
+    pid = new_product(c)
+    c.get(f"/products/{pid}/team", headers=H)
+    other = new_product(c)
+    c.get(f"/products/{other}/team", headers=H)
+
+    def due(p, *keys):
+        past = dt.datetime.now(dt.UTC) - dt.timedelta(minutes=1)
+        with session() as s:
+            s.query(TeamAgent).filter(TeamAgent.product_id == p, TeamAgent.key.in_(keys)).update(
+                {"next_run_at": past}, synchronize_session=False)
+            s.commit()
+
+    assert c.put(f"/products/{pid}/schedule/pause", headers=VIEWER, json={"paused": True}).status_code == 403
+    assert c.put(f"/products/{pid}/schedule/pause", headers=H, json={"paused": True}).json() == {"paused": True}
+    v = c.get(f"/products/{pid}/schedule", headers=H).json()
+    assert v["paused"]["manual"] is True and v["paused"]["at"] and len(v["paused"]["at"]) <= 30  # 列は30文字
+    assert c.get(f"/products/{pid}", headers=H).json()["product"]["schedule_paused"] is True
+    due(pid, "pm_design")
+    due(other, "pm_design")
+    started = team.tick()
+    assert len(started) == 1  # 止めていないプロダクトだけ動く
+    for j in started:
+        wait_job(c, j)
+    # 「今すぐ動かす」は止めない
+    r = c.post(f"/products/{pid}/team/run", headers=H, json={"keys": ["pm_biz"]})
+    assert r.status_code == 200 and r.json()["job_id"]
+    wait_job(c, r.json()["job_id"])
+    # 再開すると予定どおり動く
+    c.put(f"/products/{pid}/schedule/pause", headers=H, json={"paused": False})
+    due(pid, "pm_design")
+    again = team.tick()
+    assert len(again) == 1
+    wait_job(c, again[0])
