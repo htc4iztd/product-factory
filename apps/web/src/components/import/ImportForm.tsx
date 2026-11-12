@@ -43,9 +43,9 @@ export function ImportForm({ pid, stages }: { pid: string; stages: StageSummary[
         {file ? (
           <div className="text-[13px]"><span className="font-medium">{file.name}</span><span className="ml-2 text-zinc-500">{(file.size / 1024).toFixed(0)} KB</span></div>
         ) : (
-          <div className="text-[13px] text-zinc-600">Excel・Word・PowerPoint（.xlsx .docx .pptx）かテキスト（.md .txt .csv）をドロップ、または押して選ぶ</div>
+          <div className="text-[13px] text-zinc-600">PDF・Excel・Word・PowerPoint（.pdf .xlsx .docx .pptx）かテキスト（.md .txt .csv）をドロップ、または押して選ぶ</div>
         )}
-        <input ref={input} type="file" aria-label="取り込む資料" accept=".xlsx,.xlsm,.docx,.pptx,.md,.txt,.csv" className="hidden"
+        <input ref={input} type="file" aria-label="取り込む資料" accept=".pdf,.xlsx,.xlsm,.docx,.pptx,.md,.txt,.csv" className="hidden"
           onChange={(e) => setFile(e.target.files?.[0] ?? null)} />
       </div>
       <fieldset className="space-y-1.5 text-[13px]">

@@ -447,6 +447,19 @@ class ResearchArticle(Base):
     added_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), default=_now)
 
 
+class ResearchFile(Base):
+    """人が上げた資料（PDF・Office など）の原本。記事（RA-n）から開ける。"""
+    __tablename__ = "research_files"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    tenant_id: Mapped[str] = mapped_column(String(64), index=True)
+    article_id: Mapped[int] = mapped_column(Integer, index=True)
+    filename: Mapped[str] = mapped_column(String(300))
+    mime: Mapped[str] = mapped_column(String(120))
+    data: Mapped[bytes] = mapped_column(LargeBinary)
+    created_by: Mapped[str] = mapped_column(String(200))
+    created_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), default=_now)
+
+
 class ResearchFact(Base):
     """記事に書かれた数字・事実を1件ずつの行にしたもの（RF-n）。"""
     __tablename__ = "research_facts"

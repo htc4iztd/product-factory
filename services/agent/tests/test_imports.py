@@ -127,8 +127,10 @@ def test_import_fills_empty_and_proposes_rest(client):
 def test_import_rejects_bad_input(client):
     c = client
     pid = c.post("/products", headers=H, json={"name": "取込", "idea": "x"}).json()["id"]
-    r = c.post(f"/products/{pid}/imports", headers=H, json={"filename": "a.pdf", "content_b64": "eA=="})
+    r = c.post(f"/products/{pid}/imports", headers=H, json={"filename": "a.exe", "content_b64": "eA=="})
     assert r.status_code == 422 and "読める形式" in r.json()["detail"]
+    r = c.post(f"/products/{pid}/imports", headers=H, json={"filename": "a.pdf", "content_b64": "eA=="})
+    assert r.status_code == 422 and "PDF" in r.json()["detail"]
     r = c.post(f"/products/{pid}/imports", headers=H, json={"filename": "a.xlsx", "content_b64": "***"})
     assert r.status_code == 422
     r = c.post(f"/products/{pid}/imports", headers=H,

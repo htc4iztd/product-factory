@@ -20,7 +20,7 @@ const ACTION = {
 
 const when = (t: string) => new Date(t).toLocaleString("ja-JP", { timeZone: "Asia/Tokyo", month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit" });
 
-// ドキュメント：手で書く Markdown と、取り込んだ資料（Excel・Word・PowerPoint・テキスト）を1か所に並べる。
+// ドキュメント：手で書く Markdown と、取り込んだ資料（PDF・Excel・Word・PowerPoint・テキスト）を1か所に並べる。
 // 取り込んだ資料は、どの工程のどの項目にあたるかを AI が見分けて入れ（または承認待ちの案にし）、読んでいいエージェントが読む
 export default async function DocsPage({ params, searchParams }: { params: Promise<{ id: string }>; searchParams: Promise<{ doc?: string }> }) {
   const { id } = await params;
@@ -46,7 +46,7 @@ export default async function DocsPage({ params, searchParams }: { params: Promi
       <PageHeader
         crumbs={<><Link href={`/p/${id}`} className="hover:text-zinc-700">ダッシュボード</Link><span>/</span><span>ドキュメント</span></>}
         title="ドキュメント"
-        sub="手で書くドキュメントと、取り込んだ資料（Excel・Word・PowerPoint・テキスト）。取り込んだ資料は、どの工程のどの項目にあたるかを AI が見分けて入れます（資料に書かれていないことは入れません）。"
+        sub="手で書くドキュメントと、取り込んだ資料（PDF・Excel・Word・PowerPoint・テキスト）。取り込んだ資料は、どの工程のどの項目にあたるかを AI が見分けて入れます（資料に書かれていないことは入れません）。"
       />
       <div className="grid gap-6 px-8 py-6 xl:grid-cols-[400px_minmax(0,1fr)]">
         <div className="space-y-4">

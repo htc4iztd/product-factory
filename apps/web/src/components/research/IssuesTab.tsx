@@ -13,7 +13,7 @@ export function Refs({ nums, M }: { nums: number[]; M: Model }) {
       {nums.map((n, i) => {
         const a = M.byNum[n];
         if (!a) return null;
-        return <a key={n} href={a.url.startsWith("http") ? a.url : `#${a.key}`} target="_blank" rel="noopener noreferrer"
+        return <a key={n} href={/^(https?:\/\/|\/api\/)/.test(a.url) ? a.url : `#${a.key}`} target="_blank" rel="noopener noreferrer"
           title={`${a.key} ${a.published ?? ""} ${a.publisher}：${a.head}`} className="text-brand-700 hover:underline">[{i + 1}]</a>;
       })}
     </span>

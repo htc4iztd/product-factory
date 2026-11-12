@@ -43,7 +43,7 @@ export function AttachButton({ a, disabled }: { a: ReturnType<typeof useAttachme
         <Paperclip size={15} className={a.busy ? "animate-pulse" : ""} />
       </button>
       <input ref={input} type="file" multiple hidden aria-label="添付するファイル"
-        accept=".xlsx,.xlsm,.docx,.pptx,.md,.txt,.csv,.html,.htm,.png,.jpg,.jpeg,.webp,.gif"
+        accept=".pdf,.xlsx,.xlsm,.docx,.pptx,.md,.txt,.csv,.html,.htm,.png,.jpg,.jpeg,.webp,.gif"
         onChange={(e) => { if (e.target.files) void a.add(e.target.files); e.target.value = ""; }} />
     </>
   );

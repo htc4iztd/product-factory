@@ -461,3 +461,72 @@ def test_research_update_scopes(client):
     deps = {t["id"]: t["deps"] for t in research.update_tasks("all")}
     assert deps["read"] == ["search", "feeds"] and deps["issues"] == ["read"] and deps["report-public"] == ["read"]
     assert deps["latest"] == ["players"]
+
+
+def test_research_files_pdf_and_office(client, monkeypatch):
+    """PDF・Office の資料を上げると、文字を取り出して記事にする（要約・ファクト）。原本は記事から開ける。"""
+    import base64
+    import io
+    import zipfile
+
+    from pdfmake import make_pdf
+
+    from pf_agent import research
+
+    c = client
+    c.post("/research", headers=H, json={"name": "家計", "issues": ["締め処理"]})
+    b64 = lambda b: base64.b64encode(b).decode()  # noqa: E731
+
+    def up(name, data, h=H):
+        return c.post("/research/1/files", headers=h, json={"filename": name, "content_b64": b64(data)})
+
+    pdf = make_pdf(["2026-10-20 Survey: 48% of households use apps.", "Market size reached 1200 oku yen."])
+    a = c.post("/research/1/files", headers=H, json={"filename": "調査報告.pdf", "content_b64": b64(pdf)}).json()
+    assert a["key"] == "RA-1" and a["title"] == "調査報告" and a["url"] == "/api/research/articles/1/file"
+    assert a["origin"] == "file" and a["checked"]
+    facts = {f["value"]: f for f in c.get("/research/1", headers=H).json()["facts"]}
+    assert "48%" in facts and facts["48%"]["verified"]
+    r = c.get("/research/articles/1/file", headers=H)
+    assert r.content == pdf and r.headers["content-type"] == "application/pdf"
+    assert r.headers["content-disposition"].startswith("inline;")
+    # 同じ資料は重ねない・他のテナントからは開けない・閲覧のみは上げられない
+    assert up("x.pdf", pdf).status_code == 409
+    assert c.get("/research/articles/1/file", headers=OTHER).status_code == 404
+    assert up("y.pdf", pdf, VIEWER).status_code == 403
+    # Word（.docx）：題名を指定して足す
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w") as z:
+        z.writestr("word/document.xml", '<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">'
+                   "<w:body><w:p><w:r><w:t>市場規模は1200億円に達した。締め処理が課題。</w:t></w:r></w:p></w:body></w:document>")
+    a2 = c.post("/research/1/files", headers=H,
+                json={"filename": "メモ.docx", "content_b64": b64(buf.getvalue()), "title": "社内メモ"}).json()
+    assert a2["title"] == "社内メモ" and "締め処理" in a2["issues"]
+    assert c.get("/research/articles/2/file", headers=H).headers["content-disposition"].startswith("attachment;")
+    # 読めない形式・壊れた PDF・文字のない PDF は断る
+    assert up("x.exe", b"MZ").status_code == 422
+    assert up("b.pdf", b"%PDF-1.4 broken").status_code == 422
+    assert up("e.pdf", make_pdf([""])).status_code == 422
+    # URL が PDF なら、取りに行って文字を取り出す
+    class R:
+        headers = {"content-type": "application/pdf"}
+
+        def __init__(self):
+            self.buf = io.BytesIO(make_pdf(["Survey 2026-10-21: 52% use cashless."]))
+
+        def geturl(self):
+            return "https://pdf.example/r.pdf"
+
+        def read(self, n=-1):
+            return self.buf.read(n)
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            return False
+
+    monkeypatch.setattr(research, "_public", lambda url: None)
+    monkeypatch.setattr(research._opener, "open", lambda req, timeout=0: R())
+    a3 = c.post("/research/1/articles", headers=H, json={"url": "https://pdf.example/r.pdf"}).json()
+    assert a3["url"] == "https://pdf.example/r.pdf"
+    assert "52%" in {f["value"] for f in c.get("/research/1", headers=H).json()["facts"]}

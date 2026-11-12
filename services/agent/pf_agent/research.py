@@ -30,11 +30,12 @@ from urllib.parse import urlparse
 from pydantic import BaseModel
 from sqlalchemy import func, select
 
-from . import jobs, llm, llmconf, repo
+from . import jobs, llm, llmconf, office, repo
 from .db import (
     JobRun,
     ResearchArticle,
     ResearchFact,
+    ResearchFile,
     ResearchLibrary,
     ResearchNote,
     ResearchPlayer,
@@ -439,6 +440,15 @@ def fetch(url: str) -> tuple[str, str, str]:
         _public(final)
         ctype = r.headers.get("content-type", "")
         raw = r.read(MAX_BYTES)
+        if "pdf" in ctype.lower() or raw[:5] == b"%PDF-":
+            raw += r.read(office.MAX_FILE - len(raw))  # PDF は大きいことが多い（20MB まで）
+    if "pdf" in ctype.lower() or raw[:5] == b"%PDF-":
+        # PDF は文字を取り出して、テキストとして返す（読めなければ取れなかった扱い）
+        try:
+            text, _ = office.extract("x.pdf", raw)
+        except office.OfficeError as e:
+            raise ResearchError(422, f"{e.message}：{final}") from None
+        return final, "text/plain; source=pdf", text
     charset = re.search(r"charset=([\w-]+)", ctype) or re.search(rb'charset=["\']?([\w-]+)', raw[:3000])
     enc = (
         (charset.group(1).decode() if isinstance(charset.group(1), bytes) else charset.group(1)) if charset else "utf-8"
@@ -1353,6 +1363,62 @@ def add_manual(tenant: str, user: str, number: int, url: str, text: str, title: 
     refresh_issue_notes(tenant, lib_id, user, force=False)
     _refresh_latest(tenant, number)
     return out
+
+
+MIME = {
+    "pdf": "application/pdf",
+    "docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    "xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    "xlsm": "application/vnd.ms-excel.sheet.macroEnabled.12",
+    "pptx": "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+    "md": "text/markdown",
+    "txt": "text/plain",
+    "csv": "text/csv",
+}
+
+
+def add_file(tenant: str, user: str, number: int, filename: str, data: bytes, title: str = "") -> dict:
+    """人が上げた資料（PDF・Word・Excel・PowerPoint・テキスト）を記事として足す。
+    文字を取り出して要約・ファクトを付け、原本も残す（記事から開ける）。同じ中身の資料は重ねない。"""
+    filename = (filename or "").strip().replace("/", "_").replace("\\", "_")[:300] or "資料"
+    try:
+        text, _ = office.extract(filename, data)
+    except office.OfficeError as e:
+        raise ResearchError(422, e.message) from None
+    if not text.strip():
+        raise ResearchError(422, "文字を読み取れませんでした")
+    ext = office.kind_of(filename)
+    digest = hashlib.sha256(data).hexdigest()
+    conn = llmconf.resolve(tenant)
+    with session() as s:
+        lib = _lib(s, tenant, number)
+        same = select(ResearchArticle.id).where(ResearchArticle.library_id == lib.id, ResearchArticle.origin == "file",
+                                                ResearchArticle.content_hash == digest)
+        if s.execute(same).first():
+            raise ResearchError(409, "同じ資料は既にあります")
+        name = title.strip() or filename.rsplit(".", 1)[0]
+        a = add_article(s, conn, lib, user, f"file:{digest[:16]}", name, text, "file")
+        a.url = f"/api/research/articles/{a.number}/file"
+        mime = MIME.get(ext, "application/octet-stream")
+        s.add(ResearchFile(tenant_id=tenant, article_id=a.id, filename=filename, mime=mime, data=data, created_by=user))
+        a.content_hash = digest
+        lib.latest = max(filter(None, [lib.latest, a.published]), default=None)
+        s.commit()
+        out, lib_id = article_dict(a), lib.id
+    refresh_issue_notes(tenant, lib_id, user, force=False)
+    _refresh_latest(tenant, number)
+    return out
+
+
+def article_file(tenant: str, article_number: int) -> tuple[str, str, bytes]:
+    """記事の元の資料（ファイル名, MIME, 中身）。"""
+    with session() as s:
+        a = s.execute(select(ResearchArticle).where(ResearchArticle.tenant_id == tenant,
+                                                    ResearchArticle.number == article_number)).scalar_one_or_none()
+        f = s.execute(select(ResearchFile).where(ResearchFile.article_id == a.id)).scalar_one_or_none() if a else None
+        if f is None:
+            raise ResearchError(404, "この記事に元の資料はありません")
+        return f.filename, f.mime, f.data
 
 
 def brief(tenant: str, number: int, flt: dict, limit: int = 40) -> str:

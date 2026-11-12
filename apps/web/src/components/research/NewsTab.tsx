@@ -104,11 +104,12 @@ function ArticleCard({ n, a, M, d, la, sel, onSel, canEdit, onFacts }: {
         <span className={`chip ${a.jp ? "border-rose-200 bg-rose-50 text-rose-700" : ""}`}>{a.jp ? "国内" : a.country || "海外"}</span>
         <span className="chip">{d.options.categories[a.category] ?? a.category}</span>
         {a.publisher && <span className="font-medium text-zinc-700">{a.publisher}</span>}
+        {a.url.startsWith("/api/research/") && <span className="chip border-sky-200 bg-sky-50 text-sky-700" title="人が上げた資料。題名を押すと元の資料を開く">資料</span>}
         {!a.checked && <span className="chip border-amber-200 text-amber-700" title="本文を開けなかったため、検索結果の文章から要約した。数字はリンク先で確かめてほしい">本文未確認</span>}
         <span className="ml-auto font-mono">{a.key}</span>
       </div>
       <h3 className="text-[15px] font-semibold leading-snug">
-        {a.url.startsWith("http") ? <a href={a.url} target="_blank" rel="noopener noreferrer" className="hover:underline">{a.head}<ExternalLink size={11} className="ml-1 inline" /></a> : a.head}
+        {/^(https?:\/\/|\/api\/)/.test(a.url) ? <a href={a.url} target="_blank" rel="noopener noreferrer" className="hover:underline">{a.head}<ExternalLink size={11} className="ml-1 inline" /></a> : a.head}
       </h3>
       {a.title_ja && a.title_ja !== a.title && <p className="text-[11px] text-zinc-400">原題：{a.title}</p>}
       <p className="text-[13px] leading-relaxed text-zinc-700">{a.summary}</p>

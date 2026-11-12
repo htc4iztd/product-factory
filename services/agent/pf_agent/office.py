@@ -1,9 +1,11 @@
-"""Office の資料（Excel・Word・PowerPoint）を、AI が読める文章にする。
+"""Office の資料（Excel・Word・PowerPoint）と PDF を、AI が読める文章にする。
 
-外部のライブラリは使わず、ZIP の中の XML を直接読む。
+Office は外部のライブラリを使わず、ZIP の中の XML を直接読む。PDF は pypdf で文字を取り出す
+（スキャンした画像だけの PDF は文字がないので読めない）。
 - Excel：シートごとにセルの値を行ごとに「 | 」でつなぐ。図形（処理フローの箱など）の文字も拾う
 - Word：見出しは「#」、表は Markdown の表にする
 - PowerPoint：スライドごとに文字と表
+- PDF：ページごとの文字
 戻り値は（本文, 見出しの一覧）。本文は「## シート：…」「## スライド n」などで区切る。
 """
 from __future__ import annotations
@@ -26,8 +28,8 @@ NS = {
     "a": "http://schemas.openxmlformats.org/drawingml/2006/main",
     "p": "http://schemas.openxmlformats.org/presentationml/2006/main",
 }
-KINDS = {"xlsx": "Excel", "xlsm": "Excel", "docx": "Word", "pptx": "PowerPoint", "md": "テキスト", "txt": "テキスト",
-         "csv": "テキスト"}
+KINDS = {"xlsx": "Excel", "xlsm": "Excel", "docx": "Word", "pptx": "PowerPoint", "pdf": "PDF",
+         "md": "テキスト", "txt": "テキスト", "csv": "テキスト"}
 
 
 class OfficeError(Exception):
@@ -39,7 +41,7 @@ class OfficeError(Exception):
 def kind_of(filename: str) -> str:
     ext = filename.rsplit(".", 1)[-1].lower() if "." in filename else ""
     if ext not in KINDS:
-        raise OfficeError("読める形式は Excel（.xlsx）・Word（.docx）・PowerPoint（.pptx）・"
+        raise OfficeError("読める形式は PDF（.pdf）・Excel（.xlsx）・Word（.docx）・PowerPoint（.pptx）・"
                           "テキスト（.md .txt .csv）です")
     return ext
 
@@ -52,6 +54,10 @@ def extract(filename: str, data: bytes) -> tuple[str, list[str]]:
         text = data.decode("utf-8", errors="replace")
         heads = [ln.lstrip("# ").strip() for ln in text.splitlines() if ln.startswith("#")][:200]
         return text[:MAX_TEXT], heads
+    if ext == "pdf":
+        parts = _pdf(data)
+        text = "\n\n".join(f"## {h}\n{b}".rstrip() for h, b in parts)
+        return text[:MAX_TEXT], [h for h, _ in parts][:200]
     try:
         z = zipfile.ZipFile(io.BytesIO(data))
     except zipfile.BadZipFile:
@@ -217,3 +223,38 @@ def _pptx(z: zipfile.ZipFile) -> list[tuple[str, str]]:
             lines += _md_table(rows)
         parts.append((f"スライド {i}" + (f"：{title}" if title else ""), "\n".join(lines)))
     return parts
+
+
+MAX_PAGES = 500
+
+
+def _pdf(data: bytes) -> list[tuple[str, str]]:
+    """ページごとの文字（文字のないページは飛ばす）。暗号化（閲覧パスワードつき）は読めない。"""
+    from pypdf import PdfReader
+    from pypdf.errors import PdfReadError
+
+    try:
+        r = PdfReader(io.BytesIO(data))
+        if r.is_encrypted and not r.decrypt(""):
+            raise OfficeError("パスワードのかかった PDF は読めません")
+        pages = r.pages
+        out: list[tuple[str, str]] = []
+        total = 0
+        for i, pg in enumerate(pages):
+            if i >= MAX_PAGES or total > MAX_TEXT:
+                break
+            try:
+                t = pg.extract_text() or ""
+            except Exception:  # noqa: BLE001  1ページ読めなくても他のページは読む
+                t = ""
+            t = re.sub(r"[ \t]+\n", "\n", t).strip()
+            if t:
+                out.append((f"ページ {i + 1}", t))
+                total += len(t)
+    except OfficeError:
+        raise
+    except (PdfReadError, ValueError, KeyError, TypeError) as e:
+        raise OfficeError(f"PDF として開けません（{type(e).__name__}）") from None
+    if not out:
+        raise OfficeError("PDF から文字を読み取れませんでした（スキャンした画像だけの PDF は読めません）")
+    return out

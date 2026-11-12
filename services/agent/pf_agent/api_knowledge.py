@@ -219,6 +219,36 @@ def manual(number: int, body: ManualBody, c: Caller = Depends(caller)):
     return research.add_manual(c.tenant, c.user, number, body.url, body.text, body.title)
 
 
+class FileBody(BaseModel):
+    filename: str = Field(max_length=300)
+    content_b64: str = Field(max_length=28_000_000)
+    title: str = Field(default="", max_length=500)
+
+
+@router.post("/research/{number}/files")
+def post_file(number: int, body: FileBody, c: Caller = Depends(caller)):
+    """資料（PDF・Word・Excel・PowerPoint・テキスト）を上げて、記事として足す。"""
+    import base64
+    import binascii
+
+    _w(c)
+    try:
+        data = base64.b64decode(body.content_b64, validate=True)
+    except (binascii.Error, ValueError):
+        raise HTTPException(422, "ファイルの中身を読めません") from None
+    return research.add_file(c.tenant, c.user, number, body.filename, data, body.title)
+
+
+@router.get("/research/articles/{article_number}/file")
+def get_file(article_number: int, c: Caller = Depends(caller)):
+    from urllib.parse import quote
+
+    name, mime, data = research.article_file(c.tenant, article_number)
+    disp = "inline" if mime == "application/pdf" else "attachment"
+    return Response(data, media_type=mime, headers={
+        "content-disposition": f"{disp}; filename*=UTF-8''{quote(name)}", "x-content-type-options": "nosniff"})
+
+
 @router.put("/research/articles/{article_number}/memo")
 def memo(article_number: int, body: MemoBody, c: Caller = Depends(caller)):
     _w(c)

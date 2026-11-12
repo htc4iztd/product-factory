@@ -31,7 +31,7 @@ export default async function ProductLayout({ children, params }: { children: Re
     { label: "定期の仕事", href: `/p/${id}/agents`, hint: "リサーチ更新・報告資料の作り直し", keys: "schedule 定期 cron" },
     { label: "プリプロダクト", href: `/p/${id}/preproducts`, hint: "案（PP-n）と試作", keys: "preproduct 案 試作 パターン" },
     { label: "ジョブ", href: `/jobs?product=${id}`, hint: "動いている処理", keys: "jobs ジョブ" },
-    { label: "ドキュメント", href: `/p/${id}/docs`, hint: "書く・Excel・Word・PowerPoint を取り込んで工程に入れる", keys: "docs ドキュメント 資料 取り込み import excel word powerpoint" },
+    { label: "ドキュメント", href: `/p/${id}/docs`, hint: "書く・PDF・Excel・Word・PowerPoint を取り込んで工程に入れる", keys: "docs ドキュメント 資料 取り込み import pdf excel word powerpoint" },
     { label: "開発（コード）", href: `/p/${id}/code`, hint: "エージェントが書いているコード・変更の記録・GitHub", keys: "code ide コード 開発 作業場 github" },
     { label: "ステージの設定", href: `/p/${id}/settings`, hint: "", keys: "settings 設定 承認" },
     { label: "監査ログ", href: `/p/${id}/audit`, hint: "", keys: "audit 監査 ログ" },

@@ -10,6 +10,7 @@ import { JobProgress } from "@/components/autodev/JobBits";
 import { LibraryForm } from "@/components/knowledge/LibraryForm";
 import { UpdateButton } from "@/components/knowledge/ResearchBits";
 import { ResearchApp, TABS, type Tab } from "@/components/research/ResearchApp";
+import { FileAdd } from "@/components/research/FileAdd";
 import { addArticle, updateLibrary } from "../actions";
 
 const when = (iso: string | null) => (iso ? new Date(iso).toLocaleString("ja-JP", { timeZone: "Asia/Tokyo", month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit" }) : "—");
@@ -58,7 +59,11 @@ export default async function LibraryPage({ params, searchParams }: { params: Pr
         <ResearchApp d={d} canEdit={canEdit} initial={initial} running={running}
           add={(
             <section aria-label="記事を足す" className="card max-w-3xl space-y-3 p-5">
-              <p className="text-[12px] text-zinc-500">URL だけなら本文を取りに行く（公開されているページだけ）。ログインが要るページや PDF は本文を貼ってほしい。AI が要約・論点・企業・ファクトを付ける。</p>
+              <h3 className="text-[13px] font-semibold">資料を上げる</h3>
+              <p className="text-[12px] text-zinc-500">PDF・Office の資料から文字を取り出し、AI が要約・論点・企業・ファクトを付ける。元の資料は記事から開ける。スキャンした画像だけの PDF は文字がないので読めない。</p>
+              {canEdit && <FileAdd n={n} />}
+              <h3 className="border-t border-zinc-200 pt-3 text-[13px] font-semibold">URL か本文で足す</h3>
+              <p className="text-[12px] text-zinc-500">URL だけなら本文を取りに行く（公開されているページ・PDF）。ログインが要るページは本文を貼ってほしい。</p>
               <ActionForm action={addArticle.bind(null, n)} submit="足す" pendingLabel="読んでいます…">
                 <input name="url" className="input" placeholder="https://…" aria-label="URL" />
                 <input name="title" className="input" placeholder="題名（本文を貼るとき）" aria-label="題名" />
