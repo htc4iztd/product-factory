@@ -10,3 +10,4 @@ apps/web/e2e/shots/
 .terraform/
 *.tfstate*
 *.tfplan
+*.egg-info/
